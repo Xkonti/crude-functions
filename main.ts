@@ -5,6 +5,7 @@ import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
 import { createManagementAuthMiddleware } from "./src/middleware/management_auth.ts";
 import { RoutesService } from "./src/routes/routes_service.ts";
 import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
+import { FunctionRouter } from "./src/functions/function_router.ts";
 
 const app = new Hono();
 
@@ -19,6 +20,11 @@ const routesService = new RoutesService({
   configPath: "./config/routes.json",
 });
 
+// Initialize function router
+const functionRouter = new FunctionRouter({
+  routesService,
+});
+
 // Public endpoints
 app.get("/ping", (c) => c.json({ pong: true }));
 
@@ -29,8 +35,12 @@ app.route("/api/keys", createApiKeyRoutes(apiKeyService));
 app.use("/api/routes/*", createManagementAuthMiddleware(apiKeyService));
 app.route("/api/routes", createRoutesRoutes(routesService));
 
+// Dynamic function router - catch all /run/* requests
+app.all("/run/*", (c) => functionRouter.handle(c));
+app.all("/run", (c) => functionRouter.handle(c));
+
 // Export app and services for testing
-export { app, apiKeyService, routesService };
+export { app, apiKeyService, routesService, functionRouter };
 
 // Start server only when run directly
 if (import.meta.main) {
