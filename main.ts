@@ -23,6 +23,7 @@ const routesService = new RoutesService({
 // Initialize function router
 const functionRouter = new FunctionRouter({
   routesService,
+  apiKeyService,
 });
 
 // Public endpoints

@@ -1,16 +1,36 @@
 import { Hono, type Context } from "@hono/hono";
 import { RoutesService, type FunctionRoute } from "../routes/routes_service.ts";
+import type { ApiKeyService } from "../keys/api_key_service.ts";
+import { HandlerLoader } from "./handler_loader.ts";
+import { ApiKeyValidator } from "./api_key_validator.ts";
+import type { FunctionContext, RouteInfo } from "./types.ts";
+import {
+  HandlerNotFoundError,
+  HandlerExportError,
+  HandlerSyntaxError,
+  HandlerLoadError,
+  HandlerExecutionError,
+} from "./errors.ts";
 
 export interface FunctionRouterOptions {
   routesService: RoutesService;
+  apiKeyService: ApiKeyService;
+  /** Base directory for code files (default: current working directory) */
+  codeDirectory?: string;
 }
 
 export class FunctionRouter {
-  private routesService: RoutesService;
+  private readonly routesService: RoutesService;
+  private readonly apiKeyValidator: ApiKeyValidator;
+  private readonly handlerLoader: HandlerLoader;
   private router: Hono | null = null;
 
   constructor(options: FunctionRouterOptions) {
     this.routesService = options.routesService;
+    this.apiKeyValidator = new ApiKeyValidator(options.apiKeyService);
+    this.handlerLoader = new HandlerLoader({
+      baseDirectory: options.codeDirectory ?? Deno.cwd(),
+    });
   }
 
   async handle(c: Context): Promise<Response> {
@@ -20,7 +40,7 @@ export class FunctionRouter {
 
     if (updatedRoutes !== null || this.router === null) {
       // Routes changed or first request - rebuild router
-      const routes = updatedRoutes ?? await this.routesService.getAll();
+      const routes = updatedRoutes ?? (await this.routesService.getAll());
       this.router = this.buildRouter(routes);
     }
 
@@ -43,8 +63,8 @@ export class FunctionRouter {
     const router = new Hono();
 
     for (const route of routes) {
-      // Create placeholder handler for each route
-      const handler = this.createPlaceholderHandler(route);
+      // Create actual handler for each route
+      const handler = this.createHandler(route);
 
       // Register handler for each allowed method
       for (const method of route.methods) {
@@ -67,24 +87,161 @@ export class FunctionRouter {
     return router;
   }
 
-  private createPlaceholderHandler(route: FunctionRoute) {
-    return async (c: Context) => {
-      // Placeholder: echo route info for debugging
-      return c.json({
-        message: "Function execution not yet implemented",
-        route: {
-          name: route.name,
-          handler: route.handler,
-          path: route.route,
-          methods: route.methods,
-          keys: route.keys,
-        },
-        request: {
-          method: c.req.method,
-          path: c.req.path,
-          params: c.req.param(),
-        },
-      });
+  private createHandler(route: FunctionRoute) {
+    return async (c: Context): Promise<Response> => {
+      const requestId = crypto.randomUUID();
+
+      // 1. API Key Validation (if required)
+      let authenticatedKeyName: string | undefined;
+
+      if (route.keys && route.keys.length > 0) {
+        const validation = await this.apiKeyValidator.validate(c, route.keys);
+
+        if (!validation.valid) {
+          return c.json(
+            {
+              error: "Unauthorized",
+              message: validation.error,
+              requestId,
+            },
+            401
+          );
+        }
+
+        authenticatedKeyName = validation.keyName;
+      }
+
+      // 2. Build FunctionContext
+      const routeInfo: RouteInfo = {
+        name: route.name,
+        description: route.description,
+        handler: route.handler,
+        route: route.route,
+        methods: route.methods,
+        keys: route.keys,
+      };
+
+      const ctx: FunctionContext = {
+        route: routeInfo,
+        params: c.req.param() as Record<string, string>,
+        query: this.parseQueryParams(c),
+        authenticatedKeyName,
+        requestedAt: new Date(),
+        requestId,
+      };
+
+      // 3. Load Handler
+      let handler;
+      try {
+        handler = await this.handlerLoader.load(route.handler);
+      } catch (error) {
+        return this.handleLoadError(c, error, requestId);
+      }
+
+      // 4. Execute Handler
+      try {
+        return await handler(c, ctx);
+      } catch (error) {
+        const executionError = new HandlerExecutionError(route.handler, error);
+        return this.handleExecutionError(c, executionError, requestId);
+      }
     };
+  }
+
+  private parseQueryParams(c: Context): Record<string, string> {
+    const url = new URL(c.req.url);
+    const query: Record<string, string> = {};
+    for (const [key, value] of url.searchParams) {
+      query[key] = value;
+    }
+    return query;
+  }
+
+  private handleLoadError(
+    c: Context,
+    error: unknown,
+    requestId: string
+  ): Response {
+    if (error instanceof HandlerNotFoundError) {
+      return c.json(
+        {
+          error: "Handler not found",
+          message: `Handler file does not exist: ${error.handlerPath}`,
+          requestId,
+        },
+        404
+      );
+    }
+
+    if (error instanceof HandlerExportError) {
+      return c.json(
+        {
+          error: "Invalid handler",
+          message: "Handler must export a default function",
+          requestId,
+        },
+        500
+      );
+    }
+
+    if (error instanceof HandlerSyntaxError) {
+      return c.json(
+        {
+          error: "Handler syntax error",
+          message: error.originalError.message,
+          requestId,
+        },
+        500
+      );
+    }
+
+    if (error instanceof HandlerLoadError) {
+      console.error(`Handler load error [${requestId}]:`, error.originalError);
+      return c.json(
+        {
+          error: "Handler load failed",
+          message: "An error occurred while loading the handler",
+          requestId,
+        },
+        500
+      );
+    }
+
+    // Unknown error
+    console.error(`Unknown handler error [${requestId}]:`, error);
+    return c.json(
+      {
+        error: "Internal server error",
+        requestId,
+      },
+      500
+    );
+  }
+
+  private handleExecutionError(
+    c: Context,
+    error: HandlerExecutionError,
+    requestId: string
+  ): Response {
+    console.error(
+      `Handler execution error [${requestId}] in ${error.handlerPath}:`,
+      error.originalError
+    );
+
+    // Include error message in development, hide in production
+    const isDev = Deno.env.get("DENO_ENV") !== "production";
+    const originalError = error.originalError;
+
+    return c.json(
+      {
+        error: "Handler execution failed",
+        message:
+          isDev && originalError instanceof Error
+            ? originalError.message
+            : "An error occurred while executing the handler",
+        requestId,
+      },
+      500
+    );
   }
 }
