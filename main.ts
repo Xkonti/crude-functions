@@ -33,9 +33,11 @@ app.get("/ping", (c) => c.json({ pong: true }));
 
 // Protected API management routes
 app.use("/api/keys/*", createManagementAuthMiddleware(apiKeyService));
+app.use("/api/keys", createManagementAuthMiddleware(apiKeyService));
 app.route("/api/keys", createApiKeyRoutes(apiKeyService));
 
 app.use("/api/routes/*", createManagementAuthMiddleware(apiKeyService));
+app.use("/api/routes", createManagementAuthMiddleware(apiKeyService));
 app.route("/api/routes", createRoutesRoutes(routesService));
 
 // Initialize file service
