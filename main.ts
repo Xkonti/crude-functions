@@ -3,6 +3,8 @@ import "@std/dotenv/load";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
 import { createManagementAuthMiddleware } from "./src/middleware/management_auth.ts";
+import { RoutesService } from "./src/routes/routes_service.ts";
+import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
 
 const app = new Hono();
 
@@ -12,15 +14,23 @@ const apiKeyService = new ApiKeyService({
   managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
 });
 
+// Initialize routes service
+const routesService = new RoutesService({
+  configPath: "./config/routes.json",
+});
+
 // Public endpoints
 app.get("/ping", (c) => c.json({ pong: true }));
 
-// Protected API key management routes
+// Protected API management routes
 app.use("/api/keys/*", createManagementAuthMiddleware(apiKeyService));
 app.route("/api/keys", createApiKeyRoutes(apiKeyService));
 
-// Export app and service for testing
-export { app, apiKeyService };
+app.use("/api/routes/*", createManagementAuthMiddleware(apiKeyService));
+app.route("/api/routes", createRoutesRoutes(routesService));
+
+// Export app and services for testing
+export { app, apiKeyService, routesService };
 
 // Start server only when run directly
 if (import.meta.main) {
