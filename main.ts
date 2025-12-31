@@ -6,6 +6,8 @@ import { createManagementAuthMiddleware } from "./src/middleware/management_auth
 import { RoutesService } from "./src/routes/routes_service.ts";
 import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
+import { FileService } from "./src/files/file_service.ts";
+import { createFileRoutes } from "./src/files/file_routes.ts";
 
 const app = new Hono();
 
@@ -36,12 +38,22 @@ app.route("/api/keys", createApiKeyRoutes(apiKeyService));
 app.use("/api/routes/*", createManagementAuthMiddleware(apiKeyService));
 app.route("/api/routes", createRoutesRoutes(routesService));
 
+// Initialize file service
+const fileService = new FileService({
+  basePath: "./code",
+});
+
+// Protected file management routes
+app.use("/api/files/*", createManagementAuthMiddleware(apiKeyService));
+app.use("/api/files", createManagementAuthMiddleware(apiKeyService));
+app.route("/api/files", createFileRoutes(fileService));
+
 // Dynamic function router - catch all /run/* requests
 app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter };
+export { app, apiKeyService, routesService, functionRouter, fileService };
 
 // Start server only when run directly
 if (import.meta.main) {
