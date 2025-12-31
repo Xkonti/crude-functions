@@ -1,0 +1,14 @@
+# This compose file is for demonstration only, do not use in prod.
+services:
+  app:
+    image: xkonti/crude-functions:latest
+    ports:
+      - 8000:8000
+    environment:
+      - MANAGEMENT_API_KEY=examplekey
+    volumes:
+      # Mount the config directory for keys.config and routes.json
+      - ./config:/app/config
+      # Mount the code directory for function handlers
+      - ./code:/app/code
+    restart: unless-stopped
