@@ -8,6 +8,7 @@ import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
 import { createFileRoutes } from "./src/files/file_routes.ts";
+import { createWebRoutes } from "./src/web/web_routes.ts";
 
 const app = new Hono();
 
@@ -49,6 +50,13 @@ const fileService = new FileService({
 app.use("/api/files/*", createManagementAuthMiddleware(apiKeyService));
 app.use("/api/files", createManagementAuthMiddleware(apiKeyService));
 app.route("/api/files", createFileRoutes(fileService));
+
+// Web UI routes (Basic Auth applied internally)
+app.route("/web", createWebRoutes({
+  fileService,
+  routesService,
+  apiKeyService,
+}));
 
 // Dynamic function router - catch all /run/* requests
 app.all("/run/*", (c) => functionRouter.handle(c));

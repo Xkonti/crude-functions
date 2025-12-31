@@ -28,6 +28,12 @@ export function isPathSafe(path: string): boolean {
   return true;
 }
 
+export interface FileMetadata {
+  path: string;
+  size: number;
+  mtime: Date;
+}
+
 export interface FileServiceOptions {
   basePath: string;
 }
@@ -54,6 +60,47 @@ export class FileService {
     const files: string[] = [];
     await this.scanDirectory(this.basePath, "", files);
     return files.sort();
+  }
+
+  /**
+   * Lists all files in the base directory recursively with metadata.
+   * Returns a list sorted by path, including size and modification time.
+   */
+  async listFilesWithMetadata(): Promise<FileMetadata[]> {
+    const files: FileMetadata[] = [];
+    await this.scanDirectoryWithMetadata(this.basePath, "", files);
+    return files.sort((a, b) => a.path.localeCompare(b.path));
+  }
+
+  private async scanDirectoryWithMetadata(
+    absolutePath: string,
+    relativePath: string,
+    files: FileMetadata[]
+  ): Promise<void> {
+    try {
+      for await (const entry of Deno.readDir(absolutePath)) {
+        const entryRelPath = relativePath
+          ? `${relativePath}/${entry.name}`
+          : entry.name;
+        const entryAbsPath = `${absolutePath}/${entry.name}`;
+
+        if (entry.isFile) {
+          const stat = await Deno.stat(entryAbsPath);
+          files.push({
+            path: entryRelPath,
+            size: stat.size,
+            mtime: stat.mtime ?? new Date(0),
+          });
+        } else if (entry.isDirectory) {
+          await this.scanDirectoryWithMetadata(entryAbsPath, entryRelPath, files);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return;
+      }
+      throw error;
+    }
   }
 
   private async scanDirectory(
