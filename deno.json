@@ -1,11 +1,13 @@
 {
   "tasks": {
-    "dev": "deno run --env-file=.env.example --watch --allow-net --allow-env --allow-read main.ts",
-    "test": "deno test --env-file=.env.example --allow-net --allow-env --allow-read --allow-write"
+    "dev": "deno run --env-file=.env.example --watch --allow-net --allow-env --allow-read --allow-write --allow-ffi main.ts",
+    "test": "deno test --env-file=.env.example --allow-net --allow-env --allow-read --allow-write --allow-ffi"
   },
   "imports": {
     "@hono/hono": "jsr:@hono/hono",
     "@std/dotenv": "jsr:@std/dotenv",
-    "@std/expect": "jsr:@std/expect"
+    "@std/expect": "jsr:@std/expect",
+    "@db/sqlite": "jsr:@db/sqlite",
+    "@core/asyncutil": "jsr:@core/asyncutil"
   }
 }
