@@ -15,6 +15,9 @@ import { createWebRoutes } from "./src/web/web_routes.ts";
 const app = new Hono();
 
 // Initialize database
+// The database connection remains open for the application's lifetime and is
+// only closed during graceful shutdown (SIGTERM/SIGINT signals).
+// Services assume the database is always open after this initialization.
 const db = new DatabaseService({
   databasePath: "./data/database.db",
 });
@@ -84,10 +87,38 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, db, apiKeyService, routesService, functionRouter, fileService };
+export { app, apiKeyService, routesService, functionRouter, fileService };
+
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string) {
+  console.log(`\nReceived ${signal}, shutting down gracefully...`);
+  try {
+    await db.close();
+    console.log("Database connection closed successfully");
+  } catch (error) {
+    console.error("Error during shutdown:", error);
+    Deno.exit(1);
+  }
+  Deno.exit(0);
+}
 
 // Start server only when run directly
 if (import.meta.main) {
   const port = parseInt(Deno.env.get("PORT") || "8000");
-  Deno.serve({ port }, app.fetch);
+
+  // Setup graceful shutdown
+  const abortController = new AbortController();
+
+  Deno.addSignalListener("SIGTERM", () => {
+    gracefulShutdown("SIGTERM");
+  });
+
+  Deno.addSignalListener("SIGINT", () => {
+    gracefulShutdown("SIGINT");
+  });
+
+  Deno.serve({
+    port,
+    signal: abortController.signal,
+  }, app.fetch);
 }

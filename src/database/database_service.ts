@@ -19,6 +19,14 @@ import {
  * - Mutex-protected writes to prevent SQLITE_BUSY errors
  * - Prepared statement support
  *
+ * Usage Pattern:
+ * In production, the database should be opened once at application startup and
+ * remain open for the application's lifetime. The close() method should only be
+ * called during graceful shutdown. Services that depend on DatabaseService can
+ * assume the connection is always open after initialization. The ensureOpen()
+ * internal check provides a safety net and will throw DatabaseNotOpenError if
+ * operations are attempted on a closed connection.
+ *
  * @example
  * ```typescript
  * const db = new DatabaseService({ databasePath: "data/database.db" });
