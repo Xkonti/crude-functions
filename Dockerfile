@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy dependency files first for better caching
 COPY deno.json deno.lock ./
 
-# Cache dependencies
-RUN deno install --entrypoint main.ts
+# Cache dependencies from import map
+RUN deno install
 
 # Copy application source code
 COPY main.ts main_test.ts function_handler_design.md ./
