@@ -27,6 +27,7 @@ const routesService = new RoutesService({
 const functionRouter = new FunctionRouter({
   routesService,
   apiKeyService,
+  codeDirectory: "./code",
 });
 
 // Public endpoints
