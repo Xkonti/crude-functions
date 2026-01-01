@@ -1,31 +1,54 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
+import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { createManagementAuthMiddleware } from "./management_auth.ts";
 
-async function createTestApp(initialContent = "", envKey = "env-mgmt-key") {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/keys.config`;
-  await Deno.writeTextFile(configPath, initialContent);
+const API_KEYS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key_group TEXT NOT NULL,
+  value TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value ON api_keys(key_group, value);
+CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(key_group);
+`;
+
+interface TestKey {
+  group: string;
+  value: string;
+}
+
+async function createTestApp(initialKeys: TestKey[] = [], envKey = "env-mgmt-key") {
+  const db = new DatabaseService({ databasePath: ":memory:" });
+  await db.open();
+  await db.exec(API_KEYS_SCHEMA);
 
   const service = new ApiKeyService({
-    configPath,
+    db,
     managementKeyFromEnv: envKey,
   });
+
+  // Add initial keys
+  for (const key of initialKeys) {
+    await service.addKey(key.group, key.value);
+  }
 
   const app = new Hono();
   app.use("/*", createManagementAuthMiddleware(service));
   app.get("/protected", (c) => c.json({ message: "success" }));
 
-  return { app, tempDir, service };
+  return { app, db, service };
 }
 
-async function cleanup(tempDir: string) {
-  await Deno.remove(tempDir, { recursive: true });
+async function cleanup(db: DatabaseService) {
+  await db.close();
 }
 
 Deno.test("returns 401 when no X-API-Key header provided", async () => {
-  const { app, tempDir } = await createTestApp();
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/protected");
@@ -34,12 +57,12 @@ Deno.test("returns 401 when no X-API-Key header provided", async () => {
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 Deno.test("returns 401 when invalid API key provided", async () => {
-  const { app, tempDir } = await createTestApp();
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/protected", {
@@ -50,12 +73,12 @@ Deno.test("returns 401 when invalid API key provided", async () => {
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 Deno.test("allows request with valid env management key", async () => {
-  const { app, tempDir } = await createTestApp();
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/protected", {
@@ -66,28 +89,28 @@ Deno.test("allows request with valid env management key", async () => {
     const json = await res.json();
     expect(json.message).toBe("success");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
-Deno.test("allows request with valid file-based management key", async () => {
-  const { app, tempDir } = await createTestApp("management=file-key");
+Deno.test("allows request with valid db-based management key", async () => {
+  const { app, db } = await createTestApp([{ group: "management", value: "db-key" }]);
 
   try {
     const res = await app.request("/protected", {
-      headers: { "X-API-Key": "file-key" },
+      headers: { "X-API-Key": "db-key" },
     });
     expect(res.status).toBe(200);
 
     const json = await res.json();
     expect(json.message).toBe("success");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 Deno.test("rejects non-management keys", async () => {
-  const { app, tempDir } = await createTestApp("email=some-key");
+  const { app, db } = await createTestApp([{ group: "email", value: "some-key" }]);
 
   try {
     const res = await app.request("/protected", {
@@ -95,6 +118,6 @@ Deno.test("rejects non-management keys", async () => {
     });
     expect(res.status).toBe(401);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });

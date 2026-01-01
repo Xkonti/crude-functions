@@ -41,6 +41,7 @@ export function validateMethods(methods: string[]): boolean {
 
 // Row type for database queries
 interface RouteRow {
+  [key: string]: unknown; // Index signature for Row compatibility
   id: number;
   name: string;
   description: string | null;

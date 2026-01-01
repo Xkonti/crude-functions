@@ -1,4 +1,4 @@
-import { Database, type Statement } from "@db/sqlite";
+import { Database, type Statement, type BindValue } from "@db/sqlite";
 import { Mutex } from "@core/asyncutil/mutex";
 import type {
   DatabaseServiceOptions,
@@ -129,7 +129,7 @@ export class DatabaseService {
    * @throws DatabaseNotOpenError if the connection is not open
    * @throws QueryError if the query fails
    */
-  async execute(sql: string, params?: unknown[]): Promise<ExecuteResult> {
+  async execute(sql: string, params?: BindValue[]): Promise<ExecuteResult> {
     this.ensureOpen();
 
     // If in transaction, we already hold the lock
@@ -154,7 +154,7 @@ export class DatabaseService {
    */
   async queryAll<T extends Row = Row>(
     sql: string,
-    params?: unknown[]
+    params?: BindValue[]
   ): Promise<T[]> {
     this.ensureOpen();
 
@@ -185,7 +185,7 @@ export class DatabaseService {
    */
   async queryOne<T extends Row = Row>(
     sql: string,
-    params?: unknown[]
+    params?: BindValue[]
   ): Promise<T | null> {
     this.ensureOpen();
 
@@ -350,7 +350,7 @@ export class DatabaseService {
     }
   }
 
-  private executeSync(sql: string, params?: unknown[]): ExecuteResult {
+  private executeSync(sql: string, params?: BindValue[]): ExecuteResult {
     try {
       const stmt = this.db!.prepare(sql);
       try {
@@ -404,7 +404,7 @@ export class PreparedStatement {
    * Executes the statement with given parameters (for INSERT/UPDATE/DELETE).
    * Acquires mutex if not in a transaction.
    */
-  async run(params?: unknown[]): Promise<number> {
+  async run(params?: BindValue[]): Promise<number> {
     // If in transaction, we already hold the lock
     if (this.getTransactionLock()) {
       return this.runSync(params);
@@ -418,7 +418,7 @@ export class PreparedStatement {
    * Executes the statement and returns all rows.
    * Does not acquire mutex (reads are safe in WAL mode).
    */
-  async all<T extends Row = Row>(params?: unknown[]): Promise<T[]> {
+  async all<T extends Row = Row>(params?: BindValue[]): Promise<T[]> {
     if (params && params.length > 0) {
       return this.stmt.all<T>(...params);
     }
@@ -429,7 +429,7 @@ export class PreparedStatement {
    * Executes the statement and returns the first row.
    * Does not acquire mutex (reads are safe in WAL mode).
    */
-  async get<T extends Row = Row>(params?: unknown[]): Promise<T | null> {
+  async get<T extends Row = Row>(params?: BindValue[]): Promise<T | null> {
     let result: T | undefined;
     if (params && params.length > 0) {
       result = this.stmt.get<T>(...params);
@@ -447,7 +447,7 @@ export class PreparedStatement {
     this.stmt.finalize();
   }
 
-  private runSync(params?: unknown[]): number {
+  private runSync(params?: BindValue[]): number {
     if (params && params.length > 0) {
       return this.stmt.run(...params);
     }
