@@ -27,7 +27,7 @@ export class FunctionRouter {
 
   constructor(options: FunctionRouterOptions) {
     this.routesService = options.routesService;
-    this.apiKeyValidator = new ApiKeyValidator(options.apiKeyService);
+    this.apiKeyValidator = new ApiKeyValidator({ apiKeyService: options.apiKeyService });
     this.handlerLoader = new HandlerLoader({
       baseDirectory: options.codeDirectory ?? Deno.cwd(),
     });
