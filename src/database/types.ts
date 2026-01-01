@@ -24,11 +24,3 @@ export interface ExecuteResult {
  * A generic row object from a query result
  */
 export type Row = Record<string, unknown>;
-
-/**
- * SQLite transaction isolation types
- * - deferred: Lock is acquired when first statement is executed (default)
- * - immediate: Lock is acquired immediately, preventing other writers
- * - exclusive: Prevents other connections from reading or writing
- */
-export type TransactionType = "deferred" | "immediate" | "exclusive";

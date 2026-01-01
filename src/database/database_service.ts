@@ -4,15 +4,11 @@ import type {
   DatabaseServiceOptions,
   ExecuteResult,
   Row,
-  TransactionType,
 } from "./types.ts";
 import {
   DatabaseAccessError,
   DatabaseNotOpenError,
-  NoActiveTransactionError,
   QueryError,
-  TransactionAlreadyActiveError,
-  TransactionError,
 } from "./errors.ts";
 
 /**
@@ -21,7 +17,6 @@ import {
  * Features:
  * - WAL mode for concurrent read performance
  * - Mutex-protected writes to prevent SQLITE_BUSY errors
- * - Manual transaction control with begin/commit/rollback
  * - Prepared statement support
  *
  * @example
@@ -45,7 +40,6 @@ export class DatabaseService {
   private readonly writeMutex = new Mutex();
 
   private db: Database | null = null;
-  private transactionLock: { [Symbol.dispose]: () => void } | null = null;
 
   constructor(options: DatabaseServiceOptions) {
     this.databasePath = options.databasePath;
@@ -82,22 +76,10 @@ export class DatabaseService {
 
   /**
    * Closes the database connection.
-   * Rolls back any active transaction before closing.
    * Safe to call multiple times.
    */
   async close(): Promise<void> {
     if (!this.db) return;
-
-    // Rollback any active transaction
-    if (this.transactionLock) {
-      try {
-        this.db.exec("ROLLBACK");
-      } catch {
-        // Ignore rollback errors during close
-      }
-      this.transactionLock[Symbol.dispose]();
-      this.transactionLock = null;
-    }
 
     this.db.close();
     this.db = null;
@@ -108,13 +90,6 @@ export class DatabaseService {
    */
   get isOpen(): boolean {
     return this.db !== null;
-  }
-
-  /**
-   * Returns true if a transaction is currently active.
-   */
-  get inTransaction(): boolean {
-    return this.transactionLock !== null;
   }
 
   // ============== Query Execution ==============
@@ -132,12 +107,6 @@ export class DatabaseService {
   async execute(sql: string, params?: BindValue[]): Promise<ExecuteResult> {
     this.ensureOpen();
 
-    // If in transaction, we already hold the lock
-    if (this.transactionLock) {
-      return this.executeSync(sql, params);
-    }
-
-    // Otherwise, acquire lock for this single operation
     using _lock = await this.writeMutex.acquire();
     return this.executeSync(sql, params);
   }
@@ -219,92 +188,8 @@ export class DatabaseService {
   async exec(sql: string): Promise<number> {
     this.ensureOpen();
 
-    // If in transaction, we already hold the lock
-    if (this.transactionLock) {
-      return this.execSync(sql);
-    }
-
-    // Otherwise, acquire lock for this operation
     using _lock = await this.writeMutex.acquire();
     return this.execSync(sql);
-  }
-
-  // ============== Transaction Control ==============
-
-  /**
-   * Begins a transaction and holds the write mutex until commit/rollback.
-   *
-   * @param type - Transaction type: "deferred" (default), "immediate", or "exclusive"
-   * @throws DatabaseNotOpenError if the connection is not open
-   * @throws TransactionAlreadyActiveError if a transaction is already active
-   * @throws TransactionError if the BEGIN fails
-   */
-  async beginTransaction(type: TransactionType = "deferred"): Promise<void> {
-    this.ensureOpen();
-
-    if (this.transactionLock) {
-      throw new TransactionAlreadyActiveError();
-    }
-
-    // Acquire the mutex and hold it for the duration of the transaction
-    this.transactionLock = await this.writeMutex.acquire();
-
-    try {
-      this.db!.exec(`BEGIN ${type.toUpperCase()}`);
-    } catch (error) {
-      // Release lock if BEGIN fails
-      this.transactionLock[Symbol.dispose]();
-      this.transactionLock = null;
-      throw new TransactionError("begin", error);
-    }
-  }
-
-  /**
-   * Commits the current transaction and releases the write mutex.
-   *
-   * @throws DatabaseNotOpenError if the connection is not open
-   * @throws NoActiveTransactionError if no transaction is active
-   * @throws TransactionError if the COMMIT fails
-   */
-  async commit(): Promise<void> {
-    this.ensureOpen();
-
-    if (!this.transactionLock) {
-      throw new NoActiveTransactionError();
-    }
-
-    try {
-      this.db!.exec("COMMIT");
-    } catch (error) {
-      throw new TransactionError("commit", error);
-    } finally {
-      this.transactionLock[Symbol.dispose]();
-      this.transactionLock = null;
-    }
-  }
-
-  /**
-   * Rolls back the current transaction and releases the write mutex.
-   *
-   * @throws DatabaseNotOpenError if the connection is not open
-   * @throws NoActiveTransactionError if no transaction is active
-   * @throws TransactionError if the ROLLBACK fails
-   */
-  async rollback(): Promise<void> {
-    this.ensureOpen();
-
-    if (!this.transactionLock) {
-      throw new NoActiveTransactionError();
-    }
-
-    try {
-      this.db!.exec("ROLLBACK");
-    } catch (error) {
-      throw new TransactionError("rollback", error);
-    } finally {
-      this.transactionLock[Symbol.dispose]();
-      this.transactionLock = null;
-    }
   }
 
   // ============== Prepared Statements ==============
@@ -321,11 +206,7 @@ export class DatabaseService {
     this.ensureOpen();
 
     const stmt = this.db!.prepare(sql);
-    return new PreparedStatement(
-      stmt,
-      this.writeMutex,
-      () => this.transactionLock
-    );
+    return new PreparedStatement(stmt, this.writeMutex);
   }
 
   // ============== Private Helpers ==============
@@ -388,28 +269,17 @@ export class DatabaseService {
 export class PreparedStatement {
   private readonly stmt: Statement;
   private readonly writeMutex: Mutex;
-  private readonly getTransactionLock: () => { [Symbol.dispose]: () => void } | null;
 
-  constructor(
-    stmt: Statement,
-    writeMutex: Mutex,
-    getTransactionLock: () => { [Symbol.dispose]: () => void } | null
-  ) {
+  constructor(stmt: Statement, writeMutex: Mutex) {
     this.stmt = stmt;
     this.writeMutex = writeMutex;
-    this.getTransactionLock = getTransactionLock;
   }
 
   /**
    * Executes the statement with given parameters (for INSERT/UPDATE/DELETE).
-   * Acquires mutex if not in a transaction.
+   * Acquires write mutex automatically.
    */
   async run(params?: BindValue[]): Promise<number> {
-    // If in transaction, we already hold the lock
-    if (this.getTransactionLock()) {
-      return this.runSync(params);
-    }
-
     using _lock = await this.writeMutex.acquire();
     return this.runSync(params);
   }

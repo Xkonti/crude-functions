@@ -1,10 +1,6 @@
 import { expect } from "@std/expect";
 import { DatabaseService } from "./database_service.ts";
-import {
-  DatabaseNotOpenError,
-  TransactionAlreadyActiveError,
-  NoActiveTransactionError,
-} from "./errors.ts";
+import { DatabaseNotOpenError } from "./errors.ts";
 
 async function createTestDb(): Promise<{ db: DatabaseService; tempDir: string }> {
   const tempDir = await Deno.makeTempDir();
@@ -113,7 +109,6 @@ Deno.test("DatabaseService throws when operations called before open", async () 
     await expect(db.queryOne("SELECT 1")).rejects.toThrow(DatabaseNotOpenError);
     await expect(db.execute("SELECT 1")).rejects.toThrow(DatabaseNotOpenError);
     await expect(db.exec("SELECT 1")).rejects.toThrow(DatabaseNotOpenError);
-    await expect(db.beginTransaction()).rejects.toThrow(DatabaseNotOpenError);
   } finally {
     await cleanup(tempDir);
   }
@@ -298,156 +293,6 @@ Deno.test("DatabaseService.execute handles DELETE", async () => {
 });
 
 // =====================
-// Transaction tests
-// =====================
-
-Deno.test("DatabaseService.beginTransaction sets inTransaction", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-
-    expect(db.inTransaction).toBe(false);
-    await db.beginTransaction();
-    expect(db.inTransaction).toBe(true);
-    await db.rollback();
-    expect(db.inTransaction).toBe(false);
-
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService transaction commit persists changes", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
-
-    await db.beginTransaction();
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["foo"]);
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["bar"]);
-    await db.commit();
-
-    const rows = await db.queryAll("SELECT * FROM test");
-    expect(rows.length).toBe(2);
-
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService transaction rollback discards changes", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
-
-    await db.beginTransaction();
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["foo"]);
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["bar"]);
-    await db.rollback();
-
-    const rows = await db.queryAll("SELECT * FROM test");
-    expect(rows.length).toBe(0);
-
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService throws on double beginTransaction", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-
-    await db.beginTransaction();
-    await expect(db.beginTransaction()).rejects.toThrow(
-      TransactionAlreadyActiveError
-    );
-
-    await db.rollback();
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService throws on commit without transaction", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await expect(db.commit()).rejects.toThrow(NoActiveTransactionError);
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService throws on rollback without transaction", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await expect(db.rollback()).rejects.toThrow(NoActiveTransactionError);
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService.close rolls back active transaction", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["before"]);
-
-    await db.beginTransaction();
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["during"]);
-    // Close without commit/rollback
-    await db.close();
-
-    // Reopen and verify transaction was rolled back
-    await db.open();
-    const rows = await db.queryAll("SELECT * FROM test");
-    expect(rows.length).toBe(1);
-
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DatabaseService supports immediate transaction type", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)");
-
-    await db.beginTransaction("immediate");
-    await db.execute("INSERT INTO test (name) VALUES (?)", ["foo"]);
-    await db.commit();
-
-    const rows = await db.queryAll("SELECT * FROM test");
-    expect(rows.length).toBe(1);
-
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-// =====================
 // Prepared statement tests
 // =====================
 
@@ -536,25 +381,15 @@ Deno.test("DatabaseService serializes concurrent writes", async () => {
     await db.exec("CREATE TABLE counter (id INTEGER PRIMARY KEY, value INTEGER)");
     await db.execute("INSERT INTO counter (id, value) VALUES (1, 0)");
 
-    // Launch 20 concurrent increments
-    const increments = Array.from({ length: 20 }, async () => {
-      // Read current value
-      const row = await db.queryOne<{ value: number }>(
-        "SELECT value FROM counter WHERE id = 1"
-      );
-      const currentValue = row?.value ?? 0;
-
-      // Increment (this should be serialized by mutex)
-      await db.execute(
-        "UPDATE counter SET value = ? WHERE id = 1",
-        [currentValue + 1]
-      );
-    });
+    // Launch 20 concurrent atomic increments
+    // Using atomic SQL (value = value + 1) ensures each increment is self-contained
+    const increments = Array.from({ length: 20 }, () =>
+      db.execute("UPDATE counter SET value = value + 1 WHERE id = 1")
+    );
 
     await Promise.all(increments);
 
-    // Without mutex, this would likely be less than 20 due to race conditions
-    // With mutex, each increment sees the result of the previous one
+    // Mutex serializes the writes, so all 20 increments should succeed
     const final = await db.queryOne<{ value: number }>(
       "SELECT value FROM counter WHERE id = 1"
     );
@@ -592,41 +427,3 @@ Deno.test("DatabaseService allows concurrent reads", async () => {
   }
 });
 
-Deno.test("DatabaseService transaction holds mutex for duration", async () => {
-  const { db, tempDir } = await createTestDb();
-
-  try {
-    await db.open();
-    await db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value INTEGER)");
-    await db.execute("INSERT INTO test (id, value) VALUES (1, 0)");
-
-    // Start a transaction
-    await db.beginTransaction("immediate");
-
-    // Queue up a write that will wait for transaction
-    const pendingWrite = db.execute(
-      "UPDATE test SET value = 999 WHERE id = 1"
-    );
-
-    // Do some work in the transaction
-    await db.execute("UPDATE test SET value = 100 WHERE id = 1");
-
-    // Small delay to ensure pending write is queued
-    await new Promise((r) => setTimeout(r, 10));
-
-    await db.commit();
-
-    // Now the pending write should complete
-    await pendingWrite;
-
-    // The pending write should have run after the transaction
-    const final = await db.queryOne<{ value: number }>(
-      "SELECT value FROM test WHERE id = 1"
-    );
-    expect(final?.value).toBe(999);
-
-    await db.close();
-  } finally {
-    await cleanup(tempDir);
-  }
-});

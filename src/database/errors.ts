@@ -49,37 +49,3 @@ export class QueryError extends DatabaseError {
   }
 }
 
-/**
- * Thrown when a transaction operation (begin, commit, rollback) fails
- */
-export class TransactionError extends DatabaseError {
-  public readonly operation: "begin" | "commit" | "rollback";
-  public readonly originalError: unknown;
-
-  constructor(operation: "begin" | "commit" | "rollback", originalError: unknown) {
-    super(`Transaction ${operation} failed`);
-    this.name = "TransactionError";
-    this.operation = operation;
-    this.originalError = originalError;
-  }
-}
-
-/**
- * Thrown when attempting to begin a transaction while one is already active
- */
-export class TransactionAlreadyActiveError extends DatabaseError {
-  constructor() {
-    super("A transaction is already active");
-    this.name = "TransactionAlreadyActiveError";
-  }
-}
-
-/**
- * Thrown when attempting to commit or rollback without an active transaction
- */
-export class NoActiveTransactionError extends DatabaseError {
-  constructor() {
-    super("No active transaction to commit or rollback");
-    this.name = "NoActiveTransactionError";
-  }
-}
