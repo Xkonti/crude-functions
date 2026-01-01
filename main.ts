@@ -1,6 +1,7 @@
 import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
 import { DatabaseService } from "./src/database/database_service.ts";
+import { MigrationService } from "./src/database/migration_service.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
 import { createManagementAuthMiddleware } from "./src/middleware/management_auth.ts";
@@ -19,11 +20,17 @@ const db = new DatabaseService({
 });
 await db.open();
 
-// Load schemas
-const apiKeysSchema = await Deno.readTextFile("./schemas/api_keys.sql");
-await db.exec(apiKeysSchema);
-const routesSchema = await Deno.readTextFile("./schemas/routes.sql");
-await db.exec(routesSchema);
+// Run migrations
+const migrationService = new MigrationService({
+  db,
+  migrationsDir: "./migrations",
+});
+const migrationResult = await migrationService.migrate();
+if (migrationResult.appliedCount > 0) {
+  console.log(
+    `Applied ${migrationResult.appliedCount} migration(s): version ${migrationResult.fromVersion ?? "none"} → ${migrationResult.toVersion}`
+  );
+}
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({

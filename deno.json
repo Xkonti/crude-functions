@@ -7,6 +7,7 @@
     "@hono/hono": "jsr:@hono/hono",
     "@std/dotenv": "jsr:@std/dotenv",
     "@std/expect": "jsr:@std/expect",
+    "@std/testing": "jsr:@std/testing",
     "@db/sqlite": "jsr:@db/sqlite",
     "@core/asyncutil": "jsr:@core/asyncutil"
   }
