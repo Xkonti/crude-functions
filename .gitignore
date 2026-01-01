@@ -4,6 +4,7 @@
 # Runtime directories
 code/
 config/
+data/
 
 # IDE
 .idea/
