@@ -18,6 +18,29 @@ const API_KEYS_SCHEMA = `
   CREATE INDEX idx_api_keys_group ON api_keys(key_group);
 `;
 
+const ROUTES_SCHEMA = `
+  CREATE TABLE routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    handler TEXT NOT NULL,
+    route TEXT NOT NULL,
+    methods TEXT NOT NULL,
+    keys TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX idx_routes_route ON routes(route);
+`;
+
+interface TestRoute {
+  name: string;
+  handler: string;
+  route: string;
+  methods: string[];
+  description?: string;
+  keys?: string[];
+}
+
 interface TestContext {
   app: Hono;
   tempDir: string;
@@ -28,16 +51,16 @@ interface TestContext {
 }
 
 async function createTestApp(
-  initialRoutes = "[]"
+  initialRoutes: TestRoute[] = []
 ): Promise<TestContext> {
   const tempDir = await Deno.makeTempDir();
-  const routesPath = `${tempDir}/routes.json`;
   const codePath = `${tempDir}/code`;
 
   // Set up database
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
+  await db.exec(ROUTES_SCHEMA);
 
   // Add default management key
   await db.execute(
@@ -45,12 +68,16 @@ async function createTestApp(
     ["management", "testkey123", "admin"]
   );
 
-  await Deno.writeTextFile(routesPath, initialRoutes);
   await Deno.mkdir(codePath);
 
   const apiKeyService = new ApiKeyService({ db });
-  const routesService = new RoutesService({ configPath: routesPath });
+  const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
+
+  // Add initial routes
+  for (const route of initialRoutes) {
+    await routesService.addRoute(route);
+  }
 
   const app = new Hono();
   app.route(
@@ -241,7 +268,7 @@ Deno.test("POST /web/code/delete removes file", async () => {
 
 // Functions pages tests
 Deno.test("GET /web/functions lists functions", async () => {
-  const initialRoutes = JSON.stringify([
+  const initialRoutes = [
     {
       name: "test-fn",
       handler: "test.ts",
@@ -249,7 +276,7 @@ Deno.test("GET /web/functions lists functions", async () => {
       methods: ["GET"],
       description: "Test function",
     },
-  ]);
+  ];
   const { app, db, tempDir } = await createTestApp(initialRoutes);
   try {
     const res = await app.request("/web/functions", {
@@ -311,9 +338,9 @@ Deno.test("POST /web/functions/create creates function", async () => {
 });
 
 Deno.test("POST /web/functions/delete removes function", async () => {
-  const initialRoutes = JSON.stringify([
+  const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
-  ]);
+  ];
   const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
   try {
     const res = await app.request("/web/functions/delete?name=to-delete", {

@@ -1,27 +1,57 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
+import { DatabaseService } from "../database/database_service.ts";
 import { RoutesService } from "./routes_service.ts";
 import { createRoutesRoutes } from "./routes_routes.ts";
 
-async function createTestApp(initialRoutes: object[] = []) {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-  await Deno.writeTextFile(configPath, JSON.stringify(initialRoutes));
+const ROUTES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS routes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  handler TEXT NOT NULL,
+  route TEXT NOT NULL,
+  methods TEXT NOT NULL,
+  keys TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
+`;
 
-  const service = new RoutesService({ configPath });
+interface TestRoute {
+  name: string;
+  handler: string;
+  route: string;
+  methods: string[];
+  description?: string;
+  keys?: string[];
+}
+
+async function createTestApp(initialRoutes: TestRoute[] = []) {
+  const db = new DatabaseService({ databasePath: ":memory:" });
+  await db.open();
+  await db.exec(ROUTES_SCHEMA);
+
+  const service = new RoutesService({ db });
+
+  // Add initial routes
+  for (const route of initialRoutes) {
+    await service.addRoute(route);
+  }
+
   const app = new Hono();
   app.route("/api/routes", createRoutesRoutes(service));
 
-  return { app, tempDir, service };
+  return { app, db, service };
 }
 
-async function cleanup(tempDir: string) {
-  await Deno.remove(tempDir, { recursive: true });
+async function cleanup(db: DatabaseService) {
+  await db.close();
 }
 
 // GET /api/routes tests
-Deno.test("GET /api/routes returns empty array for empty file", async () => {
-  const { app, tempDir } = await createTestApp();
+Deno.test("GET /api/routes returns empty array for empty database", async () => {
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/api/routes");
@@ -30,7 +60,7 @@ Deno.test("GET /api/routes returns empty array for empty file", async () => {
     const json = await res.json();
     expect(json.routes).toEqual([]);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -39,7 +69,7 @@ Deno.test("GET /api/routes returns all routes", async () => {
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
     { name: "users", handler: "users.ts", route: "/users", methods: ["GET", "POST"] },
   ];
-  const { app, tempDir } = await createTestApp(routes);
+  const { app, db } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes");
@@ -50,7 +80,7 @@ Deno.test("GET /api/routes returns all routes", async () => {
     expect(json.routes[0].name).toBe("hello");
     expect(json.routes[1].name).toBe("users");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -59,7 +89,7 @@ Deno.test("GET /api/routes/:name returns route for existing name", async () => {
   const routes = [
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"], description: "Greeting" },
   ];
-  const { app, tempDir } = await createTestApp(routes);
+  const { app, db } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes/hello");
@@ -69,7 +99,7 @@ Deno.test("GET /api/routes/:name returns route for existing name", async () => {
     expect(json.route.name).toBe("hello");
     expect(json.route.description).toBe("Greeting");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -77,7 +107,7 @@ Deno.test("GET /api/routes/:name returns 404 for non-existent name", async () =>
   const routes = [
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
   ];
-  const { app, tempDir } = await createTestApp(routes);
+  const { app, db } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes/nonexistent");
@@ -86,13 +116,13 @@ Deno.test("GET /api/routes/:name returns 404 for non-existent name", async () =>
     const json = await res.json();
     expect(json.error).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 // POST /api/routes tests
 Deno.test("POST /api/routes adds new route", async () => {
-  const { app, tempDir, service } = await createTestApp();
+  const { app, db, service } = await createTestApp();
 
   try {
     const res = await app.request("/api/routes", {
@@ -117,12 +147,12 @@ Deno.test("POST /api/routes adds new route", async () => {
     expect(route).not.toBe(null);
     expect(route!.handler).toBe("new.ts");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 Deno.test("POST /api/routes rejects missing required fields", async () => {
-  const { app, tempDir } = await createTestApp();
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/api/routes", {
@@ -139,12 +169,12 @@ Deno.test("POST /api/routes rejects missing required fields", async () => {
     const json = await res.json();
     expect(json.error).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 Deno.test("POST /api/routes rejects invalid route path", async () => {
-  const { app, tempDir } = await createTestApp();
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/api/routes", {
@@ -163,12 +193,12 @@ Deno.test("POST /api/routes rejects invalid route path", async () => {
     const json = await res.json();
     expect(json.error).toContain("route");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
 Deno.test("POST /api/routes rejects invalid methods", async () => {
-  const { app, tempDir } = await createTestApp();
+  const { app, db } = await createTestApp();
 
   try {
     const res = await app.request("/api/routes", {
@@ -187,7 +217,7 @@ Deno.test("POST /api/routes rejects invalid methods", async () => {
     const json = await res.json();
     expect(json.error).toContain("method");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -195,7 +225,7 @@ Deno.test("POST /api/routes returns 409 on duplicate name", async () => {
   const routes = [
     { name: "existing", handler: "existing.ts", route: "/existing", methods: ["GET"] },
   ];
-  const { app, tempDir } = await createTestApp(routes);
+  const { app, db } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes", {
@@ -214,7 +244,7 @@ Deno.test("POST /api/routes returns 409 on duplicate name", async () => {
     const json = await res.json();
     expect(json.error).toContain("exists");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -222,7 +252,7 @@ Deno.test("POST /api/routes returns 409 on duplicate route+method", async () => 
   const routes = [
     { name: "existing", handler: "existing.ts", route: "/users", methods: ["GET", "POST"] },
   ];
-  const { app, tempDir } = await createTestApp(routes);
+  const { app, db } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes", {
@@ -238,7 +268,7 @@ Deno.test("POST /api/routes returns 409 on duplicate route+method", async () => 
 
     expect(res.status).toBe(409);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -248,7 +278,7 @@ Deno.test("DELETE /api/routes/:name removes route", async () => {
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
     { name: "users", handler: "users.ts", route: "/users", methods: ["GET"] },
   ];
-  const { app, tempDir, service } = await createTestApp(routes);
+  const { app, db, service } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes/hello", {
@@ -268,7 +298,7 @@ Deno.test("DELETE /api/routes/:name removes route", async () => {
     const users = await service.getByName("users");
     expect(users).not.toBe(null);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });
 
@@ -276,7 +306,7 @@ Deno.test("DELETE /api/routes/:name returns 404 for non-existent name", async ()
   const routes = [
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
   ];
-  const { app, tempDir } = await createTestApp(routes);
+  const { app, db } = await createTestApp(routes);
 
   try {
     const res = await app.request("/api/routes/nonexistent", {
@@ -285,6 +315,6 @@ Deno.test("DELETE /api/routes/:name returns 404 for non-existent name", async ()
 
     expect(res.status).toBe(404);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db);
   }
 });

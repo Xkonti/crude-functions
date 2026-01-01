@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
+import { DatabaseService } from "./src/database/database_service.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
 import { createManagementAuthMiddleware } from "./src/middleware/management_auth.ts";
@@ -12,15 +13,27 @@ import { createWebRoutes } from "./src/web/web_routes.ts";
 
 const app = new Hono();
 
+// Initialize database
+const db = new DatabaseService({
+  databasePath: "./data/database.db",
+});
+await db.open();
+
+// Load schemas
+const apiKeysSchema = await Deno.readTextFile("./schemas/api_keys.sql");
+await db.exec(apiKeysSchema);
+const routesSchema = await Deno.readTextFile("./schemas/routes.sql");
+await db.exec(routesSchema);
+
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
-  configPath: "./config/keys.config",
+  db,
   managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
 });
 
 // Initialize routes service
 const routesService = new RoutesService({
-  configPath: "./config/routes.json",
+  db,
 });
 
 // Initialize function router
@@ -64,7 +77,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService };
+export { app, db, apiKeyService, routesService, functionRouter, fileService };
 
 // Start server only when run directly
 if (import.meta.main) {
