@@ -24,4 +24,4 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Run the application with necessary permissions
-CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "main.ts"]
+CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "--allow-ffi", "main.ts"]
