@@ -1,125 +1,14 @@
 import { expect } from "@std/expect";
 import {
-  parseRoutesFile,
-  serializeRoutesFile,
   validateRouteName,
   validateRoutePath,
   validateMethods,
-  hasDuplicateRouteMethod,
+  RoutesService,
   type FunctionRoute,
 } from "./routes_service.ts";
+import { DatabaseService } from "../database/database_service.ts";
 
-// Parsing tests
-Deno.test("parseRoutesFile returns empty array for empty string", () => {
-  const result = parseRoutesFile("");
-  expect(result).toEqual([]);
-});
-
-Deno.test("parseRoutesFile returns empty array for empty JSON array", () => {
-  const result = parseRoutesFile("[]");
-  expect(result).toEqual([]);
-});
-
-Deno.test("parseRoutesFile parses valid routes", () => {
-  const json = JSON.stringify([
-    {
-      name: "hello",
-      handler: "code/hello.ts",
-      route: "/hello",
-      methods: ["GET"],
-    },
-  ]);
-
-  const result = parseRoutesFile(json);
-  expect(result.length).toBe(1);
-  expect(result[0].name).toBe("hello");
-  expect(result[0].handler).toBe("code/hello.ts");
-  expect(result[0].route).toBe("/hello");
-  expect(result[0].methods).toEqual(["GET"]);
-});
-
-Deno.test("parseRoutesFile handles optional fields", () => {
-  const json = JSON.stringify([
-    {
-      name: "hello",
-      handler: "code/hello.ts",
-      route: "/hello",
-      methods: ["GET"],
-      description: "A greeting endpoint",
-      keys: ["api-key"],
-    },
-  ]);
-
-  const result = parseRoutesFile(json);
-  expect(result[0].description).toBe("A greeting endpoint");
-  expect(result[0].keys).toEqual(["api-key"]);
-});
-
-Deno.test("parseRoutesFile throws on invalid JSON", () => {
-  expect(() => parseRoutesFile("not valid json")).toThrow();
-});
-
-Deno.test("parseRoutesFile throws on non-array JSON", () => {
-  expect(() => parseRoutesFile('{"name": "test"}')).toThrow();
-});
-
-// Serialization tests
-Deno.test("serializeRoutesFile produces valid JSON", () => {
-  const routes: FunctionRoute[] = [
-    {
-      name: "hello",
-      handler: "code/hello.ts",
-      route: "/hello",
-      methods: ["GET"],
-    },
-  ];
-
-  const result = serializeRoutesFile(routes);
-  const parsed = JSON.parse(result);
-  expect(parsed.length).toBe(1);
-  expect(parsed[0].name).toBe("hello");
-});
-
-Deno.test("serializeRoutesFile preserves optional fields", () => {
-  const routes: FunctionRoute[] = [
-    {
-      name: "hello",
-      handler: "code/hello.ts",
-      route: "/hello",
-      methods: ["GET"],
-      description: "A greeting",
-      keys: ["test-key"],
-    },
-  ];
-
-  const result = serializeRoutesFile(routes);
-  const parsed = JSON.parse(result);
-  expect(parsed[0].description).toBe("A greeting");
-  expect(parsed[0].keys).toEqual(["test-key"]);
-});
-
-Deno.test("serializeRoutesFile roundtrips with parseRoutesFile", () => {
-  const original: FunctionRoute[] = [
-    {
-      name: "hello",
-      handler: "code/hello.ts",
-      route: "/hello",
-      methods: ["GET", "POST"],
-      description: "Test",
-    },
-    {
-      name: "users",
-      handler: "code/users.ts",
-      route: "/users",
-      methods: ["GET"],
-      keys: ["user-api"],
-    },
-  ];
-
-  const serialized = serializeRoutesFile(original);
-  const reparsed = parseRoutesFile(serialized);
-  expect(reparsed).toEqual(original);
-});
+// ============== Validation Function Tests ==============
 
 // Validation tests - route name
 Deno.test("validateRouteName accepts valid names", () => {
@@ -173,74 +62,99 @@ Deno.test("validateMethods rejects invalid methods", () => {
   expect(validateMethods(["GET", "INVALID"])).toBe(false);
 });
 
-// Duplicate detection tests
-Deno.test("hasDuplicateRouteMethod detects conflict", () => {
-  const routes: FunctionRoute[] = [
-    { name: "a", handler: "a.ts", route: "/users", methods: ["GET", "POST"] },
-  ];
+// ============== RoutesService Tests ==============
 
-  expect(hasDuplicateRouteMethod(routes, "/users", "GET")).toBe(true);
-  expect(hasDuplicateRouteMethod(routes, "/users", "POST")).toBe(true);
-  expect(hasDuplicateRouteMethod(routes, "/users", "DELETE")).toBe(false);
-  expect(hasDuplicateRouteMethod(routes, "/other", "GET")).toBe(false);
-});
+const ROUTES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS routes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  handler TEXT NOT NULL,
+  route TEXT NOT NULL,
+  methods TEXT NOT NULL,
+  keys TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
+`;
 
-Deno.test("hasDuplicateRouteMethod handles empty routes", () => {
-  expect(hasDuplicateRouteMethod([], "/users", "GET")).toBe(false);
-});
+async function createTestService(): Promise<{
+  service: RoutesService;
+  db: DatabaseService;
+}> {
+  const db = new DatabaseService({ databasePath: ":memory:" });
+  await db.open();
+  await db.exec(ROUTES_SCHEMA);
+  const service = new RoutesService({ db });
+  return { service, db };
+}
 
-// RoutesService tests
-import { RoutesService } from "./routes_service.ts";
-
-Deno.test("RoutesService creates empty file if missing", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+// Basic CRUD tests
+Deno.test("RoutesService.getAll returns empty array initially", async () => {
+  const { service, db } = await createTestService();
   try {
-    const service = new RoutesService({ configPath });
     const routes = await service.getAll();
-
     expect(routes).toEqual([]);
-    // File should now exist
-    const stat = await Deno.stat(configPath);
-    expect(stat.isFile).toBe(true);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
-Deno.test("RoutesService.getAll returns routes from file", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+Deno.test("RoutesService.addRoute creates route with required fields", async () => {
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
+    await service.addRoute({
+      name: "hello",
+      handler: "hello.ts",
+      route: "/hello",
+      methods: ["GET"],
+    });
 
-    const service = new RoutesService({ configPath });
-    const result = await service.getAll();
-
-    expect(result.length).toBe(1);
-    expect(result[0].name).toBe("hello");
+    const routes = await service.getAll();
+    expect(routes.length).toBe(1);
+    expect(routes[0].name).toBe("hello");
+    expect(routes[0].handler).toBe("hello.ts");
+    expect(routes[0].route).toBe("/hello");
+    expect(routes[0].methods).toEqual(["GET"]);
+    expect(routes[0].description).toBeUndefined();
+    expect(routes[0].keys).toBeUndefined();
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.addRoute creates route with all fields", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      description: "Test route",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET", "POST"],
+      keys: ["api-key"],
+    });
+
+    const route = await service.getByName("test");
+    expect(route?.name).toBe("test");
+    expect(route?.description).toBe("Test route");
+    expect(route?.methods).toContain("GET");
+    expect(route?.methods).toContain("POST");
+    expect(route?.keys).toContain("api-key");
+  } finally {
+    await db.close();
   }
 });
 
 Deno.test("RoutesService.getByName returns route or null", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-      { name: "users", handler: "users.ts", route: "/users", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
-
-    const service = new RoutesService({ configPath });
+    await service.addRoute({
+      name: "hello",
+      handler: "hello.ts",
+      route: "/hello",
+      methods: ["GET"],
+    });
 
     const hello = await service.getByName("hello");
     expect(hello?.name).toBe("hello");
@@ -248,49 +162,19 @@ Deno.test("RoutesService.getByName returns route or null", async () => {
     const notFound = await service.getByName("nonexistent");
     expect(notFound).toBe(null);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
-  }
-});
-
-Deno.test("RoutesService.addRoute adds new route", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
-  try {
-    await Deno.writeTextFile(configPath, "[]");
-
-    const service = new RoutesService({ configPath });
-    await service.addRoute({
-      name: "new-route",
-      handler: "new.ts",
-      route: "/new",
-      methods: ["POST"],
-      description: "A new route",
-    });
-
-    const routes = await service.getAll();
-    expect(routes.length).toBe(1);
-    expect(routes[0].name).toBe("new-route");
-
-    // Verify file was updated
-    const content = await Deno.readTextFile(configPath);
-    expect(content).toContain("new-route");
-  } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
 Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
-
-    const service = new RoutesService({ configPath });
+    await service.addRoute({
+      name: "hello",
+      handler: "hello.ts",
+      route: "/hello",
+      methods: ["GET"],
+    });
 
     await expect(
       service.addRoute({
@@ -299,23 +183,21 @@ Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
         route: "/other",
         methods: ["POST"],
       })
-    ).rejects.toThrow();
+    ).rejects.toThrow("already exists");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
 Deno.test("RoutesService.addRoute throws on duplicate route+method", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/users", methods: ["GET", "POST"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
-
-    const service = new RoutesService({ configPath });
+    await service.addRoute({
+      name: "hello",
+      handler: "hello.ts",
+      route: "/users",
+      methods: ["GET", "POST"],
+    });
 
     await expect(
       service.addRoute({
@@ -324,148 +206,137 @@ Deno.test("RoutesService.addRoute throws on duplicate route+method", async () =>
         route: "/users", // same route
         methods: ["GET"], // conflicting method
       })
-    ).rejects.toThrow();
+    ).rejects.toThrow("already exists");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.addRoute allows same route with different methods", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "users-get",
+      handler: "users-get.ts",
+      route: "/users",
+      methods: ["GET"],
+    });
+
+    // Should succeed - same route but different method
+    await service.addRoute({
+      name: "users-post",
+      handler: "users-post.ts",
+      route: "/users",
+      methods: ["POST"],
+    });
+
+    const routes = await service.getAll();
+    expect(routes.length).toBe(2);
+  } finally {
+    await db.close();
   }
 });
 
 Deno.test("RoutesService.removeRoute removes by name", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-      { name: "users", handler: "users.ts", route: "/users", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
+    await service.addRoute({
+      name: "hello",
+      handler: "hello.ts",
+      route: "/hello",
+      methods: ["GET"],
+    });
+    await service.addRoute({
+      name: "users",
+      handler: "users.ts",
+      route: "/users",
+      methods: ["GET"],
+    });
 
-    const service = new RoutesService({ configPath });
     await service.removeRoute("hello");
 
     const result = await service.getAll();
     expect(result.length).toBe(1);
     expect(result[0].name).toBe("users");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
 Deno.test("RoutesService.removeRoute is no-op for non-existent name", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
+    await service.addRoute({
+      name: "hello",
+      handler: "hello.ts",
+      route: "/hello",
+      methods: ["GET"],
+    });
 
-    const service = new RoutesService({ configPath });
     await service.removeRoute("nonexistent");
 
     const result = await service.getAll();
     expect(result.length).toBe(1);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
-// loadIfChanged tests
-Deno.test("RoutesService.loadIfChanged returns routes on first call", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
+// ============== Dirty Flag & Rebuild Tests ==============
 
+Deno.test("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async () => {
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
 
-    const service = new RoutesService({ configPath, refreshInterval: 50 });
-    const result = await service.loadIfChanged();
+    let rebuildCount = 0;
+    let receivedRoutes: FunctionRoute[] = [];
 
-    expect(result).not.toBe(null);
-    expect(result!.length).toBe(1);
+    await service.rebuildIfNeeded((routes) => {
+      rebuildCount++;
+      receivedRoutes = routes;
+    });
+
+    expect(rebuildCount).toBe(1);
+    expect(receivedRoutes.length).toBe(1);
+    expect(receivedRoutes[0].name).toBe("test");
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
-Deno.test("RoutesService.loadIfChanged returns null if unchanged", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+Deno.test("rebuildIfNeeded skips rebuild when not dirty", async () => {
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
+    let rebuildCount = 0;
 
-    const service = new RoutesService({ configPath, refreshInterval: 50 });
+    // First call - should rebuild (starts dirty)
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1);
 
-    // First call returns routes
-    const first = await service.loadIfChanged();
-    expect(first).not.toBe(null);
-
-    // Second call within interval returns null
-    const second = await service.loadIfChanged();
-    expect(second).toBe(null);
+    // Second call - should NOT rebuild (not dirty)
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1); // Still 1
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
   }
 });
 
-Deno.test("RoutesService.loadIfChanged returns routes after external modification", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
+Deno.test("rebuildIfNeeded rebuilds after addRoute", async () => {
+  const { service, db } = await createTestService();
   try {
-    const routes = [
-      { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(routes));
+    let rebuildCount = 0;
 
-    const service = new RoutesService({ configPath, refreshInterval: 50 });
+    // Initial rebuild
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1);
 
-    // First call
-    await service.loadIfChanged();
-
-    // Wait for refresh interval
-    await new Promise((resolve) => setTimeout(resolve, 60));
-
-    // Modify file externally
-    const newRoutes = [
-      { name: "modified", handler: "mod.ts", route: "/mod", methods: ["POST"] },
-    ];
-    await Deno.writeTextFile(configPath, JSON.stringify(newRoutes));
-
-    // Should detect change
-    const result = await service.loadIfChanged();
-    expect(result).not.toBe(null);
-    expect(result![0].name).toBe("modified");
-  } finally {
-    await Deno.remove(tempDir, { recursive: true });
-  }
-});
-
-Deno.test("RoutesService.loadIfChanged returns null after internal write", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/routes.json`;
-
-  try {
-    await Deno.writeTextFile(configPath, "[]");
-
-    const service = new RoutesService({ configPath, refreshInterval: 50 });
-
-    // First call
-    await service.loadIfChanged();
-
-    // Wait for refresh interval
-    await new Promise((resolve) => setTimeout(resolve, 60));
-
-    // Internal write
+    // Add a route (marks dirty)
     await service.addRoute({
       name: "new",
       handler: "new.ts",
@@ -473,10 +344,164 @@ Deno.test("RoutesService.loadIfChanged returns null after internal write", async
       methods: ["GET"],
     });
 
-    // Should return null (internal write refreshes watcher)
-    const result = await service.loadIfChanged();
-    expect(result).toBe(null);
+    // Should rebuild again
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(2);
   } finally {
-    await Deno.remove(tempDir, { recursive: true });
+    await db.close();
+  }
+});
+
+Deno.test("rebuildIfNeeded rebuilds after removeRoute", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
+
+    let rebuildCount = 0;
+
+    // Initial rebuild
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1);
+
+    // Remove route (marks dirty)
+    await service.removeRoute("test");
+
+    // Should rebuild again
+    let receivedRoutes: FunctionRoute[] = [];
+    await service.rebuildIfNeeded((routes) => {
+      rebuildCount++;
+      receivedRoutes = routes;
+    });
+
+    expect(rebuildCount).toBe(2);
+    expect(receivedRoutes.length).toBe(0);
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("removeRoute does not mark dirty if nothing deleted", async () => {
+  const { service, db } = await createTestService();
+  try {
+    let rebuildCount = 0;
+
+    // Initial rebuild (clears dirty flag)
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1);
+
+    // Remove non-existent route (should NOT mark dirty)
+    await service.removeRoute("nonexistent");
+
+    // Should NOT rebuild
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1); // Still 1
+  } finally {
+    await db.close();
+  }
+});
+
+// ============== Concurrency Tests ==============
+
+Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
+
+    let rebuildCount = 0;
+
+    // Fire 5 concurrent rebuild requests
+    const promises = Array(5)
+      .fill(null)
+      .map(() =>
+        service.rebuildIfNeeded(() => {
+          rebuildCount++;
+        })
+      );
+
+    await Promise.all(promises);
+
+    // Should only rebuild once
+    expect(rebuildCount).toBe(1);
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("addRoute waits for in-progress rebuild", async () => {
+  const { service, db } = await createTestService();
+  try {
+    const events: string[] = [];
+
+    // Start a slow rebuild
+    const rebuildPromise = service.rebuildIfNeeded(() => {
+      events.push("rebuild-start");
+      // Simulate some work (synchronous for test simplicity)
+      const start = Date.now();
+      while (Date.now() - start < 50) {
+        // busy wait
+      }
+      events.push("rebuild-end");
+    });
+
+    // Small delay to ensure rebuild starts first
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Try to add a route while rebuild is in progress
+    const addPromise = (async () => {
+      events.push("add-waiting");
+      await service.addRoute({
+        name: "new",
+        handler: "new.ts",
+        route: "/new",
+        methods: ["GET"],
+      });
+      events.push("add-done");
+    })();
+
+    await Promise.all([rebuildPromise, addPromise]);
+
+    // Add should wait for rebuild to complete
+    expect(events[0]).toBe("rebuild-start");
+    expect(events.indexOf("rebuild-end")).toBeLessThan(events.indexOf("add-done"));
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("multiple writes are serialized", async () => {
+  const { service, db } = await createTestService();
+  try {
+    // Clear initial dirty flag
+    await service.rebuildIfNeeded(() => {});
+
+    // Fire multiple concurrent adds
+    const promises = Array(5)
+      .fill(null)
+      .map((_, i) =>
+        service.addRoute({
+          name: `route-${i}`,
+          handler: `route-${i}.ts`,
+          route: `/route-${i}`,
+          methods: ["GET"],
+        })
+      );
+
+    await Promise.all(promises);
+
+    // All routes should be added
+    const routes = await service.getAll();
+    expect(routes.length).toBe(5);
+  } finally {
+    await db.close();
   }
 });

@@ -23,7 +23,7 @@ export class FunctionRouter {
   private readonly routesService: RoutesService;
   private readonly apiKeyValidator: ApiKeyValidator;
   private readonly handlerLoader: HandlerLoader;
-  private router: Hono | null = null;
+  private router: Hono = this.createEmptyRouter();
 
   constructor(options: FunctionRouterOptions) {
     this.routesService = options.routesService;
@@ -34,15 +34,10 @@ export class FunctionRouter {
   }
 
   async handle(c: Context): Promise<Response> {
-    // Check for route changes on every request
-    // (loadIfChanged is already rate-limited by FileWatcher's 10s interval)
-    const updatedRoutes = await this.routesService.loadIfChanged();
-
-    if (updatedRoutes !== null || this.router === null) {
-      // Routes changed or first request - rebuild router
-      const routes = updatedRoutes ?? (await this.routesService.getAll());
+    // Check if routes need rebuilding - handles all concurrency internally
+    await this.routesService.rebuildIfNeeded((routes) => {
       this.router = this.buildRouter(routes);
-    }
+    });
 
     // Delegate to internal router
     // Strip /run prefix before passing to internal router
@@ -57,6 +52,12 @@ export class FunctionRouter {
     });
 
     return this.router.fetch(newRequest);
+  }
+
+  private createEmptyRouter(): Hono {
+    const router = new Hono();
+    router.all("*", (c) => c.json({ error: "Function not found" }, 404));
+    return router;
   }
 
   private buildRouter(routes: FunctionRoute[]): Hono {
@@ -92,7 +93,7 @@ export class FunctionRouter {
       const requestId = crypto.randomUUID();
 
       // 1. API Key Validation (if required)
-      let authenticatedKeyName: string | undefined;
+      let authenticatedKeyGroup: string | undefined;
 
       if (route.keys && route.keys.length > 0) {
         const validation = await this.apiKeyValidator.validate(c, route.keys);
@@ -108,7 +109,7 @@ export class FunctionRouter {
           );
         }
 
-        authenticatedKeyName = validation.keyName;
+        authenticatedKeyGroup = validation.keyGroup;
       }
 
       // 2. Build FunctionContext
@@ -125,7 +126,7 @@ export class FunctionRouter {
         route: routeInfo,
         params: c.req.param() as Record<string, string>,
         query: this.parseQueryParams(c),
-        authenticatedKeyName,
+        authenticatedKeyGroup,
         requestedAt: new Date(),
         requestId,
       };

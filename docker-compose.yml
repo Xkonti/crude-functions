@@ -9,8 +9,8 @@ services:
       # Log level: debug, info, warn, error, none (default: info)
       - LOG_LEVEL=info
     volumes:
-      # Mount the config directory for keys.config and routes.json
-      - ./config:/app/config
+      # Mount the data directory for SQLite database
+      - ./data:/app/data
       # Mount the code directory for function handlers
       - ./code:/app/code
     restart: unless-stopped

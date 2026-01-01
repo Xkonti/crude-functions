@@ -29,17 +29,14 @@ A minimal, single-container serverless-style function router built on Deno. Func
 git clone <repo-url>
 cd crude-functions
 
-# Create config directory
-mkdir -p config
-
 # Set up a management key
-echo "management=your-secret-key" > config/keys.config
+echo "MANAGEMENT_API_KEY=your-secret-key" > .env
 
 # Run the server
 deno task dev
 ```
 
-The server starts on port 8000 by default. Access the web UI at `http://localhost:8000/web`.
+The server starts on port 8000 by default. The database is automatically created at `./data/database.db` on first run. Access the web UI at `http://localhost:8000/web`.
 
 ## Configuration
 
@@ -48,60 +45,34 @@ The server starts on port 8000 by default. Access the web UI at `http://localhos
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
-| `MANAGEMENT_API_KEY` | Management key (alternative to config file) | - |
+| `MANAGEMENT_API_KEY` | Management key for admin access (API and Web UI) | - |
 | `LOG_LEVEL` | Logging verbosity: `debug`, `info`, `warn`, `error`, `none` | `info` |
 
 ### Directory Structure
 
 ```
 crude-functions/
-├── config/
-│   ├── keys.config    # API keys configuration
-│   └── routes.json    # Function route definitions
+├── data/
+│   └── database.db    # SQLite database (API keys & routes)
 ├── code/              # Your function handlers
 │   └── *.ts
+├── migrations/        # Database schema migrations
 └── main.ts
 ```
 
-### API Keys (`config/keys.config`)
+### API Keys
 
-API keys are stored as `name=value` pairs with optional descriptions:
+API keys are stored in the SQLite database and managed via the API or Web UI.
 
-```
-management=your-admin-key # Admin access
-management=another-key # For CI/CD
-api=user-key-123 # User API access
-readonly=viewer-key # Read-only access
-```
-
-- **Key names:** lowercase `a-z`, `0-9`, `_`, `-`
+- **Key groups:** lowercase `a-z`, `0-9`, `_`, `-`
 - **Key values:** `a-z`, `A-Z`, `0-9`, `_`, `-`
-- **Comments:** Everything after `#` is treated as a description
-- **Multiple values:** Same name can have multiple keys
+- **Descriptions:** Optional metadata for each key
 
-The `management` key name is reserved for admin access (API and Web UI).
+The `management` key group is reserved for admin access (API and Web UI). You can provide a management key via the `MANAGEMENT_API_KEY` environment variable, or add keys using the API/Web UI after initial setup.
 
-### Function Routes (`config/routes.json`)
+### Function Routes
 
-```json
-[
-  {
-    "name": "hello-world",
-    "description": "A simple greeting endpoint",
-    "handler": "hello.ts",
-    "route": "/hello",
-    "methods": ["GET"],
-    "keys": ["api"]
-  },
-  {
-    "name": "user-api",
-    "handler": "users/handler.ts",
-    "route": "/users/:id",
-    "methods": ["GET", "POST", "PUT", "DELETE"],
-    "keys": ["api", "admin"]
-  }
-]
-```
+Routes are stored in the SQLite database and managed via the API or Web UI. Each route defines:
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -110,7 +81,20 @@ The `management` key name is reserved for admin access (API and Web UI).
 | `route` | Yes | URL path pattern (supports `:param` syntax) |
 | `methods` | Yes | Array of HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) |
 | `description` | No | Human-readable description |
-| `keys` | No | Array of key names required for access |
+| `keys` | No | Array of key groups required for access |
+
+Example route (via API):
+
+```json
+{
+  "name": "hello-world",
+  "description": "A simple greeting endpoint",
+  "handler": "hello.ts",
+  "route": "/hello",
+  "methods": ["GET"],
+  "keys": ["api"]
+}
+```
 
 ## Writing Function Handlers
 
@@ -141,7 +125,7 @@ export default async function (c, ctx) {
 | `ctx.query` | `Record<string, string>` | Query string parameters |
 | `ctx.requestId` | `string` | Unique request ID for tracing |
 | `ctx.requestedAt` | `Date` | Request timestamp |
-| `ctx.authenticatedKeyName` | `string?` | API key name used (if route requires auth) |
+| `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
 | `ctx.route` | `RouteInfo` | Route configuration (name, handler, methods, etc.) |
 
 ### Hono Context (`c`)
@@ -187,11 +171,11 @@ All management endpoints require the `X-API-Key` header with a valid management 
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/keys` | List all key names |
-| GET | `/api/keys/:name` | Get keys for a name |
-| POST | `/api/keys/:name` | Add a new key |
-| DELETE | `/api/keys/:name` | Delete all keys for a name |
-| DELETE | `/api/keys/:name/:value` | Delete a specific key |
+| GET | `/api/keys` | List all key groups |
+| GET | `/api/keys/:group` | Get keys for a group |
+| POST | `/api/keys/:group` | Add a new key |
+| DELETE | `/api/keys/:group` | Delete all keys for a group |
+| DELETE | `/api/keys/by-id/:id` | Delete a key by ID |
 
 ### Function Execution
 
@@ -251,7 +235,7 @@ services:
       - MANAGEMENT_API_KEY=your-secret-key
       - LOG_LEVEL=info
     volumes:
-      - ./config:/app/config
+      - ./data:/app/data
       - ./code:/app/code
     restart: unless-stopped
 ```
@@ -259,10 +243,11 @@ services:
 Create your directories and start:
 
 ```bash
-mkdir -p config code
-echo '[]' > config/routes.json
+mkdir -p data code
 docker compose up -d
 ```
+
+The database will be created automatically at `./data/database.db` on first run.
 
 ### Using Docker Run
 
@@ -270,7 +255,7 @@ docker compose up -d
 docker run -d \
   -p 8000:8000 \
   -e MANAGEMENT_API_KEY=your-secret-key \
-  -v ./config:/app/config \
+  -v ./data:/app/data \
   -v ./code:/app/code \
   xkonti/crude-functions:latest
 ```
@@ -283,13 +268,7 @@ docker build -t crude-functions .
 
 ## Hot Reload
 
-The server automatically detects changes to:
-
-- `config/keys.config` - API keys reload on next request
-- `config/routes.json` - Routes rebuild on next request
-- `code/*.ts` - Handlers reload when file modification time changes
-
-Changes are detected at most every 10 seconds during active request handling.
+The server automatically reloads function handlers when their files are modified. Routes and API keys stored in the database are immediately available after changes via the API or Web UI - no server restart required.
 
 ## Security Considerations
 

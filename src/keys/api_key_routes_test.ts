@@ -1,31 +1,51 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
+import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "./api_key_service.ts";
 import { createApiKeyRoutes } from "./api_key_routes.ts";
 
-async function createTestApp(initialContent = "") {
+const API_KEYS_SCHEMA = `
+  CREATE TABLE api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key_group TEXT NOT NULL,
+    value TEXT NOT NULL,
+    description TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(key_group, value);
+  CREATE INDEX idx_api_keys_group ON api_keys(key_group);
+`;
+
+async function createTestApp(managementKeyFromEnv?: string): Promise<{
+  app: Hono;
+  service: ApiKeyService;
+  db: DatabaseService;
+  tempDir: string;
+}> {
   const tempDir = await Deno.makeTempDir();
-  const configPath = `${tempDir}/keys.config`;
-  await Deno.writeTextFile(configPath, initialContent);
+  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
+  await db.open();
+  await db.exec(API_KEYS_SCHEMA);
 
   const service = new ApiKeyService({
-    configPath,
-    managementKeyFromEnv: "env-mgmt-key",
+    db,
+    managementKeyFromEnv: managementKeyFromEnv ?? "env-mgmt-key",
   });
 
   const app = new Hono();
   app.route("/api/keys", createApiKeyRoutes(service));
 
-  return { app, tempDir, service };
+  return { app, service, db, tempDir };
 }
 
-async function cleanup(tempDir: string) {
+async function cleanup(db: DatabaseService, tempDir: string): Promise<void> {
+  await db.close();
   await Deno.remove(tempDir, { recursive: true });
 }
 
 // GET /api/keys tests
-Deno.test("GET /api/keys returns empty names array for empty file", async () => {
-  const { app, tempDir } = await createTestApp();
+Deno.test("GET /api/keys returns groups array with management from env", async () => {
+  const { app, db, tempDir } = await createTestApp();
 
   try {
     const res = await app.request("/api/keys");
@@ -33,77 +53,86 @@ Deno.test("GET /api/keys returns empty names array for empty file", async () => 
 
     const json = await res.json();
     // Should include management from env
-    expect(json.names).toContain("management");
+    expect(json.groups).toContain("management");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("GET /api/keys returns all key names", async () => {
-  const { app, tempDir } = await createTestApp("email=key1\nservice=key2");
+Deno.test("GET /api/keys returns all key groups", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
+    await service.addKey("email", "key1");
+    await service.addKey("service", "key2");
+
     const res = await app.request("/api/keys");
     expect(res.status).toBe(200);
 
     const json = await res.json();
-    expect(json.names).toContain("email");
-    expect(json.names).toContain("service");
-    expect(json.names).toContain("management"); // from env
+    expect(json.groups).toContain("email");
+    expect(json.groups).toContain("service");
+    expect(json.groups).toContain("management"); // from env
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-// GET /api/keys/:name tests
-Deno.test("GET /api/keys/:name returns keys for existing name", async () => {
-  const { app, tempDir } = await createTestApp("email=key1 # first\nemail=key2");
+// GET /api/keys/:group tests
+Deno.test("GET /api/keys/:group returns keys for existing group", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
+    await service.addKey("email", "key1", "first");
+    await service.addKey("email", "key2");
+
     const res = await app.request("/api/keys/email");
     expect(res.status).toBe(200);
 
     const json = await res.json();
-    expect(json.name).toBe("email");
+    expect(json.group).toBe("email");
     expect(json.keys.length).toBe(2);
-    expect(json.keys[0].value).toBe("key1");
-    expect(json.keys[0].description).toBe("first");
+    expect(json.keys.some((k: { value: string; description?: string }) => k.value === "key1" && k.description === "first")).toBe(true);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("GET /api/keys/:name returns 404 for non-existent name", async () => {
-  const { app, tempDir } = await createTestApp("email=key1");
+Deno.test("GET /api/keys/:group returns 404 for non-existent group", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
+    await service.addKey("email", "key1");
+
     const res = await app.request("/api/keys/nonexistent");
     expect(res.status).toBe(404);
 
     const json = await res.json();
     expect(json.error).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("GET /api/keys/:name normalizes name to lowercase", async () => {
-  const { app, tempDir } = await createTestApp("email=key1");
+Deno.test("GET /api/keys/:group normalizes group to lowercase", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
+    await service.addKey("email", "key1");
+
     const res = await app.request("/api/keys/EMAIL");
     expect(res.status).toBe(200);
 
     const json = await res.json();
-    expect(json.name).toBe("email");
+    expect(json.group).toBe("email");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-// POST /api/keys/:name tests
-Deno.test("POST /api/keys/:name adds new key", async () => {
-  const { app, tempDir, service } = await createTestApp();
+// POST /api/keys/:group tests
+Deno.test("POST /api/keys/:group adds new key", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
     const res = await app.request("/api/keys/email", {
@@ -120,15 +149,15 @@ Deno.test("POST /api/keys/:name adds new key", async () => {
     // Verify key was added
     expect(await service.hasKey("email", "newkey")).toBe(true);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("POST /api/keys/:name rejects invalid key name", async () => {
-  const { app, tempDir } = await createTestApp();
+Deno.test("POST /api/keys/:group rejects invalid key group", async () => {
+  const { app, db, tempDir } = await createTestApp();
 
   try {
-    const res = await app.request("/api/keys/INVALID.NAME", {
+    const res = await app.request("/api/keys/INVALID.GROUP", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ value: "key1" }),
@@ -137,14 +166,14 @@ Deno.test("POST /api/keys/:name rejects invalid key name", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("name");
+    expect(json.error).toContain("group");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("POST /api/keys/:name rejects invalid key value", async () => {
-  const { app, tempDir } = await createTestApp();
+Deno.test("POST /api/keys/:group rejects invalid key value", async () => {
+  const { app, db, tempDir } = await createTestApp();
 
   try {
     const res = await app.request("/api/keys/email", {
@@ -158,12 +187,12 @@ Deno.test("POST /api/keys/:name rejects invalid key value", async () => {
     const json = await res.json();
     expect(json.error).toContain("value");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("POST /api/keys/:name rejects missing value", async () => {
-  const { app, tempDir } = await createTestApp();
+Deno.test("POST /api/keys/:group rejects missing value", async () => {
+  const { app, db, tempDir } = await createTestApp();
 
   try {
     const res = await app.request("/api/keys/email", {
@@ -177,15 +206,82 @@ Deno.test("POST /api/keys/:name rejects missing value", async () => {
     const json = await res.json();
     expect(json.error).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-// DELETE /api/keys/:name tests
-Deno.test("DELETE /api/keys/:name removes all keys for name", async () => {
-  const { app, tempDir, service } = await createTestApp("email=key1\nemail=key2\nother=key3");
+// DELETE /api/keys/by-id/:id tests
+Deno.test("DELETE /api/keys/by-id/:id removes key by ID", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
+    await service.addKey("email", "key1");
+    await service.addKey("email", "key2");
+
+    const keys = await service.getKeys("email");
+    const key1Id = keys!.find((k) => k.value === "key1")!.id;
+
+    const res = await app.request(`/api/keys/by-id/${key1Id}`, {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+
+    // Verify only key1 was removed
+    expect(await service.hasKey("email", "key1")).toBe(false);
+    expect(await service.hasKey("email", "key2")).toBe(true);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("DELETE /api/keys/by-id/:id returns 400 for invalid ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/keys/by-id/notanumber", {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(400);
+
+    const json = await res.json();
+    expect(json.error).toContain("Invalid");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("DELETE /api/keys/by-id/:id returns 403 for env management key", async () => {
+  const { app, db, tempDir } = await createTestApp();
+
+  try {
+    // ID -1 is the synthetic ID for env-provided management key
+    const res = await app.request("/api/keys/by-id/-1", {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(403);
+
+    const json = await res.json();
+    expect(json.error).toContain("environment");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+// DELETE /api/keys/:group tests
+Deno.test("DELETE /api/keys/:group removes all keys for group", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
+
+  try {
+    await service.addKey("email", "key1");
+    await service.addKey("email", "key2");
+    await service.addKey("other", "key3");
+
     const res = await app.request("/api/keys/email", {
       method: "DELETE",
     });
@@ -200,73 +296,22 @@ Deno.test("DELETE /api/keys/:name removes all keys for name", async () => {
     expect(await service.hasKey("email", "key2")).toBe(false);
     expect(await service.hasKey("other", "key3")).toBe(true);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });
 
-Deno.test("DELETE /api/keys/:name returns 404 for non-existent name", async () => {
-  const { app, tempDir } = await createTestApp("email=key1");
+Deno.test("DELETE /api/keys/:group returns 404 for non-existent group", async () => {
+  const { app, service, db, tempDir } = await createTestApp();
 
   try {
+    await service.addKey("email", "key1");
+
     const res = await app.request("/api/keys/nonexistent", {
       method: "DELETE",
     });
 
     expect(res.status).toBe(404);
   } finally {
-    await cleanup(tempDir);
-  }
-});
-
-// DELETE /api/keys/:name/:keyValue tests
-Deno.test("DELETE /api/keys/:name/:keyValue removes specific key", async () => {
-  const { app, tempDir, service } = await createTestApp("email=key1\nemail=key2");
-
-  try {
-    const res = await app.request("/api/keys/email/key1", {
-      method: "DELETE",
-    });
-
-    expect(res.status).toBe(200);
-
-    const json = await res.json();
-    expect(json.success).toBe(true);
-
-    // Verify only key1 was removed
-    expect(await service.hasKey("email", "key1")).toBe(false);
-    expect(await service.hasKey("email", "key2")).toBe(true);
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DELETE /api/keys/:name/:keyValue returns 404 for non-existent key", async () => {
-  const { app, tempDir } = await createTestApp("email=key1");
-
-  try {
-    const res = await app.request("/api/keys/email/nonexistent", {
-      method: "DELETE",
-    });
-
-    expect(res.status).toBe(404);
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DELETE /api/keys/:name/:keyValue returns 403 for env management key", async () => {
-  const { app, tempDir } = await createTestApp("management=filekey");
-
-  try {
-    const res = await app.request("/api/keys/management/env-mgmt-key", {
-      method: "DELETE",
-    });
-
-    expect(res.status).toBe(403);
-
-    const json = await res.json();
-    expect(json.error).toContain("environment");
-  } finally {
-    await cleanup(tempDir);
+    await cleanup(db, tempDir);
   }
 });

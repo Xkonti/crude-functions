@@ -1,146 +1,92 @@
+import type { DatabaseService } from "../database/database_service.ts";
+
+/**
+ * Represents an API key with its metadata
+ */
 export interface ApiKey {
+  /** Unique identifier for the key (used for deletion) */
+  id: number;
+  /** The actual key value */
   value: string;
+  /** Optional description of the key's purpose */
   description?: string;
 }
 
-// Key names: lowercase a-z, 0-9, underscore, dash
-const KEY_NAME_REGEX = /^[a-z0-9_-]+$/;
+// Key groups: lowercase a-z, 0-9, underscore, dash
+const KEY_GROUP_REGEX = /^[a-z0-9_-]+$/;
 
 // Key values: a-z, A-Z, 0-9, underscore, dash
 const KEY_VALUE_REGEX = /^[a-zA-Z0-9_-]+$/;
 
-export function validateKeyName(name: string): boolean {
-  return KEY_NAME_REGEX.test(name);
+/**
+ * Validates that a key group name contains only allowed characters
+ */
+export function validateKeyGroup(group: string): boolean {
+  return KEY_GROUP_REGEX.test(group);
 }
 
+/**
+ * Validates that a key value contains only allowed characters
+ */
 export function validateKeyValue(value: string): boolean {
   return KEY_VALUE_REGEX.test(value);
 }
 
-export function serializeKeysFile(keys: Map<string, ApiKey[]>): string {
-  const lines: string[] = [];
-
-  // Sort names for consistent output
-  const sortedNames = [...keys.keys()].sort();
-
-  for (const name of sortedNames) {
-    const keyList = keys.get(name)!;
-    for (const key of keyList) {
-      if (key.description) {
-        lines.push(`${name}=${key.value} # ${key.description}`);
-      } else {
-        lines.push(`${name}=${key.value}`);
-      }
-    }
-  }
-
-  return lines.join("\n");
-}
-
-export function parseKeysFile(content: string): Map<string, ApiKey[]> {
-  const result = new Map<string, ApiKey[]>();
-
-  const lines = content.split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-
-    const equalsIndex = trimmed.indexOf("=");
-    if (equalsIndex === -1) continue;
-
-    const name = trimmed.slice(0, equalsIndex).trim().toLowerCase();
-    const rest = trimmed.slice(equalsIndex + 1);
-
-    // Parse value and optional description (separated by #)
-    const hashIndex = rest.indexOf("#");
-    let value: string;
-    let description: string | undefined;
-
-    if (hashIndex !== -1) {
-      value = rest.slice(0, hashIndex).trim();
-      description = rest.slice(hashIndex + 1).trim();
-    } else {
-      value = rest.trim();
-    }
-
-    if (!name || !value) continue;
-
-    const existing = result.get(name) || [];
-    // Deduplicate: only add if value doesn't already exist (first description wins)
-    if (!existing.some((k) => k.value === value)) {
-      existing.push({ value, description });
-    }
-    result.set(name, existing);
-  }
-
-  return result;
-}
-
 export interface ApiKeyServiceOptions {
-  configPath: string;
-  refreshInterval?: number;
+  /** Database service instance */
+  db: DatabaseService;
+  /** Management API key from environment variable (optional) */
   managementKeyFromEnv?: string;
 }
 
+/** Synthetic ID for environment-provided management key */
+const ENV_KEY_ID = -1;
+
+/**
+ * Service for managing API keys stored in SQLite database.
+ * No caching - always reads from database for simplicity and consistency.
+ */
 export class ApiKeyService {
-  private readonly configPath: string;
+  private readonly db: DatabaseService;
   private readonly managementKeyFromEnv?: string;
-  private cache: Map<string, ApiKey[]> = new Map();
-  private initialized = false;
 
   constructor(options: ApiKeyServiceOptions) {
-    this.configPath = options.configPath;
+    this.db = options.db;
     this.managementKeyFromEnv = options.managementKeyFromEnv;
   }
 
-  private async ensureFileExists(): Promise<void> {
-    try {
-      await Deno.stat(this.configPath);
-    } catch (error) {
-      if (error instanceof Deno.errors.NotFound) {
-        await Deno.writeTextFile(this.configPath, "");
-      } else {
-        throw error;
-      }
-    }
-  }
-
-  private async load(): Promise<void> {
-    await this.ensureFileExists();
-    const content = await Deno.readTextFile(this.configPath);
-    this.cache = parseKeysFile(content);
-    this.initialized = true;
-  }
-
-  private async save(): Promise<void> {
-    // Only save file-based keys (exclude env management key)
-    const fileKeys = new Map<string, ApiKey[]>();
-    for (const [name, keys] of this.cache) {
-      if (name === "management" && this.managementKeyFromEnv) {
-        // Filter out env key
-        const filtered = keys.filter((k) => k.value !== this.managementKeyFromEnv);
-        if (filtered.length > 0) {
-          fileKeys.set(name, filtered);
-        }
-      } else {
-        fileKeys.set(name, keys);
-      }
-    }
-    const content = serializeKeysFile(fileKeys);
-    await Deno.writeTextFile(this.configPath, content);
-  }
-
+  /**
+   * Get all API keys grouped by their group name.
+   * Includes environment-provided management key if configured.
+   */
   async getAll(): Promise<Map<string, ApiKey[]>> {
-    if (!this.initialized) {
-      await this.load();
+    const rows = await this.db.queryAll<{
+      id: number;
+      key_group: string;
+      value: string;
+      description: string | null;
+    }>("SELECT id, key_group, value, description FROM api_keys ORDER BY key_group, value");
+
+    const result = new Map<string, ApiKey[]>();
+    for (const row of rows) {
+      const existing = result.get(row.key_group) || [];
+      existing.push({
+        id: row.id,
+        value: row.value,
+        description: row.description ?? undefined,
+      });
+      result.set(row.key_group, existing);
     }
 
     // Merge env management key if present
-    const result = new Map(this.cache);
     if (this.managementKeyFromEnv) {
       const mgmtKeys = result.get("management") || [];
       if (!mgmtKeys.some((k) => k.value === this.managementKeyFromEnv)) {
-        mgmtKeys.push({ value: this.managementKeyFromEnv, description: "from environment" });
+        mgmtKeys.push({
+          id: ENV_KEY_ID,
+          value: this.managementKeyFromEnv,
+          description: "from environment",
+        });
         result.set("management", mgmtKeys);
       }
     }
@@ -148,65 +94,130 @@ export class ApiKeyService {
     return result;
   }
 
-  async getKeys(name: string): Promise<ApiKey[] | null> {
-    const all = await this.getAll();
-    return all.get(name.toLowerCase()) || null;
-  }
+  /**
+   * Get all API keys for a specific group.
+   * @param group - The group name (will be normalized to lowercase)
+   * @returns Array of keys or null if group doesn't exist
+   */
+  async getKeys(group: string): Promise<ApiKey[] | null> {
+    const normalizedGroup = group.toLowerCase();
+    const rows = await this.db.queryAll<{
+      id: number;
+      value: string;
+      description: string | null;
+    }>("SELECT id, value, description FROM api_keys WHERE key_group = ?", [
+      normalizedGroup,
+    ]);
 
-  async hasKey(name: string, keyValue: string): Promise<boolean> {
-    const keys = await this.getKeys(name);
-    if (!keys) return false;
-    return keys.some((k) => k.value === keyValue);
-  }
+    const keys: ApiKey[] = rows.map((r) => ({
+      id: r.id,
+      value: r.value,
+      description: r.description ?? undefined,
+    }));
 
-  async addKey(name: string, value: string, description?: string): Promise<void> {
-    if (!this.initialized) {
-      await this.load();
+    // Add env key for management group
+    if (normalizedGroup === "management" && this.managementKeyFromEnv) {
+      if (!keys.some((k) => k.value === this.managementKeyFromEnv)) {
+        keys.push({
+          id: ENV_KEY_ID,
+          value: this.managementKeyFromEnv,
+          description: "from environment",
+        });
+      }
     }
 
-    const normalizedName = name.toLowerCase();
-    const existing = this.cache.get(normalizedName) || [];
-
-    // Don't add duplicate
-    if (existing.some((k) => k.value === value)) {
-      return;
-    }
-
-    existing.push({ value, description });
-    this.cache.set(normalizedName, existing);
-    await this.save();
+    return keys.length > 0 ? keys : null;
   }
 
-  async removeKey(name: string, keyValue: string): Promise<void> {
+  /**
+   * Check if a specific key value exists in a group.
+   * @param group - The group name (will be normalized to lowercase)
+   * @param keyValue - The key value to check
+   */
+  async hasKey(group: string, keyValue: string): Promise<boolean> {
+    const normalizedGroup = group.toLowerCase();
+
+    // Check env key first
+    if (
+      normalizedGroup === "management" &&
+      keyValue === this.managementKeyFromEnv
+    ) {
+      return true;
+    }
+
+    const row = await this.db.queryOne(
+      "SELECT 1 FROM api_keys WHERE key_group = ? AND value = ?",
+      [normalizedGroup, keyValue]
+    );
+    return row !== null;
+  }
+
+  /**
+   * Add a new API key to a group.
+   * Silently ignores if the exact (group, value) pair already exists.
+   * @param group - The group name (will be normalized to lowercase)
+   * @param value - The key value
+   * @param description - Optional description
+   */
+  async addKey(
+    group: string,
+    value: string,
+    description?: string
+  ): Promise<void> {
+    const normalizedGroup = group.toLowerCase();
+    // Use INSERT OR IGNORE to handle duplicate (group, value) silently
+    await this.db.execute(
+      "INSERT OR IGNORE INTO api_keys (key_group, value, description) VALUES (?, ?, ?)",
+      [normalizedGroup, value, description ?? null]
+    );
+  }
+
+  /**
+   * Remove a specific key by group and value.
+   * @param group - The group name (will be normalized to lowercase)
+   * @param keyValue - The key value to remove
+   * @throws Error if attempting to remove environment-provided management key
+   */
+  async removeKey(group: string, keyValue: string): Promise<void> {
+    const normalizedGroup = group.toLowerCase();
+
     // Cannot remove env management key
-    if (name.toLowerCase() === "management" && keyValue === this.managementKeyFromEnv) {
+    if (
+      normalizedGroup === "management" &&
+      keyValue === this.managementKeyFromEnv
+    ) {
       throw new Error("Cannot remove environment-provided management key");
     }
 
-    if (!this.initialized) {
-      await this.load();
-    }
-
-    const normalizedName = name.toLowerCase();
-    const existing = this.cache.get(normalizedName);
-    if (!existing) return;
-
-    const filtered = existing.filter((k) => k.value !== keyValue);
-    if (filtered.length === 0) {
-      this.cache.delete(normalizedName);
-    } else {
-      this.cache.set(normalizedName, filtered);
-    }
-    await this.save();
+    await this.db.execute(
+      "DELETE FROM api_keys WHERE key_group = ? AND value = ?",
+      [normalizedGroup, keyValue]
+    );
   }
 
-  async removeName(name: string): Promise<void> {
-    if (!this.initialized) {
-      await this.load();
+  /**
+   * Remove a key by its unique ID.
+   * Useful for web UI where passing the key value over the wire is undesirable.
+   * @param id - The unique key ID
+   * @throws Error if attempting to remove environment-provided management key (id = -1)
+   */
+  async removeKeyById(id: number): Promise<void> {
+    // Cannot remove env management key
+    if (id === ENV_KEY_ID) {
+      throw new Error("Cannot remove environment-provided management key");
     }
 
-    const normalizedName = name.toLowerCase();
-    this.cache.delete(normalizedName);
-    await this.save();
+    await this.db.execute("DELETE FROM api_keys WHERE id = ?", [id]);
+  }
+
+  /**
+   * Remove all keys in a group.
+   * @param group - The group name (will be normalized to lowercase)
+   */
+  async removeGroup(group: string): Promise<void> {
+    const normalizedGroup = group.toLowerCase();
+    await this.db.execute("DELETE FROM api_keys WHERE key_group = ?", [
+      normalizedGroup,
+    ]);
   }
 }

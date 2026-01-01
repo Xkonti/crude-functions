@@ -13,17 +13,18 @@ export default async function (c, ctx) {
 }
 ```
 
-Register it in `config/routes.json`:
+Register it via the API or Web UI:
 
-```json
-[
-  {
+```bash
+curl -X POST http://localhost:8000/api/routes \
+  -H "X-API-Key: your-management-key" \
+  -H "Content-Type: application/json" \
+  -d '{
     "name": "hello",
     "handler": "hello.ts",
     "route": "/hello",
     "methods": ["GET"]
-  }
-]
+  }'
 ```
 
 Call it at `http://localhost:8000/run/hello`.
@@ -186,7 +187,7 @@ The `ctx` object provides metadata about the current request:
 | `ctx.query` | `Record<string, string>` | Query parameters |
 | `ctx.requestId` | `string` | Unique ID for this request (for logging/tracing) |
 | `ctx.requestedAt` | `Date` | Timestamp when request was received |
-| `ctx.authenticatedKeyName` | `string?` | API key name used (if route requires auth) |
+| `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
 | `ctx.route` | `object` | Route configuration (name, methods, etc.) |
 
 ## Examples
@@ -306,15 +307,18 @@ code/
     validation.ts       # Shared validation helpers
 ```
 
-Reference nested handlers in routes:
+Reference nested handlers when creating routes via the API:
 
-```json
-{
-  "name": "create-user",
-  "handler": "users/create.ts",
-  "route": "/users",
-  "methods": ["POST"]
-}
+```bash
+curl -X POST http://localhost:8000/api/routes \
+  -H "X-API-Key: your-management-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "create-user",
+    "handler": "users/create.ts",
+    "route": "/users",
+    "methods": ["POST"]
+  }'
 ```
 
 ## Hot Reloading

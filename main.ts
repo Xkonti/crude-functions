@@ -1,5 +1,7 @@
 import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
+import { DatabaseService } from "./src/database/database_service.ts";
+import { MigrationService } from "./src/database/migration_service.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
 import { createManagementAuthMiddleware } from "./src/middleware/management_auth.ts";
@@ -12,15 +14,36 @@ import { createWebRoutes } from "./src/web/web_routes.ts";
 
 const app = new Hono();
 
+// Initialize database
+// The database connection remains open for the application's lifetime and is
+// only closed during graceful shutdown (SIGTERM/SIGINT signals).
+// Services assume the database is always open after this initialization.
+const db = new DatabaseService({
+  databasePath: "./data/database.db",
+});
+await db.open();
+
+// Run migrations
+const migrationService = new MigrationService({
+  db,
+  migrationsDir: "./migrations",
+});
+const migrationResult = await migrationService.migrate();
+if (migrationResult.appliedCount > 0) {
+  console.log(
+    `Applied ${migrationResult.appliedCount} migration(s): version ${migrationResult.fromVersion ?? "none"} → ${migrationResult.toVersion}`
+  );
+}
+
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
-  configPath: "./config/keys.config",
+  db,
   managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
 });
 
 // Initialize routes service
 const routesService = new RoutesService({
-  configPath: "./config/routes.json",
+  db,
 });
 
 // Initialize function router
@@ -66,8 +89,36 @@ app.all("/run", (c) => functionRouter.handle(c));
 // Export app and services for testing
 export { app, apiKeyService, routesService, functionRouter, fileService };
 
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string) {
+  console.log(`\nReceived ${signal}, shutting down gracefully...`);
+  try {
+    await db.close();
+    console.log("Database connection closed successfully");
+  } catch (error) {
+    console.error("Error during shutdown:", error);
+    Deno.exit(1);
+  }
+  Deno.exit(0);
+}
+
 // Start server only when run directly
 if (import.meta.main) {
   const port = parseInt(Deno.env.get("PORT") || "8000");
-  Deno.serve({ port }, app.fetch);
+
+  // Setup graceful shutdown
+  const abortController = new AbortController();
+
+  Deno.addSignalListener("SIGTERM", () => {
+    gracefulShutdown("SIGTERM");
+  });
+
+  Deno.addSignalListener("SIGINT", () => {
+    gracefulShutdown("SIGINT");
+  });
+
+  Deno.serve({
+    port,
+    signal: abortController.signal,
+  }, app.fetch);
 }

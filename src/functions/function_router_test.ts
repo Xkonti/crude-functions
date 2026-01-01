@@ -1,29 +1,79 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
+import { DatabaseService } from "../database/database_service.ts";
 import { RoutesService } from "../routes/routes_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { FunctionRouter } from "./function_router.ts";
 
+const API_KEYS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key_group TEXT NOT NULL,
+  value TEXT NOT NULL,
+  description TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value ON api_keys(key_group, value);
+CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(key_group);
+`;
+
+const ROUTES_SCHEMA = `
+CREATE TABLE IF NOT EXISTS routes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  handler TEXT NOT NULL,
+  route TEXT NOT NULL,
+  methods TEXT NOT NULL,
+  keys TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
+`;
+
+interface TestRoute {
+  name: string;
+  handler: string;
+  route: string;
+  methods: string[];
+  description?: string;
+  keys?: string[];
+}
+
+interface TestKey {
+  group: string;
+  value: string;
+  description?: string;
+}
+
 async function createTestSetup(
-  initialRoutes: object[] = [],
-  initialKeys: string = ""
+  initialRoutes: TestRoute[] = [],
+  initialKeys: TestKey[] = []
 ) {
   const tempDir = await Deno.makeTempDir();
-  const routesConfigPath = `${tempDir}/routes.json`;
-  const keysConfigPath = `${tempDir}/keys.config`;
   const codeDir = `${tempDir}/code`;
 
   await Deno.mkdir(codeDir);
-  await Deno.writeTextFile(routesConfigPath, JSON.stringify(initialRoutes));
-  await Deno.writeTextFile(keysConfigPath, initialKeys);
 
-  const routesService = new RoutesService({
-    configPath: routesConfigPath,
-    refreshInterval: 50,
-  });
-  const apiKeyService = new ApiKeyService({
-    configPath: keysConfigPath,
-  });
+  // Create in-memory database for testing
+  const db = new DatabaseService({ databasePath: ":memory:" });
+  await db.open();
+  await db.exec(API_KEYS_SCHEMA);
+  await db.exec(ROUTES_SCHEMA);
+
+  const routesService = new RoutesService({ db });
+  const apiKeyService = new ApiKeyService({ db });
+
+  // Add initial routes
+  for (const route of initialRoutes) {
+    await routesService.addRoute(route);
+  }
+
+  // Add initial keys
+  for (const key of initialKeys) {
+    await apiKeyService.addKey(key.group, key.value, key.description);
+  }
+
   const functionRouter = new FunctionRouter({
     routesService,
     apiKeyService,
@@ -39,15 +89,15 @@ async function createTestSetup(
     app,
     tempDir,
     codeDir,
+    db,
     routesService,
     apiKeyService,
     functionRouter,
-    routesConfigPath,
-    keysConfigPath,
   };
 }
 
-async function cleanup(tempDir: string) {
+async function cleanup(tempDir: string, db: DatabaseService) {
+  await db.close();
   await Deno.remove(tempDir, { recursive: true });
 }
 
@@ -101,7 +151,7 @@ export default "not a function";
 // =====================
 
 Deno.test("FunctionRouter returns 404 for empty routes", async () => {
-  const { app, tempDir } = await createTestSetup([]);
+  const { app, tempDir, db } = await createTestSetup([]);
 
   try {
     const res = await app.request("/run/anything");
@@ -110,7 +160,7 @@ Deno.test("FunctionRouter returns 404 for empty routes", async () => {
     const json = await res.json();
     expect(json.error).toBe("Function not found");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -118,7 +168,7 @@ Deno.test("FunctionRouter executes handler for matching route", async () => {
   const routes = [
     { name: "hello", handler: "code/hello.ts", route: "/hello", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "hello.ts", simpleHandler);
@@ -130,7 +180,7 @@ Deno.test("FunctionRouter executes handler for matching route", async () => {
     expect(json.route).toBe("hello");
     expect(json.requestId).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -138,7 +188,7 @@ Deno.test("FunctionRouter handles POST request with body", async () => {
   const routes = [
     { name: "echo", handler: "code/echo.ts", route: "/echo", methods: ["POST"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "echo.ts", echoHandler);
@@ -154,7 +204,7 @@ Deno.test("FunctionRouter handles POST request with body", async () => {
     expect(json.received).toEqual({ message: "hello" });
     expect(json.route).toBe("echo");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -162,7 +212,7 @@ Deno.test("FunctionRouter handles multiple methods per route", async () => {
   const routes = [
     { name: "multi", handler: "code/multi.ts", route: "/multi", methods: ["GET", "POST", "PUT"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "multi.ts", simpleHandler);
@@ -183,7 +233,7 @@ Deno.test("FunctionRouter handles multiple methods per route", async () => {
     const deleteRes = await app.request("/run/multi", { method: "DELETE" });
     expect(deleteRes.status).toBe(404);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -191,7 +241,7 @@ Deno.test("FunctionRouter returns 404 for wrong method", async () => {
   const routes = [
     { name: "hello", handler: "code/hello.ts", route: "/hello", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "hello.ts", simpleHandler);
@@ -199,7 +249,7 @@ Deno.test("FunctionRouter returns 404 for wrong method", async () => {
     const res = await app.request("/run/hello", { method: "POST" });
     expect(res.status).toBe(404);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -211,7 +261,7 @@ Deno.test("FunctionRouter handles path parameters", async () => {
   const routes = [
     { name: "get-user", handler: "code/user.ts", route: "/users/:id", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "user.ts", simpleHandler);
@@ -223,7 +273,7 @@ Deno.test("FunctionRouter handles path parameters", async () => {
     expect(json.route).toBe("get-user");
     expect(json.params.id).toBe("123");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -236,7 +286,7 @@ Deno.test("FunctionRouter handles nested path parameters", async () => {
       methods: ["GET"],
     },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "post.ts", simpleHandler);
@@ -248,7 +298,7 @@ Deno.test("FunctionRouter handles nested path parameters", async () => {
     expect(json.params.userId).toBe("42");
     expect(json.params.postId).toBe("99");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -256,7 +306,7 @@ Deno.test("FunctionRouter handles query parameters", async () => {
   const routes = [
     { name: "search", handler: "code/search.ts", route: "/search", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "search.ts", simpleHandler);
@@ -268,7 +318,7 @@ Deno.test("FunctionRouter handles query parameters", async () => {
     expect(json.query.q).toBe("test");
     expect(json.query.page).toBe("2");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -276,7 +326,7 @@ Deno.test("FunctionRouter handles root route", async () => {
   const routes = [
     { name: "root", handler: "code/root.ts", route: "/", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "root.ts", simpleHandler);
@@ -287,7 +337,7 @@ Deno.test("FunctionRouter handles root route", async () => {
     const json = await res.json();
     expect(json.route).toBe("root");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -299,7 +349,7 @@ Deno.test("FunctionRouter allows request without key when route has no keys", as
   const routes = [
     { name: "public", handler: "code/public.ts", route: "/public", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "public.ts", simpleHandler);
@@ -307,7 +357,7 @@ Deno.test("FunctionRouter allows request without key when route has no keys", as
     const res = await app.request("/run/public");
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -321,8 +371,8 @@ Deno.test("FunctionRouter returns 401 when key is required but missing", async (
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -334,7 +384,7 @@ Deno.test("FunctionRouter returns 401 when key is required but missing", async (
     expect(json.error).toBe("Unauthorized");
     expect(json.message).toBe("Missing API key");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -348,8 +398,8 @@ Deno.test("FunctionRouter returns 401 when key is invalid", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -363,7 +413,7 @@ Deno.test("FunctionRouter returns 401 when key is invalid", async () => {
     expect(json.error).toBe("Unauthorized");
     expect(json.message).toBe("Invalid API key");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -377,8 +427,8 @@ Deno.test("FunctionRouter allows request with valid key", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -391,7 +441,7 @@ Deno.test("FunctionRouter allows request with valid key", async () => {
     const json = await res.json();
     expect(json.route).toBe("protected");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -405,8 +455,11 @@ Deno.test("FunctionRouter accepts key from any allowed key name", async () => {
       keys: ["admin", "user"],
     },
   ];
-  const keys = "admin=admin123\nuser=user456";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [
+    { group: "admin", value: "admin123" },
+    { group: "user", value: "user456" },
+  ];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "multi.ts", simpleHandler);
@@ -423,7 +476,7 @@ Deno.test("FunctionRouter accepts key from any allowed key name", async () => {
     });
     expect(res2.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -437,8 +490,8 @@ Deno.test("FunctionRouter accepts Authorization Bearer token", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -448,7 +501,7 @@ Deno.test("FunctionRouter accepts Authorization Bearer token", async () => {
     });
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -462,8 +515,8 @@ Deno.test("FunctionRouter accepts Authorization plain value", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -473,7 +526,7 @@ Deno.test("FunctionRouter accepts Authorization plain value", async () => {
     });
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -487,8 +540,8 @@ Deno.test("FunctionRouter accepts Authorization Basic (key as password)", async 
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -500,7 +553,7 @@ Deno.test("FunctionRouter accepts Authorization Basic (key as password)", async 
     });
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -514,8 +567,8 @@ Deno.test("FunctionRouter accepts X-Auth-Token header", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -525,7 +578,7 @@ Deno.test("FunctionRouter accepts X-Auth-Token header", async () => {
     });
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -539,8 +592,8 @@ Deno.test("FunctionRouter accepts api_key query parameter", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -548,7 +601,7 @@ Deno.test("FunctionRouter accepts api_key query parameter", async () => {
     const res = await app.request("/run/protected?api_key=secret123");
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -562,8 +615,8 @@ Deno.test("FunctionRouter accepts apiKey query parameter", async () => {
       keys: ["api"],
     },
   ];
-  const keys = "api=secret123";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [{ group: "api", value: "secret123" }];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -571,7 +624,7 @@ Deno.test("FunctionRouter accepts apiKey query parameter", async () => {
     const res = await app.request("/run/protected?apiKey=secret123");
     expect(res.status).toBe(200);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -585,8 +638,11 @@ Deno.test("FunctionRouter prioritizes Authorization over X-API-Key", async () =>
       keys: ["api"],
     },
   ];
-  const keys = "api=bearer-key\napi=header-key";
-  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+  const keys = [
+    { group: "api", value: "bearer-key" },
+    { group: "api", value: "header-key" },
+  ];
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes, keys);
 
   try {
     await writeHandler(codeDir, "protected.ts", simpleHandler);
@@ -610,7 +666,7 @@ Deno.test("FunctionRouter prioritizes Authorization over X-API-Key", async () =>
     });
     expect(res2.status).toBe(401);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -622,7 +678,7 @@ Deno.test("FunctionRouter returns 404 when handler file not found", async () => 
   const routes = [
     { name: "missing", handler: "code/nonexistent.ts", route: "/missing", methods: ["GET"] },
   ];
-  const { app, tempDir } = await createTestSetup(routes);
+  const { app, tempDir, db } = await createTestSetup(routes);
 
   try {
     const res = await app.request("/run/missing");
@@ -632,7 +688,7 @@ Deno.test("FunctionRouter returns 404 when handler file not found", async () => 
     expect(json.error).toBe("Handler not found");
     expect(json.requestId).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -640,7 +696,7 @@ Deno.test("FunctionRouter returns 500 when handler has no default export", async
   const routes = [
     { name: "no-export", handler: "code/noexport.ts", route: "/noexport", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "noexport.ts", noExportHandler);
@@ -652,7 +708,7 @@ Deno.test("FunctionRouter returns 500 when handler has no default export", async
     expect(json.error).toBe("Invalid handler");
     expect(json.requestId).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -660,7 +716,7 @@ Deno.test("FunctionRouter returns 500 when default export is not a function", as
   const routes = [
     { name: "not-func", handler: "code/notfunc.ts", route: "/notfunc", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "notfunc.ts", notFunctionHandler);
@@ -672,7 +728,7 @@ Deno.test("FunctionRouter returns 500 when default export is not a function", as
     expect(json.error).toBe("Invalid handler");
     expect(json.requestId).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -680,7 +736,7 @@ Deno.test("FunctionRouter returns 500 when handler throws error", async () => {
   const routes = [
     { name: "error", handler: "code/error.ts", route: "/error", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "error.ts", errorHandler);
@@ -692,7 +748,7 @@ Deno.test("FunctionRouter returns 500 when handler throws error", async () => {
     expect(json.error).toBe("Handler execution failed");
     expect(json.requestId).toBeDefined();
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -700,11 +756,11 @@ Deno.test("FunctionRouter returns 500 when handler throws error", async () => {
 // Route hot-reload tests
 // ========================
 
-Deno.test("FunctionRouter rebuilds router when routes change", async () => {
+Deno.test("FunctionRouter rebuilds router when routes are added", async () => {
   const routes = [
     { name: "hello", handler: "code/hello.ts", route: "/hello", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir, routesConfigPath } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db, routesService } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "hello.ts", simpleHandler);
@@ -718,24 +774,22 @@ Deno.test("FunctionRouter rebuilds router when routes change", async () => {
     const res2 = await app.request("/run/goodbye");
     expect(res2.status).toBe(404);
 
-    // Wait for refresh interval
-    await new Promise((resolve) => setTimeout(resolve, 60));
+    // Add new route via service
+    await routesService.addRoute({
+      name: "goodbye",
+      handler: "code/goodbye.ts",
+      route: "/goodbye",
+      methods: ["GET"],
+    });
 
-    // Add new route to file
-    const newRoutes = [
-      { name: "hello", handler: "code/hello.ts", route: "/hello", methods: ["GET"] },
-      { name: "goodbye", handler: "code/goodbye.ts", route: "/goodbye", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(routesConfigPath, JSON.stringify(newRoutes));
-
-    // New route should now work (router rebuilt)
+    // New route should now work (router rebuilt due to dirty flag)
     const res3 = await app.request("/run/goodbye");
     expect(res3.status).toBe(200);
 
     const json = await res3.json();
     expect(json.route).toBe("goodbye");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -744,7 +798,7 @@ Deno.test("FunctionRouter handles route removal", async () => {
     { name: "hello", handler: "code/hello.ts", route: "/hello", methods: ["GET"] },
     { name: "goodbye", handler: "code/goodbye.ts", route: "/goodbye", methods: ["GET"] },
   ];
-  const { app, tempDir, codeDir, routesConfigPath } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db, routesService } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "hello.ts", simpleHandler);
@@ -754,14 +808,8 @@ Deno.test("FunctionRouter handles route removal", async () => {
     expect((await app.request("/run/hello")).status).toBe(200);
     expect((await app.request("/run/goodbye")).status).toBe(200);
 
-    // Wait for refresh interval
-    await new Promise((resolve) => setTimeout(resolve, 60));
-
-    // Remove goodbye route
-    const newRoutes = [
-      { name: "hello", handler: "code/hello.ts", route: "/hello", methods: ["GET"] },
-    ];
-    await Deno.writeTextFile(routesConfigPath, JSON.stringify(newRoutes));
+    // Remove goodbye route via service
+    await routesService.removeRoute("goodbye");
 
     // Hello still works
     expect((await app.request("/run/hello")).status).toBe(200);
@@ -769,7 +817,7 @@ Deno.test("FunctionRouter handles route removal", async () => {
     // Goodbye now returns 404
     expect((await app.request("/run/goodbye")).status).toBe(404);
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
 
@@ -784,7 +832,7 @@ Deno.test("FunctionRouter handles multiple routes", async () => {
     { name: "users-create", handler: "code/users.ts", route: "/users", methods: ["POST"] },
     { name: "user-detail", handler: "code/user.ts", route: "/users/:id", methods: ["GET", "PUT", "DELETE"] },
   ];
-  const { app, tempDir, codeDir } = await createTestSetup(routes);
+  const { app, tempDir, codeDir, db } = await createTestSetup(routes);
 
   try {
     await writeHandler(codeDir, "hello.ts", simpleHandler);
@@ -812,6 +860,6 @@ Deno.test("FunctionRouter handles multiple routes", async () => {
     expect(userUpdateRes.status).toBe(200);
     expect((await userUpdateRes.json()).route).toBe("user-detail");
   } finally {
-    await cleanup(tempDir);
+    await cleanup(tempDir, db);
   }
 });
