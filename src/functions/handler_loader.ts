@@ -6,6 +6,7 @@ import {
   HandlerSyntaxError,
   HandlerLoadError,
 } from "./errors.ts";
+import { logger } from "../utils/logger.ts";
 
 export interface HandlerLoaderOptions {
   /** Base directory for resolving relative paths (e.g., "./" or project root) */
@@ -28,7 +29,15 @@ export class HandlerLoader {
   private readonly cache = new Map<string, LoadedHandler>();
 
   constructor(options: HandlerLoaderOptions = {}) {
-    this.baseDirectory = options.baseDirectory ?? Deno.cwd();
+    // Convert relative base directory to absolute path
+    const base = options.baseDirectory ?? Deno.cwd();
+    if (base.startsWith("/")) {
+      this.baseDirectory = base;
+    } else {
+      // Normalize: remove ./ prefix, join with cwd, collapse multiple slashes
+      const normalized = base.replace(/^\.\//, "");
+      this.baseDirectory = `${Deno.cwd()}/${normalized}`.replace(/\/+/g, "/");
+    }
   }
 
   /**
@@ -37,13 +46,17 @@ export class HandlerLoader {
    * @param forceReload - Force reload even if cached
    */
   async load(handlerPath: string, forceReload = false): Promise<FunctionHandler> {
+    logger.debug(`Loading handler: ${handlerPath}`);
     const absolutePath = this.resolveAbsolutePath(handlerPath);
+    logger.debug(`Resolved absolute path: ${absolutePath}`);
 
     // Check if file exists and get its modification time
     const stat = await this.getFileStat(absolutePath);
     if (!stat) {
+      logger.debug(`Handler file not found: ${absolutePath}`);
       throw new HandlerNotFoundError(handlerPath);
     }
+    logger.debug(`Handler file exists, mtime: ${stat.mtime}`);
 
     const cached = this.cache.get(handlerPath);
     const fileModTime = stat.mtime?.getTime() ?? 0;
@@ -83,10 +96,20 @@ export class HandlerLoader {
     // Use timestamp to bust Deno's module cache
     const cacheBuster = Date.now();
     const importUrl = `file://${absolutePath}?v=${cacheBuster}`;
+    logger.debug(`Importing module from: ${importUrl}`);
 
     try {
-      return await import(importUrl);
+      const module = await import(importUrl);
+      logger.debug(`Module imported successfully, exports: ${Object.keys(module).join(", ")}`);
+      return module;
     } catch (error) {
+      logger.debug(`Module import failed: ${error}`);
+      if (error instanceof Error) {
+        logger.debug(`Error name: ${error.name}, message: ${error.message}`);
+        if (error.stack) {
+          logger.debug(`Stack trace: ${error.stack}`);
+        }
+      }
       if (error instanceof SyntaxError) {
         throw new HandlerSyntaxError(handlerPath, error);
       }

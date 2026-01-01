@@ -6,7 +6,8 @@
     "jsr:@std/dotenv@*": "0.225.6",
     "jsr:@std/expect@*": "1.0.17",
     "jsr:@std/internal@^1.0.10": "1.0.12",
-    "jsr:@std/internal@^1.0.12": "1.0.12"
+    "jsr:@std/internal@^1.0.12": "1.0.12",
+    "npm:lodash-es@*": "4.17.22"
   },
   "jsr": {
     "@hono/hono@4.11.3": {
@@ -30,6 +31,11 @@
     },
     "@std/internal@1.0.12": {
       "integrity": "972a634fd5bc34b242024402972cd5143eac68d8dffaca5eaa4dba30ce17b027"
+    }
+  },
+  "npm": {
+    "lodash-es@4.17.22": {
+      "integrity": "sha512-XEawp1t0gxSi9x01glktRZ5HDy0HXqrM0x5pXQM98EaI0NxO6jVM7omDOxsuEo5UIASAnm2bRp1Jt/e0a2XU8Q=="
     }
   },
   "workspace": {

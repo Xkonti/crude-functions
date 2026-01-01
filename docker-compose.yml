@@ -6,6 +6,8 @@ services:
       - 8000:8000
     environment:
       - MANAGEMENT_API_KEY=examplekey
+      # Log level: debug, info, warn, error, none (default: info)
+      - LOG_LEVEL=info
     volumes:
       # Mount the config directory for keys.config and routes.json
       - ./config:/app/config

@@ -1,318 +1,350 @@
-# Function Handler Design
+# Writing Function Handlers
 
-This document describes how to write function handlers for the Deno Functions Router.
+This guide explains how to write function handlers for crude-functions.
 
-## Handler Signature
+## Quick Start
 
-Handlers are TypeScript files that export a default async function. The function receives two arguments:
-
-1. **`c`** - Hono Context for full request/response control
-2. **`ctx`** - FunctionContext with route metadata and convenience data
-
-```typescript
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  return c.json({ message: "Hello!" });
-}
-```
-
-## FunctionContext Interface
-
-The `FunctionContext` provides metadata about the request and matched route:
-
-```typescript
-interface FunctionContext {
-  // Route configuration that matched this request
-  route: {
-    name: string;           // Function name from config
-    description?: string;   // Optional description
-    handler: string;        // Path to this handler file
-    route: string;          // Route pattern (e.g., "/users/:id")
-    methods: string[];      // Allowed HTTP methods
-    keys?: string[];        // Required API key names
-  };
-
-  // Extracted path parameters (e.g., { id: "123" })
-  params: Record<string, string>;
-
-  // Query parameters as key-value pairs
-  query: Record<string, string>;
-
-  // Which API key name matched (if auth required)
-  authenticatedKeyName?: string;
-
-  // Request timestamp
-  requestedAt: Date;
-
-  // Unique request ID for tracing
-  requestId: string;
-}
-```
-
-## Hono Context Capabilities
-
-The Hono Context (`c`) provides rich request/response handling:
-
-### Reading Request Data
-
-```typescript
-// Get JSON body
-const body = await c.req.json();
-
-// Get form data
-const formData = await c.req.formData();
-
-// Get raw text
-const text = await c.req.text();
-
-// Get headers
-const contentType = c.req.header("Content-Type");
-
-// Get specific path parameter
-const id = c.req.param("id");
-
-// Get query parameter
-const page = c.req.query("page");
-```
-
-### Returning Responses
-
-```typescript
-// JSON response
-return c.json({ success: true });
-
-// JSON with status code
-return c.json({ error: "Not found" }, 404);
-
-// Plain text
-return c.text("Hello, World!");
-
-// HTML
-return c.html("<h1>Hello</h1>");
-
-// Redirect
-return c.redirect("/other-path");
-
-// Custom response
-return new Response("Custom", {
-  status: 201,
-  headers: { "X-Custom": "value" },
-});
-```
-
-## Example Handlers
-
-### Simple Hello World
+A handler is a TypeScript file that exports a default function. Place it in the `code/` directory:
 
 ```typescript
 // code/hello.ts
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  return c.json({
-    message: "Hello, World!",
-    requestId: ctx.requestId,
-  });
+export default async function (c, ctx) {
+  return c.json({ message: "Hello, World!" });
 }
 ```
 
-### Using Path Parameters
-
-```typescript
-// code/users.ts
-// Route: /users/:id
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  const userId = ctx.params.id;
-
-  // Fetch user from database...
-  const user = { id: userId, name: "John" };
-
-  return c.json(user);
-}
-```
-
-### Handling POST with JSON Body
-
-```typescript
-// code/create-item.ts
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-
-interface CreateItemRequest {
-  name: string;
-  description?: string;
-}
-
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  const body = await c.req.json<CreateItemRequest>();
-
-  if (!body.name) {
-    return c.json({ error: "Name is required" }, 400);
-  }
-
-  // Create item in database...
-  const item = {
-    id: crypto.randomUUID(),
-    name: body.name,
-    description: body.description,
-    createdAt: ctx.requestedAt.toISOString(),
-  };
-
-  return c.json(item, 201);
-}
-```
-
-### Using Query Parameters
-
-```typescript
-// code/search.ts
-// Route: /search?q=term&page=1
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  const query = ctx.query.q || "";
-  const page = parseInt(ctx.query.page || "1", 10);
-
-  // Search logic...
-  const results = {
-    query,
-    page,
-    results: [],
-  };
-
-  return c.json(results);
-}
-```
-
-### Protected Route with API Key
-
-```typescript
-// code/admin-action.ts
-// Route config includes: "keys": ["admin"]
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  // ctx.authenticatedKeyName will be "admin" if we got here
-  console.log(`Authenticated with key: ${ctx.authenticatedKeyName}`);
-
-  // Perform admin action...
-
-  return c.json({ success: true });
-}
-```
-
-## Error Handling
-
-Handlers should catch their own errors and return appropriate responses:
-
-```typescript
-export default async function (
-  c: Context,
-  ctx: FunctionContext
-): Promise<Response> {
-  try {
-    const result = await riskyOperation();
-    return c.json(result);
-  } catch (error) {
-    console.error(`Error in ${ctx.route.name}:`, error);
-
-    return c.json(
-      {
-        error: "Operation failed",
-        requestId: ctx.requestId,
-      },
-      500
-    );
-  }
-}
-```
-
-If an unhandled error occurs, the router will catch it and return a 500 response with the `requestId` for debugging.
-
-## File Organization
-
-Place handler files in the `code/` directory:
-
-```
-code/
-  hello.ts          # Simple endpoint
-  users.ts          # User operations
-  users/
-    create.ts       # Nested organization
-    delete.ts
-  utils/
-    helpers.ts      # Shared utilities (import in handlers)
-```
-
-Reference handlers in `config/routes.json`:
+Register it in `config/routes.json`:
 
 ```json
 [
   {
     "name": "hello",
-    "handler": "code/hello.ts",
+    "handler": "hello.ts",
     "route": "/hello",
     "methods": ["GET"]
-  },
-  {
-    "name": "create-user",
-    "handler": "code/users/create.ts",
-    "route": "/users",
-    "methods": ["POST"],
-    "keys": ["api"]
   }
 ]
 ```
 
+Call it at `http://localhost:8000/run/hello`.
+
+## Handler Function
+
+Every handler receives two arguments:
+
+| Argument | Purpose |
+|----------|---------|
+| `c` | Hono context - reading requests and sending responses |
+| `ctx` | Function context - route info, parameters, request metadata |
+
+```typescript
+export default async function (c, ctx) {
+  // c  - use for request/response (c.json, c.req.json, etc.)
+  // ctx - use for params, query, route info, request ID
+  return c.json({ ok: true });
+}
+```
+
+## Importing Dependencies
+
+### Relative Imports
+
+Import other files from your `code/` directory using relative paths:
+
+```typescript
+// code/hello.ts
+import { formatGreeting } from "./utils/formatting.ts";
+import { validateInput } from "./validators.ts";
+
+export default async function (c, ctx) {
+  return c.json({ message: formatGreeting("World") });
+}
+```
+
+### External Packages
+
+Import packages from NPM, JSR, or URLs using full specifiers:
+
+```typescript
+// NPM packages - prefix with npm:
+import { camelCase } from "npm:lodash-es";
+import dayjs from "npm:dayjs";
+
+// JSR packages - prefix with jsr:
+import { z } from "jsr:@zod/zod";
+
+// URL imports - full URL
+import confetti from "https://esm.sh/canvas-confetti";
+
+export default async function (c, ctx) {
+  return c.json({ date: dayjs().format("YYYY-MM-DD") });
+}
+```
+
+**Important:** Always use the full specifier (`npm:`, `jsr:`, or URL). Short aliases like `"lodash"` won't work.
+
+## Reading Requests
+
+### JSON Body
+
+```typescript
+export default async function (c, ctx) {
+  const body = await c.req.json();
+  return c.json({ received: body });
+}
+```
+
+### Form Data
+
+```typescript
+export default async function (c, ctx) {
+  const form = await c.req.formData();
+  const name = form.get("name");
+  return c.json({ name });
+}
+```
+
+### Headers
+
+```typescript
+export default async function (c, ctx) {
+  const authHeader = c.req.header("Authorization");
+  const contentType = c.req.header("Content-Type");
+  return c.json({ authHeader, contentType });
+}
+```
+
+### Path Parameters
+
+For a route like `/users/:id`:
+
+```typescript
+export default async function (c, ctx) {
+  const userId = ctx.params.id;  // or c.req.param("id")
+  return c.json({ userId });
+}
+```
+
+### Query Parameters
+
+For a request like `/search?q=hello&page=2`:
+
+```typescript
+export default async function (c, ctx) {
+  const query = ctx.query.q;      // "hello"
+  const page = ctx.query.page;    // "2"
+  return c.json({ query, page });
+}
+```
+
+## Sending Responses
+
+### JSON
+
+```typescript
+return c.json({ message: "Success" });
+return c.json({ error: "Not found" }, 404);
+return c.json(data, 201);  // Created
+```
+
+### Text
+
+```typescript
+return c.text("Hello, World!");
+return c.text("Not found", 404);
+```
+
+### HTML
+
+```typescript
+return c.html("<h1>Hello</h1>");
+```
+
+### Redirect
+
+```typescript
+return c.redirect("/other-path");
+return c.redirect("/login", 301);  // Permanent redirect
+```
+
+### Custom Response
+
+```typescript
+return new Response("Custom body", {
+  status: 201,
+  headers: { "X-Custom-Header": "value" },
+});
+```
+
+## Function Context (`ctx`)
+
+The `ctx` object provides metadata about the current request:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `ctx.params` | `Record<string, string>` | Path parameters (e.g., `{ id: "123" }`) |
+| `ctx.query` | `Record<string, string>` | Query parameters |
+| `ctx.requestId` | `string` | Unique ID for this request (for logging/tracing) |
+| `ctx.requestedAt` | `Date` | Timestamp when request was received |
+| `ctx.authenticatedKeyName` | `string?` | API key name used (if route requires auth) |
+| `ctx.route` | `object` | Route configuration (name, methods, etc.) |
+
+## Examples
+
+### GET with Query Parameters
+
+```typescript
+// Route: /search
+export default async function (c, ctx) {
+  const term = ctx.query.q || "";
+  const page = parseInt(ctx.query.page || "1");
+
+  // Your search logic here...
+
+  return c.json({ term, page, results: [] });
+}
+```
+
+### POST with Validation
+
+```typescript
+// Route: /users (POST)
+export default async function (c, ctx) {
+  const body = await c.req.json();
+
+  if (!body.email) {
+    return c.json({ error: "Email is required" }, 400);
+  }
+
+  const user = {
+    id: crypto.randomUUID(),
+    email: body.email,
+    createdAt: ctx.requestedAt.toISOString(),
+  };
+
+  return c.json(user, 201);
+}
+```
+
+### Using External Packages
+
+```typescript
+import { z } from "jsr:@zod/zod";
+
+const UserSchema = z.object({
+  email: z.string().email(),
+  name: z.string().min(1),
+});
+
+export default async function (c, ctx) {
+  const body = await c.req.json();
+  const result = UserSchema.safeParse(body);
+
+  if (!result.success) {
+    return c.json({ error: result.error.issues }, 400);
+  }
+
+  return c.json({ user: result.data }, 201);
+}
+```
+
+### Shared Utilities
+
+```typescript
+// code/utils/db.ts
+export async function getUser(id: string) {
+  // Database logic...
+  return { id, name: "John" };
+}
+
+// code/users.ts
+import { getUser } from "./utils/db.ts";
+
+export default async function (c, ctx) {
+  const user = await getUser(ctx.params.id);
+  if (!user) {
+    return c.json({ error: "User not found" }, 404);
+  }
+  return c.json(user);
+}
+```
+
+## Error Handling
+
+Handle errors gracefully and return appropriate status codes:
+
+```typescript
+export default async function (c, ctx) {
+  try {
+    const result = await someOperation();
+    return c.json(result);
+  } catch (error) {
+    console.error(`[${ctx.requestId}] Error:`, error);
+    return c.json({
+      error: "Something went wrong",
+      requestId: ctx.requestId,
+    }, 500);
+  }
+}
+```
+
+Unhandled errors automatically return a 500 response with the request ID.
+
+## File Organization
+
+Organize handlers however makes sense for your project:
+
+```
+code/
+  hello.ts              # Simple endpoints
+  users.ts              # User-related handler
+  users/
+    create.ts           # Nested by feature
+    delete.ts
+  utils/
+    db.ts               # Shared database utilities
+    validation.ts       # Shared validation helpers
+```
+
+Reference nested handlers in routes:
+
+```json
+{
+  "name": "create-user",
+  "handler": "users/create.ts",
+  "route": "/users",
+  "methods": ["POST"]
+}
+```
+
 ## Hot Reloading
 
-Handlers are automatically reloaded when their files change. The system checks file modification times and reloads handlers as needed. No server restart required.
+Handlers automatically reload when you modify them. No server restart needed.
 
-## Type Imports
+## TypeScript Types (Optional)
 
-For full type safety, import types from the project:
-
-```typescript
-import type { Context } from "@hono/hono";
-import type { FunctionContext } from "./src/functions/types.ts";
-```
-
-Or create a `code/_types.ts` for convenience:
+Types are optional but can help during development. Define them inline:
 
 ```typescript
-// code/_types.ts
-export type { Context } from "@hono/hono";
-export type { FunctionContext, FunctionHandler } from "../src/functions/types.ts";
-```
+interface User {
+  id: string;
+  email: string;
+  name: string;
+}
 
-Then use in handlers:
+interface CreateUserBody {
+  email: string;
+  name: string;
+}
 
-```typescript
-import type { Context, FunctionContext } from "./_types.ts";
+export default async function (c, ctx): Promise<Response> {
+  const body: CreateUserBody = await c.req.json();
+
+  const user: User = {
+    id: crypto.randomUUID(),
+    ...body,
+  };
+
+  return c.json(user, 201);
+}
 ```

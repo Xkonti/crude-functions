@@ -1,6 +1,10 @@
 # Environment variables
 .env
 
+# Runtime directories
+code/
+config/
+
 # IDE
 .idea/
 .vscode/

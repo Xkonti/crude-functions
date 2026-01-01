@@ -1,8 +1,10 @@
-# crude-functions
+# Crude Functions
 
 A minimal, single-container serverless-style function router built on Deno. Functions are TypeScript files that get dynamically loaded and executed as HTTP endpoints.
 
 **Target use case:** Internal network services with low-to-moderate traffic (~5-50 req/s).
+
+🚨 ENTIRELY VIBE CODED INCLUDING THIS DOCUMENT 🚨
 
 ## Features
 
@@ -47,6 +49,7 @@ The server starts on port 8000 by default. Access the web UI at `http://localhos
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
 | `MANAGEMENT_API_KEY` | Management key (alternative to config file) | - |
+| `LOG_LEVEL` | Logging verbosity: `debug`, `info`, `warn`, `error`, `none` | `info` |
 
 ### Directory Structure
 
@@ -111,55 +114,52 @@ The `management` key name is reserved for admin access (API and Web UI).
 
 ## Writing Function Handlers
 
-Create TypeScript files in the `code/` directory. Each handler must export a default function:
+Create TypeScript files in the `code/` directory. Each handler exports a default function that receives a Hono context (`c`) and function context (`ctx`):
 
 ```typescript
 // code/hello.ts
-import type { FunctionContext } from "../src/functions/types.ts";
+// Import other files from code/ using relative paths
+import { greet } from "./utils/greetings.ts";
 
-export default async function handler(ctx: FunctionContext): Promise<Response> {
-  return new Response(JSON.stringify({
-    message: "Hello, World!",
+// Import external packages using full specifiers (npm:, jsr:, or URLs)
+import { camelCase } from "npm:lodash-es";
+
+export default async function (c, ctx) {
+  return c.json({
+    message: camelCase(greet("world")),
     params: ctx.params,
     query: ctx.query,
-  }), {
-    headers: { "Content-Type": "application/json" },
   });
 }
 ```
 
-### FunctionContext
+### Function Context (`ctx`)
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `ctx.params` | `Record<string, string>` | Path parameters (e.g., `{ id: "123" }`) |
+| `ctx.query` | `Record<string, string>` | Query string parameters |
+| `ctx.requestId` | `string` | Unique request ID for tracing |
+| `ctx.requestedAt` | `Date` | Request timestamp |
+| `ctx.authenticatedKeyName` | `string?` | API key name used (if route requires auth) |
+| `ctx.route` | `RouteInfo` | Route configuration (name, handler, methods, etc.) |
+
+### Hono Context (`c`)
+
+Use `c` for request/response handling:
 
 ```typescript
-interface FunctionContext {
-  request: Request;           // Original HTTP request
-  params: Record<string, string>;  // URL path parameters
-  query: Record<string, string>;   // Query string parameters
-  route: RouteInfo;           // Route metadata
-  requestId: string;          // Unique request ID
-  authenticated: boolean;     // Whether request has valid API key
-  authenticatedKeyName?: string;  // Name of the matched key
-}
+// Read request
+const body = await c.req.json();
+const header = c.req.header("Authorization");
+
+// Send response
+return c.json({ data }, 200);
+return c.text("Hello");
+return c.redirect("/other");
 ```
 
-### Example: POST Handler with Body
-
-```typescript
-// code/create-user.ts
-import type { FunctionContext } from "../src/functions/types.ts";
-
-export default async function handler(ctx: FunctionContext): Promise<Response> {
-  const body = await ctx.request.json();
-
-  // Your logic here
-  const user = { id: crypto.randomUUID(), ...body };
-
-  return new Response(JSON.stringify(user), {
-    status: 201,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-```
+For detailed documentation on writing handlers, see [function_handler_design.md](./function_handler_design.md).
 
 ## API Endpoints
 
@@ -233,6 +233,52 @@ deno task dev
 
 # Run tests
 deno task test
+```
+
+## Docker Deployment
+
+### Using Docker Compose
+
+Create a `docker-compose.yml`:
+
+```yaml
+services:
+  app:
+    image: xkonti/crude-functions:latest
+    ports:
+      - 8000:8000
+    environment:
+      - MANAGEMENT_API_KEY=your-secret-key
+      - LOG_LEVEL=info
+    volumes:
+      - ./config:/app/config
+      - ./code:/app/code
+    restart: unless-stopped
+```
+
+Create your directories and start:
+
+```bash
+mkdir -p config code
+echo '[]' > config/routes.json
+docker compose up -d
+```
+
+### Using Docker Run
+
+```bash
+docker run -d \
+  -p 8000:8000 \
+  -e MANAGEMENT_API_KEY=your-secret-key \
+  -v ./config:/app/config \
+  -v ./code:/app/code \
+  xkonti/crude-functions:latest
+```
+
+### Building from Source
+
+```bash
+docker build -t crude-functions .
 ```
 
 ## Hot Reload
