@@ -1,6 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { ApiKeyService, ApiKey } from "../keys/api_key_service.ts";
-import { validateKeyName, validateKeyValue } from "../keys/api_key_service.ts";
+import { validateKeyGroup, validateKeyValue } from "../keys/api_key_service.ts";
 import {
   layout,
   escapeHtml,
@@ -12,14 +12,14 @@ import {
 export function createKeysPages(apiKeyService: ApiKeyService): Hono {
   const routes = new Hono();
 
-  // List all keys grouped by name
+  // List all keys grouped by group
   routes.get("/", async (c) => {
     const success = c.req.query("success");
     const error = c.req.query("error");
     const allKeys = await apiKeyService.getAll();
 
-    // Sort key names
-    const sortedNames = [...allKeys.keys()].sort();
+    // Sort key groups
+    const sortedGroups = [...allKeys.keys()].sort();
 
     const content = `
       <h1>API Keys</h1>
@@ -28,21 +28,21 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
         ${buttonLink("/web/keys/create", "Create New Key")}
       </p>
       ${
-        sortedNames.length === 0
+        sortedGroups.length === 0
           ? "<p>No API keys found.</p>"
-          : sortedNames
-              .map((name) => {
-                const keys = allKeys.get(name)!;
+          : sortedGroups
+              .map((group) => {
+                const keys = allKeys.get(group)!;
                 return `
               <article class="key-group">
                 <header>
                   <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <strong>${escapeHtml(name)}</strong>
+                    <strong>${escapeHtml(group)}</strong>
                     <div>
-                      <a href="/web/keys/create?name=${encodeURIComponent(name)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Add Key</a>
+                      <a href="/web/keys/create?group=${encodeURIComponent(group)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Add Key</a>
                       ${
-                        name !== "management"
-                          ? `<a href="/web/keys/delete?name=${encodeURIComponent(name)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete All</a>`
+                        group !== "management"
+                          ? `<a href="/web/keys/delete-group?group=${encodeURIComponent(group)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete All</a>`
                           : ""
                       }
                     </div>
@@ -51,6 +51,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                 <table>
                   <thead>
                     <tr>
+                      <th>ID</th>
                       <th>Value</th>
                       <th>Description</th>
                       <th class="actions">Actions</th>
@@ -61,13 +62,14 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                       .map(
                         (key) => `
                       <tr>
+                        <td><code>${key.id === -1 ? "env" : key.id}</code></td>
                         <td><code>${escapeHtml(key.value)}</code></td>
                         <td>${key.description ? escapeHtml(key.description) : "<em>none</em>"}</td>
                         <td class="actions">
                           ${
-                            key.description === "from environment"
+                            key.id === -1
                               ? "<em>env</em>"
-                              : `<a href="/web/keys/delete?name=${encodeURIComponent(name)}&value=${encodeURIComponent(key.value)}">Delete</a>`
+                              : `<a href="/web/keys/delete?id=${key.id}">Delete</a>`
                           }
                         </td>
                       </tr>
@@ -87,7 +89,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
 
   // Create key form
   routes.get("/create", (c) => {
-    const name = c.req.query("name") ?? "";
+    const group = c.req.query("group") ?? "";
     const error = c.req.query("error");
 
     const content = `
@@ -95,11 +97,11 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
       ${error ? flashMessages(undefined, error) : ""}
       <form method="POST" action="/web/keys/create">
         <label>
-          Key Name
-          <input type="text" name="name" value="${escapeHtml(name)}"
-                 ${name ? "readonly" : "required"} placeholder="my-api-key"
+          Key Group
+          <input type="text" name="group" value="${escapeHtml(group)}"
+                 ${group ? "readonly" : "required"} placeholder="my-api-key"
                  pattern="[a-z0-9_-]+">
-          <small>Lowercase letters, numbers, dashes, and underscores only${name ? " (pre-filled)" : ""}</small>
+          <small>Lowercase letters, numbers, dashes, and underscores only${group ? " (pre-filled)" : ""}</small>
         </label>
         <label>
           Key Value
@@ -122,137 +124,154 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
 
   // Handle create
   routes.post("/create", async (c) => {
-    let body: { name?: string; value?: string; description?: string };
+    let body: { group?: string; value?: string; description?: string };
     try {
       body = (await c.req.parseBody()) as typeof body;
     } catch {
       return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid form data"));
     }
 
-    const name = (body.name as string | undefined)?.trim().toLowerCase() ?? "";
+    const group = (body.group as string | undefined)?.trim().toLowerCase() ?? "";
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
 
-    if (!name) {
-      return c.redirect("/web/keys/create?error=" + encodeURIComponent("Key name is required"));
+    if (!group) {
+      return c.redirect("/web/keys/create?error=" + encodeURIComponent("Key group is required"));
     }
 
-    if (!validateKeyName(name)) {
+    if (!validateKeyGroup(group)) {
       return c.redirect(
-        `/web/keys/create?name=${encodeURIComponent(name)}&error=` +
-          encodeURIComponent("Invalid key name format (use lowercase a-z, 0-9, -, _)")
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+          encodeURIComponent("Invalid key group format (use lowercase a-z, 0-9, -, _)")
       );
     }
 
     if (!value) {
       return c.redirect(
-        `/web/keys/create?name=${encodeURIComponent(name)}&error=` +
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
           encodeURIComponent("Key value is required")
       );
     }
 
     if (!validateKeyValue(value)) {
       return c.redirect(
-        `/web/keys/create?name=${encodeURIComponent(name)}&error=` +
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
           encodeURIComponent("Invalid key value format (use a-z, A-Z, 0-9, -, _)")
       );
     }
 
     try {
-      await apiKeyService.addKey(name, value, description);
-      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key created for: ${name}`));
+      await apiKeyService.addKey(group, value, description);
+      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key created for group: ${group}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create key";
       return c.redirect(
-        `/web/keys/create?name=${encodeURIComponent(name)}&error=` + encodeURIComponent(message)
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` + encodeURIComponent(message)
       );
     }
   });
 
-  // Delete confirmation
+  // Delete key by ID confirmation
   routes.get("/delete", async (c) => {
-    const name = c.req.query("name");
-    const value = c.req.query("value");
+    const idStr = c.req.query("id");
 
-    if (!name) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("No key name specified"));
+    if (!idStr) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("No key ID specified"));
     }
 
-    const keys = await apiKeyService.getKeys(name);
-    if (!keys) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent(`Key name not found: ${name}`));
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
     }
 
-    if (value) {
-      // Delete specific key
-      const key = keys.find((k) => k.value === value);
-      if (!key) {
-        return c.redirect("/web/keys?error=" + encodeURIComponent(`Key value not found for: ${name}`));
-      }
-
-      if (key.description === "from environment") {
-        return c.redirect(
-          "/web/keys?error=" + encodeURIComponent("Cannot delete environment-provided management key")
-        );
-      }
-
-      return c.html(
-        confirmPage(
-          "Delete API Key",
-          `Are you sure you want to delete the key "${value}" from "${name}"? This action cannot be undone.`,
-          `/web/keys/delete?name=${encodeURIComponent(name)}&value=${encodeURIComponent(value)}`,
-          "/web/keys"
-        )
-      );
-    } else {
-      // Delete all keys for name
-      if (name.toLowerCase() === "management") {
-        return c.redirect(
-          "/web/keys?error=" + encodeURIComponent("Cannot delete all management keys")
-        );
-      }
-
-      return c.html(
-        confirmPage(
-          "Delete All Keys",
-          `Are you sure you want to delete ALL keys for "${name}"? This will remove ${keys.length} key(s). This action cannot be undone.`,
-          `/web/keys/delete?name=${encodeURIComponent(name)}`,
-          "/web/keys"
-        )
+    if (id === -1) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Cannot delete environment-provided management key")
       );
     }
+
+    return c.html(
+      confirmPage(
+        "Delete API Key",
+        `Are you sure you want to delete the key with ID ${id}? This action cannot be undone.`,
+        `/web/keys/delete?id=${id}`,
+        "/web/keys"
+      )
+    );
   });
 
-  // Handle delete
+  // Handle delete by ID
   routes.post("/delete", async (c) => {
-    const name = c.req.query("name");
-    const value = c.req.query("value");
+    const idStr = c.req.query("id");
 
-    if (!name) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("No key name specified"));
+    if (!idStr) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("No key ID specified"));
+    }
+
+    const id = parseInt(idStr, 10);
+    if (isNaN(id)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
     }
 
     try {
-      if (value) {
-        // Delete specific key
-        await apiKeyService.removeKey(name, value);
-        return c.redirect(
-          "/web/keys?success=" + encodeURIComponent(`Key deleted from: ${name}`)
-        );
-      } else {
-        // Delete all keys for name
-        if (name.toLowerCase() === "management") {
-          return c.redirect(
-            "/web/keys?error=" + encodeURIComponent("Cannot delete all management keys")
-          );
-        }
-        await apiKeyService.removeName(name);
-        return c.redirect(
-          "/web/keys?success=" + encodeURIComponent(`All keys deleted for: ${name}`)
-        );
-      }
+      await apiKeyService.removeKeyById(id);
+      return c.redirect("/web/keys?success=" + encodeURIComponent("Key deleted successfully"));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete key";
+      return c.redirect("/web/keys?error=" + encodeURIComponent(message));
+    }
+  });
+
+  // Delete group confirmation
+  routes.get("/delete-group", async (c) => {
+    const group = c.req.query("group");
+
+    if (!group) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("No key group specified"));
+    }
+
+    const keys = await apiKeyService.getKeys(group);
+    if (!keys) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent(`Key group not found: ${group}`));
+    }
+
+    if (group.toLowerCase() === "management") {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Cannot delete all management keys")
+      );
+    }
+
+    return c.html(
+      confirmPage(
+        "Delete All Keys",
+        `Are you sure you want to delete ALL keys for group "${group}"? This will remove ${keys.length} key(s). This action cannot be undone.`,
+        `/web/keys/delete-group?group=${encodeURIComponent(group)}`,
+        "/web/keys"
+      )
+    );
+  });
+
+  // Handle delete group
+  routes.post("/delete-group", async (c) => {
+    const group = c.req.query("group");
+
+    if (!group) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("No key group specified"));
+    }
+
+    if (group.toLowerCase() === "management") {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Cannot delete all management keys")
+      );
+    }
+
+    try {
+      await apiKeyService.removeGroup(group);
+      return c.redirect(
+        "/web/keys?success=" + encodeURIComponent(`All keys deleted for group: ${group}`)
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to delete keys";
       return c.redirect("/web/keys?error=" + encodeURIComponent(message));
     }
   });

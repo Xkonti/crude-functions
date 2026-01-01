@@ -186,7 +186,7 @@ The `ctx` object provides metadata about the current request:
 | `ctx.query` | `Record<string, string>` | Query parameters |
 | `ctx.requestId` | `string` | Unique ID for this request (for logging/tracing) |
 | `ctx.requestedAt` | `Date` | Timestamp when request was received |
-| `ctx.authenticatedKeyName` | `string?` | API key name used (if route requires auth) |
+| `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
 | `ctx.route` | `object` | Route configuration (name, methods, etc.) |
 
 ## Examples

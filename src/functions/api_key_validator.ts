@@ -7,8 +7,8 @@ import { logger } from "../utils/logger.ts";
 export interface ApiKeyValidationResult {
   /** Whether the API key is valid */
   valid: boolean;
-  /** Which key name matched (e.g., "api-key", "admin") */
-  keyName?: string;
+  /** Which key group matched (e.g., "api-key", "admin") */
+  keyGroup?: string;
   /** Where the API key was found (e.g., "X-API-Key header", "Authorization Bearer") */
   source?: string;
   /** Error message if validation failed */
@@ -22,7 +22,7 @@ export interface ApiKeyValidatorOptions {
 }
 
 /**
- * Validates API keys against allowed key names for function routes.
+ * Validates API keys against allowed key groups for function routes.
  * Supports multiple locations for API key extraction.
  */
 export class ApiKeyValidator {
@@ -35,14 +35,14 @@ export class ApiKeyValidator {
   }
 
   /**
-   * Validate API key against allowed key names
+   * Validate API key against allowed key groups
    * @param c - Hono context
-   * @param allowedKeyNames - Array of key names to check against
-   * @returns Validation result with matched key name and source if successful
+   * @param allowedKeyGroups - Array of key groups to check against
+   * @returns Validation result with matched key group and source if successful
    */
   async validate(
     c: Context,
-    allowedKeyNames: string[]
+    allowedKeyGroups: string[]
   ): Promise<ApiKeyValidationResult> {
     // Try each extractor in order until one finds a key
     let apiKey: string | null = null;
@@ -65,14 +65,14 @@ export class ApiKeyValidator {
       };
     }
 
-    // Check each allowed key name
-    for (const keyName of allowedKeyNames) {
-      const hasKey = await this.apiKeyService.hasKey(keyName, apiKey);
+    // Check each allowed key group
+    for (const keyGroup of allowedKeyGroups) {
+      const hasKey = await this.apiKeyService.hasKey(keyGroup, apiKey);
       if (hasKey) {
-        logger.debug(`API key validated successfully (key name: ${keyName}, source: ${source})`);
+        logger.debug(`API key validated successfully (key group: ${keyGroup}, source: ${source})`);
         return {
           valid: true,
-          keyName,
+          keyGroup,
           source: source!,
         };
       }

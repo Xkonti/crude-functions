@@ -74,12 +74,12 @@ api=user-key-123 # User API access
 readonly=viewer-key # Read-only access
 ```
 
-- **Key names:** lowercase `a-z`, `0-9`, `_`, `-`
+- **Key groups:** lowercase `a-z`, `0-9`, `_`, `-`
 - **Key values:** `a-z`, `A-Z`, `0-9`, `_`, `-`
 - **Comments:** Everything after `#` is treated as a description
-- **Multiple values:** Same name can have multiple keys
+- **Multiple values:** Same group can have multiple keys
 
-The `management` key name is reserved for admin access (API and Web UI).
+The `management` key group is reserved for admin access (API and Web UI).
 
 ### Function Routes (`config/routes.json`)
 
@@ -110,7 +110,7 @@ The `management` key name is reserved for admin access (API and Web UI).
 | `route` | Yes | URL path pattern (supports `:param` syntax) |
 | `methods` | Yes | Array of HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS) |
 | `description` | No | Human-readable description |
-| `keys` | No | Array of key names required for access |
+| `keys` | No | Array of key groups required for access |
 
 ## Writing Function Handlers
 
@@ -141,7 +141,7 @@ export default async function (c, ctx) {
 | `ctx.query` | `Record<string, string>` | Query string parameters |
 | `ctx.requestId` | `string` | Unique request ID for tracing |
 | `ctx.requestedAt` | `Date` | Request timestamp |
-| `ctx.authenticatedKeyName` | `string?` | API key name used (if route requires auth) |
+| `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
 | `ctx.route` | `RouteInfo` | Route configuration (name, handler, methods, etc.) |
 
 ### Hono Context (`c`)
@@ -187,11 +187,11 @@ All management endpoints require the `X-API-Key` header with a valid management 
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/keys` | List all key names |
-| GET | `/api/keys/:name` | Get keys for a name |
-| POST | `/api/keys/:name` | Add a new key |
-| DELETE | `/api/keys/:name` | Delete all keys for a name |
-| DELETE | `/api/keys/:name/:value` | Delete a specific key |
+| GET | `/api/keys` | List all key groups |
+| GET | `/api/keys/:group` | Get keys for a group |
+| POST | `/api/keys/:group` | Add a new key |
+| DELETE | `/api/keys/:group` | Delete all keys for a group |
+| DELETE | `/api/keys/by-id/:id` | Delete a key by ID |
 
 ### Function Execution
 

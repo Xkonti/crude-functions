@@ -28,8 +28,8 @@ export interface FunctionContext {
   params: Record<string, string>;
   /** Query parameters as key-value pairs */
   query: Record<string, string>;
-  /** The validated API key name that was used (if authentication required) */
-  authenticatedKeyName?: string;
+  /** The validated API key group that was used (if authentication required) */
+  authenticatedKeyGroup?: string;
   /** Request timestamp */
   requestedAt: Date;
   /** Unique request ID for tracing */

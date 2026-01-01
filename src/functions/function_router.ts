@@ -92,7 +92,7 @@ export class FunctionRouter {
       const requestId = crypto.randomUUID();
 
       // 1. API Key Validation (if required)
-      let authenticatedKeyName: string | undefined;
+      let authenticatedKeyGroup: string | undefined;
 
       if (route.keys && route.keys.length > 0) {
         const validation = await this.apiKeyValidator.validate(c, route.keys);
@@ -108,7 +108,7 @@ export class FunctionRouter {
           );
         }
 
-        authenticatedKeyName = validation.keyName;
+        authenticatedKeyGroup = validation.keyGroup;
       }
 
       // 2. Build FunctionContext
@@ -125,7 +125,7 @@ export class FunctionRouter {
         route: routeInfo,
         params: c.req.param() as Record<string, string>,
         query: this.parseQueryParams(c),
-        authenticatedKeyName,
+        authenticatedKeyGroup,
         requestedAt: new Date(),
         requestId,
       };
