@@ -332,7 +332,7 @@ Deno.test("FunctionRouter returns 401 when key is required but missing", async (
 
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
-    expect(json.message).toBe("Missing X-API-Key header");
+    expect(json.message).toBe("Missing API key");
   } finally {
     await cleanup(tempDir);
   }
@@ -422,6 +422,193 @@ Deno.test("FunctionRouter accepts key from any allowed key name", async () => {
       headers: { "X-API-Key": "user456" },
     });
     expect(res2.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter accepts Authorization Bearer token", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=secret123";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    const res = await app.request("/run/protected", {
+      headers: { Authorization: "Bearer secret123" },
+    });
+    expect(res.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter accepts Authorization plain value", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=secret123";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    const res = await app.request("/run/protected", {
+      headers: { Authorization: "secret123" },
+    });
+    expect(res.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter accepts Authorization Basic (key as password)", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=secret123";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    // Base64 of ":secret123" (empty username, key as password)
+    const encoded = btoa(":secret123");
+    const res = await app.request("/run/protected", {
+      headers: { Authorization: `Basic ${encoded}` },
+    });
+    expect(res.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter accepts X-Auth-Token header", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=secret123";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    const res = await app.request("/run/protected", {
+      headers: { "X-Auth-Token": "secret123" },
+    });
+    expect(res.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter accepts api_key query parameter", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=secret123";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    const res = await app.request("/run/protected?api_key=secret123");
+    expect(res.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter accepts apiKey query parameter", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=secret123";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    const res = await app.request("/run/protected?apiKey=secret123");
+    expect(res.status).toBe(200);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FunctionRouter prioritizes Authorization over X-API-Key", async () => {
+  const routes = [
+    {
+      name: "protected",
+      handler: "code/protected.ts",
+      route: "/protected",
+      methods: ["GET"],
+      keys: ["api"],
+    },
+  ];
+  const keys = "api=bearer-key\napi=header-key";
+  const { app, tempDir, codeDir } = await createTestSetup(routes, keys);
+
+  try {
+    await writeHandler(codeDir, "protected.ts", simpleHandler);
+
+    // Both headers present - Authorization Bearer should be used (it's first)
+    const res = await app.request("/run/protected", {
+      headers: {
+        Authorization: "Bearer bearer-key",
+        "X-API-Key": "header-key",
+      },
+    });
+    expect(res.status).toBe(200);
+
+    // Now test with wrong bearer but correct X-API-Key - should fail
+    // because Authorization is checked first and "wrong-bearer" is not valid
+    const res2 = await app.request("/run/protected", {
+      headers: {
+        Authorization: "Bearer wrong-bearer",
+        "X-API-Key": "header-key",
+      },
+    });
+    expect(res2.status).toBe(401);
   } finally {
     await cleanup(tempDir);
   }
