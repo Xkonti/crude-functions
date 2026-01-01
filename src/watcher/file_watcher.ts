@@ -32,7 +32,7 @@ export class FileWatcher {
     if (now - this.lastCheckTime < this.refreshInterval) {
       return { changed: false, added: [], modified: [], deleted: [] };
     }
-    return this.forceCheck();
+    return await this.forceCheck();
   }
 
   async forceCheck(): Promise<CheckResult> {

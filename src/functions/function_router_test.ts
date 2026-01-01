@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { DatabaseService } from "../database/database_service.ts";
-import { RoutesService, type FunctionRoute } from "../routes/routes_service.ts";
+import { RoutesService } from "../routes/routes_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { FunctionRouter } from "./function_router.ts";
 

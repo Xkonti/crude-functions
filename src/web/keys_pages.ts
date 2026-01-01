@@ -1,5 +1,5 @@
 import { Hono } from "@hono/hono";
-import type { ApiKeyService, ApiKey } from "../keys/api_key_service.ts";
+import type { ApiKeyService } from "../keys/api_key_service.ts";
 import { validateKeyGroup, validateKeyValue } from "../keys/api_key_service.ts";
 import {
   layout,
@@ -172,7 +172,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
   });
 
   // Delete key by ID confirmation
-  routes.get("/delete", async (c) => {
+  routes.get("/delete", (c) => {
     const idStr = c.req.query("id");
 
     if (!idStr) {

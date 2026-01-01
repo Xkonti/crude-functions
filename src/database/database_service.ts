@@ -89,6 +89,8 @@ export class DatabaseService {
   async close(): Promise<void> {
     if (!this.db) return;
 
+    // Synchronous operation, but kept async for API consistency
+    await Promise.resolve();
     this.db.close();
     this.db = null;
   }
@@ -135,6 +137,9 @@ export class DatabaseService {
   ): Promise<T[]> {
     this.ensureOpen();
 
+    // Synchronous operation, but kept async for API consistency
+    await Promise.resolve();
+
     try {
       const stmt = this.db!.prepare(sql);
       try {
@@ -165,6 +170,9 @@ export class DatabaseService {
     params?: BindValue[]
   ): Promise<T | null> {
     this.ensureOpen();
+
+    // Synchronous operation, but kept async for API consistency
+    await Promise.resolve();
 
     try {
       const stmt = this.db!.prepare(sql);
@@ -297,6 +305,9 @@ export class PreparedStatement {
    * Does not acquire mutex (reads are safe in WAL mode).
    */
   async all<T extends Row = Row>(params?: BindValue[]): Promise<T[]> {
+    // Synchronous operation, but kept async for API consistency
+    await Promise.resolve();
+
     if (params && params.length > 0) {
       return this.stmt.all<T>(...params);
     }
@@ -308,6 +319,9 @@ export class PreparedStatement {
    * Does not acquire mutex (reads are safe in WAL mode).
    */
   async get<T extends Row = Row>(params?: BindValue[]): Promise<T | null> {
+    // Synchronous operation, but kept async for API consistency
+    await Promise.resolve();
+
     let result: T | undefined;
     if (params && params.length > 0) {
       result = this.stmt.get<T>(...params);
