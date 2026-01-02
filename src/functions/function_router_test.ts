@@ -3,6 +3,8 @@ import { Hono } from "@hono/hono";
 import { DatabaseService } from "../database/database_service.ts";
 import { RoutesService } from "../routes/routes_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
+import { ConsoleLogService } from "../logs/console_log_service.ts";
+import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { FunctionRouter } from "./function_router.ts";
 
 const API_KEYS_SCHEMA = `
@@ -29,6 +31,30 @@ CREATE TABLE IF NOT EXISTS routes (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
+`;
+
+const CONSOLE_LOGS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS console_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id TEXT NOT NULL,
+  route_id INTEGER,
+  level TEXT NOT NULL,
+  message TEXT NOT NULL,
+  args TEXT,
+  timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_console_logs_request_id ON console_logs(request_id);
+`;
+
+const EXECUTION_METRICS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS execution_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_id INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  time_value_ms INTEGER NOT NULL,
+  timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_route_id ON execution_metrics(route_id);
 `;
 
 interface TestRoute {
@@ -60,9 +86,13 @@ async function createTestSetup(
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
   await db.exec(ROUTES_SCHEMA);
+  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_METRICS_SCHEMA);
 
   const routesService = new RoutesService({ db });
   const apiKeyService = new ApiKeyService({ db });
+  const consoleLogService = new ConsoleLogService({ db });
+  const executionMetricsService = new ExecutionMetricsService({ db });
 
   // Add initial routes
   for (const route of initialRoutes) {
@@ -77,6 +107,8 @@ async function createTestSetup(
   const functionRouter = new FunctionRouter({
     routesService,
     apiKeyService,
+    consoleLogService,
+    executionMetricsService,
     codeDirectory: tempDir,
   });
 
@@ -92,6 +124,8 @@ async function createTestSetup(
     db,
     routesService,
     apiKeyService,
+    consoleLogService,
+    executionMetricsService,
     functionRouter,
   };
 }

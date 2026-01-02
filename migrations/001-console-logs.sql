@@ -22,3 +22,18 @@ CREATE INDEX IF NOT EXISTS idx_console_logs_route_level ON console_logs(route_id
 
 -- For time-based cleanup/retention
 CREATE INDEX IF NOT EXISTS idx_console_logs_timestamp ON console_logs(timestamp);
+
+-- Execution metrics table
+-- Stores execution timing data for analytics
+
+CREATE TABLE IF NOT EXISTS execution_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_id INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  time_value_ms INTEGER NOT NULL,
+  timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_route_id ON execution_metrics(route_id);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_type ON execution_metrics(type, timestamp);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_timestamp ON execution_metrics(timestamp);

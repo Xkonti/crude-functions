@@ -31,6 +31,9 @@ function renderLogLevelBadge(level: string): string {
     debug: "color: #6c757d;",
     info: "color: #17a2b8;",
     trace: "color: #adb5bd;",
+    exec_start: "color: #28a745;",
+    exec_end: "color: #28a745;",
+    exec_reject: "color: #dc3545;",
   };
   const style = levelColors[level] ?? "";
   return `<span style="font-weight: bold; ${style}">${escapeHtml(level.toUpperCase())}</span>`;

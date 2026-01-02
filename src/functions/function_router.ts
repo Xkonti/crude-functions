@@ -1,6 +1,8 @@
 import { Hono, type Context } from "@hono/hono";
 import { RoutesService, type FunctionRoute } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
+import type { ConsoleLogService } from "../logs/console_log_service.ts";
+import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { HandlerLoader } from "./handler_loader.ts";
 import { ApiKeyValidator } from "./api_key_validator.ts";
 import type { FunctionContext, RouteInfo } from "./types.ts";
@@ -17,6 +19,8 @@ import { originalConsole } from "../logs/console_interceptor.ts";
 export interface FunctionRouterOptions {
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
+  consoleLogService: ConsoleLogService;
+  executionMetricsService: ExecutionMetricsService;
   /** Base directory for code files (default: current working directory) */
   codeDirectory?: string;
 }
@@ -25,6 +29,8 @@ export class FunctionRouter {
   private readonly routesService: RoutesService;
   private readonly apiKeyValidator: ApiKeyValidator;
   private readonly handlerLoader: HandlerLoader;
+  private readonly consoleLogService: ConsoleLogService;
+  private readonly executionMetricsService: ExecutionMetricsService;
   private router: Hono = this.createEmptyRouter();
 
   constructor(options: FunctionRouterOptions) {
@@ -33,6 +39,8 @@ export class FunctionRouter {
     this.handlerLoader = new HandlerLoader({
       baseDirectory: options.codeDirectory ?? Deno.cwd(),
     });
+    this.consoleLogService = options.consoleLogService;
+    this.executionMetricsService = options.executionMetricsService;
   }
 
   async handle(c: Context): Promise<Response> {
@@ -93,6 +101,8 @@ export class FunctionRouter {
   private createHandler(route: FunctionRoute) {
     return async (c: Context): Promise<Response> => {
       const requestId = crypto.randomUUID();
+      const method = c.req.method;
+      const fullUrl = c.req.url;
 
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
@@ -101,6 +111,15 @@ export class FunctionRouter {
         const validation = await this.apiKeyValidator.validate(c, route.keys);
 
         if (!validation.valid) {
+          // Log rejected request
+          this.consoleLogService.store({
+            requestId,
+            routeId: route.id,
+            level: "exec_reject",
+            message: `${method} ${fullUrl}`,
+            args: JSON.stringify({ reason: "invalid_api_key" }),
+          }).catch(() => {});
+
           return c.json(
             {
               error: "Unauthorized",
@@ -144,11 +163,60 @@ export class FunctionRouter {
       // 4. Execute Handler within request context (for console log capture)
       const requestContext = { requestId, routeId: route.id };
 
+      // Prepare execution logging data
+      const origin = c.req.header("origin") || c.req.header("referer") || "";
+      const contentLength = c.req.header("content-length") || "0";
+      const keyGroup = authenticatedKeyGroup || "";
+
+      // Log execution start
+      const startTime = performance.now();
+      this.consoleLogService.store({
+        requestId,
+        routeId: route.id,
+        level: "exec_start",
+        message: `${method} ${fullUrl}`,
+        args: JSON.stringify({ origin, keyGroup, contentLength }),
+      }).catch(() => {});
+
       try {
-        return await runInRequestContext(requestContext, async () => {
+        const response = await runInRequestContext(requestContext, async () => {
           return await handler(c, ctx);
         });
+
+        // Log execution end (success)
+        const durationMs = Math.round(performance.now() - startTime);
+        this.consoleLogService.store({
+          requestId,
+          routeId: route.id,
+          level: "exec_end",
+          message: `${durationMs}ms`,
+        }).catch(() => {});
+
+        // Store execution metric
+        this.executionMetricsService.store({
+          routeId: route.id,
+          type: "single_execution",
+          timeValueMs: durationMs,
+        }).catch(() => {});
+
+        return response;
       } catch (error) {
+        // Log execution end (error)
+        const durationMs = Math.round(performance.now() - startTime);
+        this.consoleLogService.store({
+          requestId,
+          routeId: route.id,
+          level: "exec_end",
+          message: `${durationMs}ms (error)`,
+        }).catch(() => {});
+
+        // Still store metric for failed executions
+        this.executionMetricsService.store({
+          routeId: route.id,
+          type: "single_execution",
+          timeValueMs: durationMs,
+        }).catch(() => {});
+
         const executionError = new HandlerExecutionError(route.handler, error);
         return this.handleExecutionError(c, executionError, requestId);
       }

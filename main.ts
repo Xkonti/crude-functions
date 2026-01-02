@@ -13,6 +13,7 @@ import { createFileRoutes } from "./src/files/file_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
 import { ConsoleInterceptor } from "./src/logs/console_interceptor.ts";
+import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
 
 const app = new Hono();
 
@@ -43,6 +44,9 @@ const consoleLogService = new ConsoleLogService({ db });
 const consoleInterceptor = new ConsoleInterceptor({ logService: consoleLogService });
 consoleInterceptor.install();
 
+// Initialize execution metrics service
+const executionMetricsService = new ExecutionMetricsService({ db });
+
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
   db,
@@ -58,6 +62,8 @@ const routesService = new RoutesService({
 const functionRouter = new FunctionRouter({
   routesService,
   apiKeyService,
+  consoleLogService,
+  executionMetricsService,
   codeDirectory: "./code",
 });
 
@@ -96,7 +102,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
