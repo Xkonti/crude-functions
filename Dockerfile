@@ -13,6 +13,7 @@ RUN deno install
 # Copy application source code
 COPY main.ts main_test.ts function_handler_design.md ./
 COPY src/ ./src/
+COPY migrations/ ./migrations/
 
 # Create directories for volumes
 RUN mkdir -p /app/config /app/code
