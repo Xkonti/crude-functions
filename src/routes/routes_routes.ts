@@ -5,6 +5,7 @@ import {
   validateRoutePath,
   validateMethods,
   type FunctionRoute,
+  type NewFunctionRoute,
 } from "./routes_service.ts";
 
 export function createRoutesRoutes(service: RoutesService): Hono {
@@ -51,7 +52,7 @@ export function createRoutesRoutes(service: RoutesService): Hono {
       return c.json({ error: "Invalid or missing methods" }, 400);
     }
 
-    const newRoute: FunctionRoute = {
+    const newRoute: NewFunctionRoute = {
       name: body.name,
       handler: body.handler,
       route: body.route,

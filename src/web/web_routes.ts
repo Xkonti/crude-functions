@@ -7,15 +7,17 @@ import { layout } from "./templates.ts";
 import type { FileService } from "../files/file_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
+import type { ConsoleLogService } from "../logs/console_log_service.ts";
 
 export interface WebRoutesOptions {
   fileService: FileService;
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
+  consoleLogService: ConsoleLogService;
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { fileService, routesService, apiKeyService } = options;
+  const { fileService, routesService, apiKeyService, consoleLogService } = options;
   const routes = new Hono();
 
   // Apply Basic Auth to all web routes
@@ -54,7 +56,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
 
   // Mount sub-routers
   routes.route("/code", createCodePages(fileService));
-  routes.route("/functions", createFunctionsPages(routesService));
+  routes.route("/functions", createFunctionsPages(routesService, consoleLogService));
   routes.route("/keys", createKeysPages(apiKeyService));
 
   return routes;

@@ -1,10 +1,12 @@
 import { Hono } from "@hono/hono";
-import type { RoutesService, FunctionRoute } from "../routes/routes_service.ts";
+import type { RoutesService, FunctionRoute, NewFunctionRoute } from "../routes/routes_service.ts";
 import {
   validateRouteName,
   validateRoutePath,
   validateMethods,
 } from "../routes/routes_service.ts";
+import type { ConsoleLogService } from "../logs/console_log_service.ts";
+import type { ConsoleLog } from "../logs/types.ts";
 import {
   layout,
   escapeHtml,
@@ -19,6 +21,70 @@ function renderMethodBadges(methods: string[]): string {
   return methods
     .map((m) => `<span class="method-badge">${escapeHtml(m)}</span>`)
     .join(" ");
+}
+
+function renderLogLevelBadge(level: string): string {
+  const levelColors: Record<string, string> = {
+    error: "color: #dc3545;",
+    warn: "color: #fd7e14;",
+    log: "color: #6c757d;",
+    debug: "color: #6c757d;",
+    info: "color: #17a2b8;",
+    trace: "color: #adb5bd;",
+  };
+  const style = levelColors[level] ?? "";
+  return `<span style="font-weight: bold; ${style}">${escapeHtml(level.toUpperCase())}</span>`;
+}
+
+function formatTimestamp(date: Date): string {
+  return date.toISOString().replace("T", " ").substring(0, 19);
+}
+
+function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[]): string {
+  return `
+    <h1>Logs: ${escapeHtml(functionName)}</h1>
+    <div class="grid" style="margin-bottom: 1rem;">
+      <div>
+        <a href="/web/functions" role="button" class="secondary outline">&larr; Back to Functions</a>
+      </div>
+      <div style="text-align: right;">
+        <a href="/web/functions/logs/${routeId}" role="button" class="outline">Refresh</a>
+      </div>
+    </div>
+    ${
+      logs.length === 0
+        ? "<p><em>No logs recorded for this function.</em></p>"
+        : `
+      <p style="color: #6c757d;">Showing ${logs.length} most recent log${logs.length === 1 ? "" : "s"}</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Level</th>
+            <th>Request ID</th>
+            <th>Message</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${logs
+            .map(
+              (log) => `
+            <tr>
+              <td style="white-space: nowrap;"><code>${formatTimestamp(log.timestamp)}</code></td>
+              <td>${renderLogLevelBadge(log.level)}</td>
+              <td><code title="${escapeHtml(log.requestId)}">${escapeHtml(log.requestId.substring(0, 8))}...</code></td>
+              <td style="word-break: break-word;">${escapeHtml(log.message)}${
+                log.args ? `<br><small style="color: #6c757d;">${escapeHtml(log.args)}</small>` : ""
+              }</td>
+            </tr>
+          `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    `
+    }
+  `;
 }
 
 function renderFunctionForm(
@@ -81,7 +147,7 @@ function renderFunctionForm(
 }
 
 function parseFormData(formData: FormData): {
-  route: FunctionRoute;
+  route: NewFunctionRoute;
   errors: string[];
 } {
   const errors: string[] = [];
@@ -117,7 +183,7 @@ function parseFormData(formData: FormData): {
     ? keysStr.split(",").map((k) => k.trim()).filter((k) => k.length > 0)
     : undefined;
 
-  const route: FunctionRoute = {
+  const route: NewFunctionRoute = {
     name,
     description,
     handler,
@@ -129,7 +195,10 @@ function parseFormData(formData: FormData): {
   return { route, errors };
 }
 
-export function createFunctionsPages(routesService: RoutesService): Hono {
+export function createFunctionsPages(
+  routesService: RoutesService,
+  consoleLogService: ConsoleLogService
+): Hono {
   const routes = new Hono();
 
   // List all functions
@@ -170,6 +239,7 @@ export function createFunctionsPages(routesService: RoutesService): Hono {
                 <td>${fn.keys ? escapeHtml(fn.keys.join(", ")) : "<em>none</em>"}</td>
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
+                  <a href="/web/functions/logs/${fn.id}">Logs</a>
                   <a href="/web/functions/edit?name=${encodeURIComponent(fn.name)}">Edit</a>
                   <a href="/web/functions/delete?name=${encodeURIComponent(fn.name)}">Delete</a>
                 </td>
@@ -339,6 +409,28 @@ export function createFunctionsPages(routesService: RoutesService): Hono {
       const message = err instanceof Error ? err.message : "Failed to delete function";
       return c.redirect("/web/functions?error=" + encodeURIComponent(message));
     }
+  });
+
+  // View logs for a function
+  routes.get("/logs/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
+
+    if (isNaN(id)) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
+    }
+
+    const route = await routesService.getById(id);
+    if (!route) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
+    }
+
+    // Get last 200 logs, newest first
+    const logs = await consoleLogService.getByRouteId(id, 200);
+    logs.reverse(); // getByRouteId returns oldest first, we want newest first
+
+    const content = renderLogsPage(route.name, id, logs);
+    return c.html(layout(`Logs: ${route.name}`, content));
   });
 
   return routes;

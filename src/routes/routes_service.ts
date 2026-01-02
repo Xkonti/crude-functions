@@ -2,6 +2,7 @@ import { Mutex } from "@core/asyncutil/mutex";
 import type { DatabaseService } from "../database/database_service.ts";
 
 export interface FunctionRoute {
+  id: number;
   name: string;
   description?: string;
   handler: string;
@@ -9,6 +10,9 @@ export interface FunctionRoute {
   methods: string[];
   keys?: string[];
 }
+
+/** Input type for adding new routes (id is auto-generated) */
+export type NewFunctionRoute = Omit<FunctionRoute, "id">;
 
 export interface RoutesServiceOptions {
   db: DatabaseService;
@@ -152,8 +156,25 @@ export class RoutesService {
     return this.rowToFunctionRoute(row);
   }
 
+  /**
+   * Get a single route by ID.
+   */
+  async getById(id: number): Promise<FunctionRoute | null> {
+    const row = await this.db.queryOne<RouteRow>(
+      "SELECT id, name, description, handler, route, methods, keys FROM routes WHERE id = ?",
+      [id]
+    );
+
+    if (!row) {
+      return null;
+    }
+
+    return this.rowToFunctionRoute(row);
+  }
+
   private rowToFunctionRoute(row: RouteRow): FunctionRoute {
     const route: FunctionRoute = {
+      id: row.id,
       name: row.name,
       handler: row.handler,
       route: row.route,
@@ -177,7 +198,7 @@ export class RoutesService {
    * Add a new route to the database.
    * Waits for any in-progress rebuild to complete before modifying.
    */
-  async addRoute(route: FunctionRoute): Promise<void> {
+  async addRoute(route: NewFunctionRoute): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 

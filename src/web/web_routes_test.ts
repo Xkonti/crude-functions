@@ -5,6 +5,7 @@ import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { RoutesService } from "../routes/routes_service.ts";
 import { FileService } from "../files/file_service.ts";
+import { ConsoleLogService } from "../logs/console_log_service.ts";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
@@ -32,6 +33,20 @@ const ROUTES_SCHEMA = `
   CREATE INDEX idx_routes_route ON routes(route);
 `;
 
+const CONSOLE_LOGS_SCHEMA = `
+  CREATE TABLE console_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT NOT NULL,
+    route_id INTEGER,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    args TEXT,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX idx_console_logs_request_id ON console_logs(request_id);
+  CREATE INDEX idx_console_logs_route_id ON console_logs(route_id, id);
+`;
+
 interface TestRoute {
   name: string;
   handler: string;
@@ -48,6 +63,7 @@ interface TestContext {
   apiKeyService: ApiKeyService;
   routesService: RoutesService;
   fileService: FileService;
+  consoleLogService: ConsoleLogService;
 }
 
 async function createTestApp(
@@ -61,6 +77,7 @@ async function createTestApp(
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
   await db.exec(ROUTES_SCHEMA);
+  await db.exec(CONSOLE_LOGS_SCHEMA);
 
   // Add default management key
   await db.execute(
@@ -73,6 +90,7 @@ async function createTestApp(
   const apiKeyService = new ApiKeyService({ db });
   const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
+  const consoleLogService = new ConsoleLogService({ db });
 
   // Add initial routes
   for (const route of initialRoutes) {
@@ -82,10 +100,10 @@ async function createTestApp(
   const app = new Hono();
   app.route(
     "/web",
-    createWebRoutes({ fileService, routesService, apiKeyService })
+    createWebRoutes({ fileService, routesService, apiKeyService, consoleLogService })
   );
 
-  return { app, tempDir, db, apiKeyService, routesService, fileService };
+  return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService };
 }
 
 async function cleanup(db: DatabaseService, tempDir: string) {

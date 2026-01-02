@@ -11,6 +11,8 @@ import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
 import { createFileRoutes } from "./src/files/file_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
+import { ConsoleLogService } from "./src/logs/console_log_service.ts";
+import { ConsoleInterceptor } from "./src/logs/console_interceptor.ts";
 
 const app = new Hono();
 
@@ -34,6 +36,12 @@ if (migrationResult.appliedCount > 0) {
     `Applied ${migrationResult.appliedCount} migration(s): version ${migrationResult.fromVersion ?? "none"} → ${migrationResult.toVersion}`
   );
 }
+
+// Initialize console log capture
+// Must be installed after migrations but before handling requests
+const consoleLogService = new ConsoleLogService({ db });
+const consoleInterceptor = new ConsoleInterceptor({ logService: consoleLogService });
+consoleInterceptor.install();
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -80,6 +88,7 @@ app.route("/web", createWebRoutes({
   fileService,
   routesService,
   apiKeyService,
+  consoleLogService,
 }));
 
 // Dynamic function router - catch all /run/* requests
@@ -87,7 +96,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

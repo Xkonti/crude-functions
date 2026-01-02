@@ -11,6 +11,8 @@ import {
   HandlerLoadError,
   HandlerExecutionError,
 } from "./errors.ts";
+import { runInRequestContext } from "../logs/request_context.ts";
+import { originalConsole } from "../logs/console_interceptor.ts";
 
 export interface FunctionRouterOptions {
   routesService: RoutesService;
@@ -139,9 +141,13 @@ export class FunctionRouter {
         return this.handleLoadError(c, error, requestId);
       }
 
-      // 4. Execute Handler
+      // 4. Execute Handler within request context (for console log capture)
+      const requestContext = { requestId, routeId: route.id };
+
       try {
-        return await handler(c, ctx);
+        return await runInRequestContext(requestContext, async () => {
+          return await handler(c, ctx);
+        });
       } catch (error) {
         const executionError = new HandlerExecutionError(route.handler, error);
         return this.handleExecutionError(c, executionError, requestId);
@@ -197,7 +203,7 @@ export class FunctionRouter {
     }
 
     if (error instanceof HandlerLoadError) {
-      console.error(`Handler load error [${requestId}]:`, error.originalError);
+      originalConsole.error(`Handler load error [${requestId}]:`, error.originalError);
       return c.json(
         {
           error: "Handler load failed",
@@ -209,7 +215,7 @@ export class FunctionRouter {
     }
 
     // Unknown error
-    console.error(`Unknown handler error [${requestId}]:`, error);
+    originalConsole.error(`Unknown handler error [${requestId}]:`, error);
     return c.json(
       {
         error: "Internal server error",
@@ -224,7 +230,7 @@ export class FunctionRouter {
     error: HandlerExecutionError,
     requestId: string
   ): Response {
-    console.error(
+    originalConsole.error(
       `Handler execution error [${requestId}] in ${error.handlerPath}:`,
       error.originalError
     );
