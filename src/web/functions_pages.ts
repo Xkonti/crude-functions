@@ -36,12 +36,74 @@ function renderLogLevelBadge(level: string): string {
   return `<span style="font-weight: bold; ${style}">${escapeHtml(level.toUpperCase())}</span>`;
 }
 
-function formatTimestamp(date: Date): string {
-  return date.toISOString().replace("T", " ").substring(0, 19);
+function formatTimeShort(date: Date): string {
+  const h = date.getHours().toString().padStart(2, "0");
+  const m = date.getMinutes().toString().padStart(2, "0");
+  const s = date.getSeconds().toString().padStart(2, "0");
+  const ms = date.getMilliseconds().toString().padStart(3, "0");
+  return `${h}:${m}:${s}.${ms}`;
+}
+
+function formatTimestampFull(date: Date): string {
+  return date.toISOString().replace("T", " ").substring(0, 23);
 }
 
 function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[]): string {
+  const logsTableStyles = `
+    <style>
+      .logs-table { font-size: 0.85em; }
+      .logs-table th, .logs-table td { padding: 0.4em 0.6em; }
+      .logs-table th:nth-child(1), .logs-table td:nth-child(1) { width: 1%; white-space: nowrap; }
+      .logs-table th:nth-child(2), .logs-table td:nth-child(2) { width: 1%; white-space: nowrap; }
+      .logs-table th:nth-child(3), .logs-table td:nth-child(3) { width: 1%; white-space: nowrap; }
+      .logs-table th:nth-child(4), .logs-table td:nth-child(4) { width: auto; }
+      .logs-table .log-message { font-family: monospace; word-break: break-word; }
+      .logs-table .log-row { cursor: pointer; }
+      .logs-table .log-row:hover { background: rgba(0,0,0,0.05); }
+      .logs-table .log-detail { display: none; }
+      .logs-table .log-detail.expanded { display: table-row; }
+      .logs-table .log-detail td { padding: 0.8em; background: #1a1a2e; }
+      .logs-table .log-detail pre {
+        margin: 0;
+        padding: 1em;
+        background: #0d0d1a;
+        border-radius: 4px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 0.95em;
+        color: #e0e0e0;
+      }
+      .request-id-copy {
+        cursor: pointer;
+        text-decoration: underline dotted;
+      }
+      .request-id-copy:hover { color: #17a2b8; }
+    </style>
+  `;
+
+  const logsTableScript = `
+    <script>
+      function toggleLogDetail(rowId) {
+        const detail = document.getElementById('detail-' + rowId);
+        if (detail) {
+          detail.classList.toggle('expanded');
+        }
+      }
+      function copyRequestId(event, fullId) {
+        event.stopPropagation();
+        navigator.clipboard.writeText(fullId).then(() => {
+          const el = event.target;
+          const original = el.textContent;
+          el.textContent = 'copied!';
+          setTimeout(() => { el.textContent = original; }, 1000);
+        });
+      }
+    </script>
+  `;
+
   return `
+    ${logsTableStyles}
     <h1>Logs: ${escapeHtml(functionName)}</h1>
     <div class="grid" style="margin-bottom: 1rem;">
       <div>
@@ -55,33 +117,41 @@ function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[
       logs.length === 0
         ? "<p><em>No logs recorded for this function.</em></p>"
         : `
-      <p style="color: #6c757d;">Showing ${logs.length} most recent log${logs.length === 1 ? "" : "s"}</p>
-      <table>
+      <p style="color: #6c757d;">Showing ${logs.length} most recent log${logs.length === 1 ? "" : "s"}. Click a row to expand.</p>
+      <table class="logs-table">
         <thead>
           <tr>
-            <th>Timestamp</th>
+            <th>Time</th>
             <th>Level</th>
-            <th>Request ID</th>
+            <th>Req ID</th>
             <th>Message</th>
           </tr>
         </thead>
         <tbody>
           ${logs
             .map(
-              (log) => `
-            <tr>
-              <td style="white-space: nowrap;"><code>${formatTimestamp(log.timestamp)}</code></td>
+              (log, i) => {
+                const fullMessage = log.args
+                  ? `${log.message}\n\nArgs: ${log.args}`
+                  : log.message;
+                const requestIdShort = log.requestId.slice(-5);
+                return `
+            <tr class="log-row" onclick="toggleLogDetail(${i})">
+              <td><code title="${escapeHtml(formatTimestampFull(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
               <td>${renderLogLevelBadge(log.level)}</td>
-              <td><code title="${escapeHtml(log.requestId)}">${escapeHtml(log.requestId.substring(0, 8))}...</code></td>
-              <td style="word-break: break-word;">${escapeHtml(log.message)}${
-                log.args ? `<br><small style="color: #6c757d;">${escapeHtml(log.args)}</small>` : ""
-              }</td>
+              <td><code class="request-id-copy" title="Click to copy: ${escapeHtml(log.requestId)}" onclick="copyRequestId(event, '${escapeHtml(log.requestId)}')">${escapeHtml(requestIdShort)}</code></td>
+              <td class="log-message">${escapeHtml(log.message).substring(0, 120)}${log.message.length > 120 ? "..." : ""}</td>
             </tr>
-          `
+            <tr id="detail-${i}" class="log-detail">
+              <td colspan="4"><pre>${escapeHtml(fullMessage)}</pre></td>
+            </tr>
+          `;
+              }
             )
             .join("")}
         </tbody>
       </table>
+      ${logsTableScript}
     `
     }
   `;
