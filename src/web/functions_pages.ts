@@ -16,6 +16,7 @@ import {
   confirmPage,
   buttonLink,
 } from "./templates.ts";
+import { validateId } from "../utils/validation.ts";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
@@ -1011,11 +1012,10 @@ export function createFunctionsPages(
 
   // Edit form
   routes.get("/edit/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = validateId(c.req.param("id"));
     const error = c.req.query("error");
 
-    if (isNaN(id)) {
+    if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1034,10 +1034,9 @@ export function createFunctionsPages(
 
   // Handle edit (update in place)
   routes.post("/edit/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = validateId(c.req.param("id"));
 
-    if (isNaN(id)) {
+    if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1089,10 +1088,9 @@ export function createFunctionsPages(
 
   // Delete confirmation
   routes.get("/delete/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = validateId(c.req.param("id"));
 
-    if (isNaN(id)) {
+    if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1113,10 +1111,9 @@ export function createFunctionsPages(
 
   // Handle delete
   routes.post("/delete/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = validateId(c.req.param("id"));
 
-    if (isNaN(id)) {
+    if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1135,10 +1132,9 @@ export function createFunctionsPages(
 
   // View logs for a function
   routes.get("/logs/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = validateId(c.req.param("id"));
 
-    if (isNaN(id)) {
+    if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1177,8 +1173,7 @@ export function createFunctionsPages(
 
   // View metrics for a function
   routes.get("/metrics/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = validateId(c.req.param("id"));
     const modeParam = c.req.query("mode") || "hour";
 
     // Validate mode
@@ -1187,7 +1182,7 @@ export function createFunctionsPages(
       ? (modeParam as MetricsDisplayMode)
       : "hour";
 
-    if (isNaN(id)) {
+    if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 

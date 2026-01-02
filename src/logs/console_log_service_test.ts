@@ -142,8 +142,9 @@ Deno.test("ConsoleLogService retrieves logs by routeId", async () => {
 
     const logs = await service.getByRouteId(1);
     expect(logs.length).toBe(2);
-    expect(logs[0].message).toBe("Route 1 - Message 1");
-    expect(logs[1].message).toBe("Route 1 - Message 2");
+    // Results are ordered newest to oldest (DESC)
+    expect(logs[0].message).toBe("Route 1 - Message 2");
+    expect(logs[1].message).toBe("Route 1 - Message 1");
   } finally {
     await cleanup(db, tempDir);
   }
@@ -165,7 +166,8 @@ Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => 
 
     const logs = await service.getByRouteId(1, 3);
     expect(logs.length).toBe(3);
-    expect(logs[0].message).toBe("Message 0");
+    // Results are ordered newest to oldest (DESC), limit 3 gets most recent
+    expect(logs[0].message).toBe("Message 4");
     expect(logs[2].message).toBe("Message 2");
   } finally {
     await cleanup(db, tempDir);

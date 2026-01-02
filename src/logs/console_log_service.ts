@@ -73,6 +73,11 @@ export class ConsoleLogService {
    * Results are ordered from newest to oldest.
    */
   async getByRouteId(routeId: number, limit?: number): Promise<ConsoleLog[]> {
+    // Validate limit if provided
+    if (limit !== undefined && limit <= 0) {
+      throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
+    }
+
     const sql = limit
       ? `SELECT id, request_id, route_id, level, message, args, timestamp
          FROM console_logs
@@ -100,6 +105,10 @@ export class ConsoleLogService {
     beforeId: number,
     limit: number
   ): Promise<ConsoleLog[]> {
+    if (limit <= 0) {
+      throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
+    }
+
     const rows = await this.db.queryAll<ConsoleLogRow>(
       `SELECT id, request_id, route_id, level, message, args, timestamp
        FROM console_logs
@@ -116,6 +125,10 @@ export class ConsoleLogService {
    * Retrieve recent logs across all routes.
    */
   async getRecent(limit = 100): Promise<ConsoleLog[]> {
+    if (limit <= 0) {
+      throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
+    }
+
     const rows = await this.db.queryAll<ConsoleLogRow>(
       `SELECT id, request_id, route_id, level, message, args, timestamp
        FROM console_logs

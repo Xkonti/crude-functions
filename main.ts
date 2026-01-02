@@ -19,6 +19,40 @@ import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
 import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
 import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 
+/**
+ * Parse an environment variable as a positive integer.
+ * Returns the parsed value or the default if parsing fails or value is invalid.
+ */
+function parseEnvInt(
+  name: string,
+  defaultValue: number,
+  options?: { min?: number; max?: number }
+): number {
+  const raw = Deno.env.get(name);
+  if (!raw) return defaultValue;
+
+  const parsed = parseInt(raw, 10);
+  if (isNaN(parsed)) {
+    console.warn(`Invalid ${name}: "${raw}" is not a number. Using default: ${defaultValue}`);
+    return defaultValue;
+  }
+
+  if (options?.min !== undefined && parsed < options.min) {
+    console.warn(`${name} (${parsed}) is below minimum (${options.min}). Using default: ${defaultValue}`);
+    return defaultValue;
+  }
+
+  if (options?.max !== undefined && parsed > options.max) {
+    console.warn(`${name} (${parsed}) is above maximum (${options.max}). Using default: ${defaultValue}`);
+    return defaultValue;
+  }
+
+  return parsed;
+}
+
+// AbortController for graceful shutdown - must be module-scoped
+let abortController: AbortController | null = null;
+
 const app = new Hono();
 
 // Initialize database
@@ -53,12 +87,8 @@ const executionMetricsService = new ExecutionMetricsService({ db });
 
 // Initialize and start metrics aggregation service
 const metricsAggregationConfig: MetricsAggregationConfig = {
-  aggregationIntervalSeconds: parseInt(
-    Deno.env.get("METRICS_AGGREGATION_INTERVAL_SECONDS") || "60"
-  ),
-  retentionDays: parseInt(
-    Deno.env.get("METRICS_RETENTION_DAYS") || "90"
-  ),
+  aggregationIntervalSeconds: parseEnvInt("METRICS_AGGREGATION_INTERVAL_SECONDS", 60, { min: 1 }),
+  retentionDays: parseEnvInt("METRICS_RETENTION_DAYS", 90, { min: 1 }),
 };
 const metricsAggregationService = new MetricsAggregationService({
   metricsService: executionMetricsService,
@@ -68,12 +98,8 @@ metricsAggregationService.start();
 
 // Initialize and start log trimming service
 const logTrimmingConfig: LogTrimmingConfig = {
-  trimmingIntervalSeconds: parseInt(
-    Deno.env.get("LOG_TRIMMING_INTERVAL_SECONDS") || "300"
-  ),
-  maxLogsPerRoute: parseInt(
-    Deno.env.get("LOG_MAX_PER_ROUTE") || "2000"
-  ),
+  trimmingIntervalSeconds: parseEnvInt("LOG_TRIMMING_INTERVAL_SECONDS", 300, { min: 1 }),
+  maxLogsPerRoute: parseEnvInt("LOG_MAX_PER_ROUTE", 2000, { min: 1 }),
 };
 const logTrimmingService = new LogTrimmingService({
   logService: consoleLogService,
@@ -143,14 +169,26 @@ export { app, apiKeyService, routesService, functionRouter, fileService, console
 async function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
-    // Stop log trimming service first (waits for current processing)
+    // 1. Stop accepting new requests first
+    if (abortController) {
+      abortController.abort();
+      console.log("Stopped accepting new connections");
+    }
+
+    // 2. Wait for in-flight requests to drain (5 seconds)
+    const drainTimeoutMs = 5000;
+    console.log(`Waiting ${drainTimeoutMs}ms for requests to drain...`);
+    await new Promise((resolve) => setTimeout(resolve, drainTimeoutMs));
+
+    // 3. Stop log trimming service (waits for current processing)
     await logTrimmingService.stop();
     console.log("Log trimming service stopped");
 
-    // Stop aggregation service (waits for current processing)
+    // 4. Stop aggregation service (waits for current processing)
     await metricsAggregationService.stop();
     console.log("Metrics aggregation service stopped");
 
+    // 5. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {
@@ -162,10 +200,10 @@ async function gracefulShutdown(signal: string) {
 
 // Start server only when run directly
 if (import.meta.main) {
-  const port = parseInt(Deno.env.get("PORT") || "8000");
+  const port = parseEnvInt("PORT", 8000, { min: 1, max: 65535 });
 
-  // Setup graceful shutdown
-  const abortController = new AbortController();
+  // Setup graceful shutdown - assign to module-scoped variable
+  abortController = new AbortController();
 
   Deno.addSignalListener("SIGTERM", () => {
     gracefulShutdown("SIGTERM");

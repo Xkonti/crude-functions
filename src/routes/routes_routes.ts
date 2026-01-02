@@ -7,6 +7,7 @@ import {
   type FunctionRoute,
   type NewFunctionRoute,
 } from "./routes_service.ts";
+import { validateId } from "../utils/validation.ts";
 
 export function createRoutesRoutes(service: RoutesService): Hono {
   const routes = new Hono();
@@ -74,10 +75,8 @@ export function createRoutesRoutes(service: RoutesService): Hono {
 
   // PUT /api/routes/:id - Update route by ID
   routes.put("/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
-
-    if (isNaN(id)) {
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
       return c.json({ error: "Invalid route ID" }, 400);
     }
 
@@ -131,10 +130,10 @@ export function createRoutesRoutes(service: RoutesService): Hono {
   routes.delete("/:identifier", async (c) => {
     const identifier = c.req.param("identifier");
 
-    // Try parsing as ID first
-    const id = parseInt(identifier, 10);
+    // Try parsing as ID first (with full validation)
+    const id = validateId(identifier);
 
-    if (!isNaN(id)) {
+    if (id !== null) {
       // Delete by ID
       const existing = await service.getById(id);
       if (!existing) {

@@ -86,6 +86,11 @@ export class ExecutionMetricsService {
     type?: MetricType,
     limit?: number
   ): Promise<ExecutionMetric[]> {
+    // Validate limit if provided
+    if (limit !== undefined && limit <= 0) {
+      throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
+    }
+
     let rows: ExecutionMetricRow[];
 
     if (type && limit) {
@@ -131,6 +136,10 @@ export class ExecutionMetricsService {
    * Retrieve recent metrics across all routes.
    */
   async getRecent(limit = 100): Promise<ExecutionMetric[]> {
+    if (limit <= 0) {
+      throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
+    }
+
     const rows = await this.db.queryAll<ExecutionMetricRow>(
       `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
        FROM execution_metrics
@@ -271,7 +280,7 @@ export class ExecutionMetricsService {
   async deleteByTypeOlderThan(type: MetricType, date: Date): Promise<number> {
     const result = await this.db.execute(
       `DELETE FROM execution_metrics WHERE type = ? AND timestamp < ?`,
-      [type, date.toISOString()]
+      [type, formatDateForSqlite(date)]
     );
 
     return result.changes;

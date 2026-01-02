@@ -20,6 +20,10 @@ export class LogTrimmingService {
   private timerId: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
+  private consecutiveFailures = 0;
+
+  private static readonly MAX_CONSECUTIVE_FAILURES = 5;
+  private static readonly STOP_TIMEOUT_MS = 30000;
 
   constructor(options: LogTrimmingServiceOptions) {
     this.logService = options.logService;
@@ -42,20 +46,41 @@ export class LogTrimmingService {
     );
 
     // Run immediately on start, then schedule interval
-    this.runTrimming().catch((error) => {
-      logger.error("[LogTrimming] Initial trimming failed:", error);
-    });
+    this.runTrimming()
+      .then(() => {
+        this.consecutiveFailures = 0;
+      })
+      .catch((error) => {
+        this.consecutiveFailures++;
+        logger.error("[LogTrimming] Initial trimming failed:", error);
+      });
 
     this.timerId = setInterval(() => {
-      this.runTrimming().catch((error) => {
-        logger.error("[LogTrimming] Trimming failed:", error);
-      });
+      this.runTrimming()
+        .then(() => {
+          this.consecutiveFailures = 0;
+        })
+        .catch((error) => {
+          this.consecutiveFailures++;
+          logger.error(
+            `[LogTrimming] Trimming failed (${this.consecutiveFailures}/${LogTrimmingService.MAX_CONSECUTIVE_FAILURES}):`,
+            error
+          );
+
+          if (this.consecutiveFailures >= LogTrimmingService.MAX_CONSECUTIVE_FAILURES) {
+            logger.error("[LogTrimming] Max consecutive failures reached, stopping service");
+            if (this.timerId !== null) {
+              clearInterval(this.timerId);
+              this.timerId = null;
+            }
+          }
+        });
     }, this.config.trimmingIntervalSeconds * 1000);
   }
 
   /**
    * Stop the trimming timer.
-   * Waits for any in-progress trimming to complete.
+   * Waits for any in-progress trimming to complete (with timeout).
    */
   async stop(): Promise<void> {
     if (this.timerId !== null) {
@@ -65,8 +90,13 @@ export class LogTrimmingService {
 
     this.stopRequested = true;
 
-    // Wait for any in-progress processing to complete
+    // Wait for any in-progress processing to complete with timeout
+    const startTime = Date.now();
     while (this.isProcessing) {
+      if (Date.now() - startTime > LogTrimmingService.STOP_TIMEOUT_MS) {
+        logger.warn("[LogTrimming] Stop timeout exceeded, processing may still be running");
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 

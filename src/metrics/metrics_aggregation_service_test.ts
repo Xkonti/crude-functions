@@ -69,7 +69,8 @@ interface TestSetup {
 
 async function createTestSetup(
   intervalSeconds = 60,
-  retentionDays = 90
+  retentionDays = 90,
+  maxMinutesPerRun = 10000 // High default for tests to process all data
 ): Promise<TestSetup> {
   const tempDir = await Deno.makeTempDir();
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
@@ -83,6 +84,7 @@ async function createTestSetup(
       aggregationIntervalSeconds: intervalSeconds,
       retentionDays: retentionDays,
     },
+    maxMinutesPerRun,
   });
 
   return { aggregationService, metricsService, db, tempDir };

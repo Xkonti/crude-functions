@@ -5,6 +5,8 @@ import { logger } from "../utils/logger.ts";
 export interface MetricsAggregationServiceOptions {
   metricsService: ExecutionMetricsService;
   config: MetricsAggregationConfig;
+  /** Maximum minutes to process per aggregation run. Defaults to 60. */
+  maxMinutesPerRun?: number;
 }
 
 /**
@@ -19,13 +21,20 @@ export interface MetricsAggregationServiceOptions {
 export class MetricsAggregationService {
   private readonly metricsService: ExecutionMetricsService;
   private readonly config: MetricsAggregationConfig;
+  private readonly maxMinutesPerRun: number;
   private timerId: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
+  private consecutiveFailures = 0;
+
+  private static readonly MAX_CONSECUTIVE_FAILURES = 5;
+  private static readonly STOP_TIMEOUT_MS = 30000;
+  private static readonly DEFAULT_MAX_MINUTES_PER_RUN = 60;
 
   constructor(options: MetricsAggregationServiceOptions) {
     this.metricsService = options.metricsService;
     this.config = options.config;
+    this.maxMinutesPerRun = options.maxMinutesPerRun ?? MetricsAggregationService.DEFAULT_MAX_MINUTES_PER_RUN;
   }
 
   /**
@@ -44,20 +53,41 @@ export class MetricsAggregationService {
     );
 
     // Run immediately on start, then schedule interval
-    this.runAggregation().catch((error) => {
-      logger.error("[MetricsAggregation] Initial aggregation failed:", error);
-    });
+    this.runAggregation()
+      .then(() => {
+        this.consecutiveFailures = 0;
+      })
+      .catch((error) => {
+        this.consecutiveFailures++;
+        logger.error("[MetricsAggregation] Initial aggregation failed:", error);
+      });
 
     this.timerId = setInterval(() => {
-      this.runAggregation().catch((error) => {
-        logger.error("[MetricsAggregation] Aggregation failed:", error);
-      });
+      this.runAggregation()
+        .then(() => {
+          this.consecutiveFailures = 0;
+        })
+        .catch((error) => {
+          this.consecutiveFailures++;
+          logger.error(
+            `[MetricsAggregation] Aggregation failed (${this.consecutiveFailures}/${MetricsAggregationService.MAX_CONSECUTIVE_FAILURES}):`,
+            error
+          );
+
+          if (this.consecutiveFailures >= MetricsAggregationService.MAX_CONSECUTIVE_FAILURES) {
+            logger.error("[MetricsAggregation] Max consecutive failures reached, stopping service");
+            if (this.timerId !== null) {
+              clearInterval(this.timerId);
+              this.timerId = null;
+            }
+          }
+        });
     }, this.config.aggregationIntervalSeconds * 1000);
   }
 
   /**
    * Stop the aggregation timer.
-   * Waits for any in-progress aggregation to complete.
+   * Waits for any in-progress aggregation to complete (with timeout).
    */
   async stop(): Promise<void> {
     if (this.timerId !== null) {
@@ -67,8 +97,13 @@ export class MetricsAggregationService {
 
     this.stopRequested = true;
 
-    // Wait for any in-progress processing to complete
+    // Wait for any in-progress processing to complete with timeout
+    const startTime = Date.now();
     while (this.isProcessing) {
+      if (Date.now() - startTime > MetricsAggregationService.STOP_TIMEOUT_MS) {
+        logger.warn("[MetricsAggregation] Stop timeout exceeded, processing may still be running");
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
@@ -122,8 +157,18 @@ export class MetricsAggregationService {
     let currentMinute = this.floorToMinute(oldestExecution.timestamp);
     const endMinute = this.floorToMinute(now); // Don't process current incomplete minute
 
+    let minutesProcessed = 0;
+
     while (currentMinute < endMinute) {
       if (this.stopRequested) return;
+
+      // Limit processing per run to avoid long-running operations on startup
+      if (minutesProcessed >= this.maxMinutesPerRun) {
+        logger.info(
+          `[MetricsAggregation] Reached max minutes per run (${this.maxMinutesPerRun}), will continue in next run`
+        );
+        return;
+      }
 
       const minuteEnd = new Date(currentMinute.getTime() + 60 * 1000);
       const currentHour = this.floorToHour(currentMinute);
@@ -165,6 +210,7 @@ export class MetricsAggregationService {
       }
 
       currentMinute = minuteEnd;
+      minutesProcessed++;
     }
   }
 

@@ -107,12 +107,27 @@ export function createCodePages(fileService: FileService): Hono {
       return c.redirect("/web/code?error=" + encodeURIComponent("No file path specified"));
     }
 
+    // Validate and normalize path (matching upload endpoint validation)
+    const normalizedPath = normalizePath(path);
+
+    if (!validateFilePath(normalizedPath)) {
+      return c.redirect(
+        "/web/code?error=" + encodeURIComponent("Invalid file path format")
+      );
+    }
+
+    if (!isPathSafe(normalizedPath)) {
+      return c.redirect(
+        "/web/code?error=" + encodeURIComponent("Path contains invalid characters or traversal")
+      );
+    }
+
     let body: { content?: string };
     try {
       body = await c.req.parseBody();
     } catch {
       return c.redirect(
-        `/web/code/edit?path=${encodeURIComponent(path)}&error=` +
+        `/web/code/edit?path=${encodeURIComponent(normalizedPath)}&error=` +
           encodeURIComponent("Invalid form data")
       );
     }
@@ -120,18 +135,18 @@ export function createCodePages(fileService: FileService): Hono {
     const content = body.content;
     if (content === undefined) {
       return c.redirect(
-        `/web/code/edit?path=${encodeURIComponent(path)}&error=` +
+        `/web/code/edit?path=${encodeURIComponent(normalizedPath)}&error=` +
           encodeURIComponent("Content is required")
       );
     }
 
     try {
-      await fileService.writeFile(path, content as string);
-      return c.redirect("/web/code?success=" + encodeURIComponent(`File saved: ${path}`));
+      await fileService.writeFile(normalizedPath, content as string);
+      return c.redirect("/web/code?success=" + encodeURIComponent(`File saved: ${normalizedPath}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to save file";
       return c.redirect(
-        `/web/code/edit?path=${encodeURIComponent(path)}&error=` +
+        `/web/code/edit?path=${encodeURIComponent(normalizedPath)}&error=` +
           encodeURIComponent(message)
       );
     }

@@ -67,7 +67,6 @@ export class RoutesService {
   private readonly db: DatabaseService;
   private readonly rebuildMutex = new Mutex();
   private dirty = true; // Start dirty to force initial build
-  private rebuildPromise: Promise<void> | null = null;
 
   constructor(options: RoutesServiceOptions) {
     this.db = options.db;
@@ -78,30 +77,20 @@ export class RoutesService {
   /**
    * Check if routes need rebuilding and rebuild if necessary.
    * Coordinates concurrent access to prevent duplicate rebuilds.
+   * The mutex in performRebuild ensures only one rebuild runs at a time.
    *
    * @param rebuilder - Callback function that receives the routes and performs the rebuild
    */
   async rebuildIfNeeded(
     rebuilder: (routes: FunctionRoute[]) => void
   ): Promise<void> {
-    // Fast path: not dirty, no rebuild needed
+    // Fast path: not dirty, no rebuild needed (safe to check without lock)
     if (!this.dirty) {
       return;
     }
 
-    // If a rebuild is already in progress, wait for it
-    if (this.rebuildPromise) {
-      await this.rebuildPromise;
-      return;
-    }
-
-    // Acquire the rebuild lock and perform rebuild
-    this.rebuildPromise = this.performRebuild(rebuilder);
-    try {
-      await this.rebuildPromise;
-    } finally {
-      this.rebuildPromise = null;
-    }
+    // Delegate to performRebuild which handles all synchronization
+    await this.performRebuild(rebuilder);
   }
 
   private async performRebuild(
@@ -173,20 +162,46 @@ export class RoutesService {
   }
 
   private rowToFunctionRoute(row: RouteRow): FunctionRoute {
+    // Parse methods with error handling
+    let methods: string[];
+    try {
+      methods = JSON.parse(row.methods) as string[];
+    } catch (error) {
+      globalThis.console.error(
+        `[RoutesService] Failed to parse methods for route ${row.id}: ${row.methods}`,
+        error
+      );
+      methods = []; // Return empty array to allow other routes to load
+    }
+
+    // Parse keys with error handling
+    let keys: string[] | undefined;
+    if (row.keys) {
+      try {
+        keys = JSON.parse(row.keys) as string[];
+      } catch (error) {
+        globalThis.console.error(
+          `[RoutesService] Failed to parse keys for route ${row.id}: ${row.keys}`,
+          error
+        );
+        keys = undefined;
+      }
+    }
+
     const route: FunctionRoute = {
       id: row.id,
       name: row.name,
       handler: row.handler,
       route: row.route,
-      methods: JSON.parse(row.methods) as string[],
+      methods,
     };
 
     if (row.description) {
       route.description = row.description;
     }
 
-    if (row.keys) {
-      route.keys = JSON.parse(row.keys) as string[];
+    if (keys) {
+      route.keys = keys;
     }
 
     return route;
