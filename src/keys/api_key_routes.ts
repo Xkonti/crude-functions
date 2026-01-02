@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import { ApiKeyService, validateKeyGroup, validateKeyValue } from "./api_key_service.ts";
+import { validateId } from "../utils/validation.ts";
 
 export function createApiKeyRoutes(service: ApiKeyService): Hono {
   const routes = new Hono();
@@ -52,13 +53,20 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // DELETE /api/keys/by-id/:id - Delete a key by ID (for web UI)
   routes.delete("/by-id/:id", async (c) => {
-    const id = parseInt(c.req.param("id"), 10);
-    if (isNaN(id)) {
-      return c.json({ error: "Invalid key ID" }, 400);
+    // Special case: -1 is the synthetic ID for env-provided management key
+    const idParam = c.req.param("id");
+    const parsedId = parseInt(idParam, 10);
+
+    // Allow -1 (env key) but validate all other IDs
+    if (parsedId !== -1) {
+      const id = validateId(idParam);
+      if (id === null) {
+        return c.json({ error: "Invalid key ID" }, 400);
+      }
     }
 
     try {
-      await service.removeKeyById(id);
+      await service.removeKeyById(parsedId);
       return c.json({ success: true });
     } catch (error) {
       if (error instanceof Error && error.message.includes("environment")) {

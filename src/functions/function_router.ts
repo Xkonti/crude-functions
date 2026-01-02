@@ -1,6 +1,8 @@
 import { Hono, type Context } from "@hono/hono";
 import { RoutesService, type FunctionRoute } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
+import type { ConsoleLogService } from "../logs/console_log_service.ts";
+import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { HandlerLoader } from "./handler_loader.ts";
 import { ApiKeyValidator } from "./api_key_validator.ts";
 import type { FunctionContext, RouteInfo } from "./types.ts";
@@ -11,10 +13,14 @@ import {
   HandlerLoadError,
   HandlerExecutionError,
 } from "./errors.ts";
+import { runInRequestContext } from "../logs/request_context.ts";
+import { originalConsole } from "../logs/console_interceptor.ts";
 
 export interface FunctionRouterOptions {
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
+  consoleLogService: ConsoleLogService;
+  executionMetricsService: ExecutionMetricsService;
   /** Base directory for code files (default: current working directory) */
   codeDirectory?: string;
 }
@@ -23,6 +29,8 @@ export class FunctionRouter {
   private readonly routesService: RoutesService;
   private readonly apiKeyValidator: ApiKeyValidator;
   private readonly handlerLoader: HandlerLoader;
+  private readonly consoleLogService: ConsoleLogService;
+  private readonly executionMetricsService: ExecutionMetricsService;
   private router: Hono = this.createEmptyRouter();
 
   constructor(options: FunctionRouterOptions) {
@@ -31,6 +39,8 @@ export class FunctionRouter {
     this.handlerLoader = new HandlerLoader({
       baseDirectory: options.codeDirectory ?? Deno.cwd(),
     });
+    this.consoleLogService = options.consoleLogService;
+    this.executionMetricsService = options.executionMetricsService;
   }
 
   async handle(c: Context): Promise<Response> {
@@ -91,6 +101,8 @@ export class FunctionRouter {
   private createHandler(route: FunctionRoute) {
     return async (c: Context): Promise<Response> => {
       const requestId = crypto.randomUUID();
+      const method = c.req.method;
+      const fullUrl = c.req.url;
 
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
@@ -99,6 +111,17 @@ export class FunctionRouter {
         const validation = await this.apiKeyValidator.validate(c, route.keys);
 
         if (!validation.valid) {
+          // Log rejected request
+          this.consoleLogService.store({
+            requestId,
+            routeId: route.id,
+            level: "exec_reject",
+            message: `${method} ${fullUrl}`,
+            args: JSON.stringify({ reason: "invalid_api_key" }),
+          }).catch((error) => {
+            globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
+          });
+
           return c.json(
             {
               error: "Unauthorized",
@@ -139,10 +162,77 @@ export class FunctionRouter {
         return this.handleLoadError(c, error, requestId);
       }
 
-      // 4. Execute Handler
+      // 4. Execute Handler within request context (for console log capture)
+      const requestContext = { requestId, routeId: route.id };
+
+      // Prepare execution logging data
+      const origin = c.req.header("origin") || c.req.header("referer") || "";
+      const contentLength = c.req.header("content-length") || "0";
+      const keyGroup = authenticatedKeyGroup || "";
+
+      // Log execution start
+      const startTime = performance.now();
+      this.consoleLogService.store({
+        requestId,
+        routeId: route.id,
+        level: "exec_start",
+        message: `${method} ${fullUrl}`,
+        args: JSON.stringify({ origin, keyGroup, contentLength }),
+      }).catch((error) => {
+        globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
+      });
+
       try {
-        return await handler(c, ctx);
+        const response = await runInRequestContext(requestContext, async () => {
+          return await handler(c, ctx);
+        });
+
+        // Log execution end (success)
+        const durationMs = Math.round(performance.now() - startTime);
+        this.consoleLogService.store({
+          requestId,
+          routeId: route.id,
+          level: "exec_end",
+          message: `${durationMs}ms`,
+        }).catch((error) => {
+          globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
+        });
+
+        // Store execution metric
+        this.executionMetricsService.store({
+          routeId: route.id,
+          type: "execution",
+          avgTimeMs: durationMs,
+          maxTimeMs: durationMs,
+          executionCount: 1,
+        }).catch((error) => {
+          globalThis.console.error("[FunctionRouter] Failed to store metric:", error);
+        });
+
+        return response;
       } catch (error) {
+        // Log execution end (error)
+        const durationMs = Math.round(performance.now() - startTime);
+        this.consoleLogService.store({
+          requestId,
+          routeId: route.id,
+          level: "exec_end",
+          message: `${durationMs}ms (error)`,
+        }).catch((logError) => {
+          globalThis.console.error("[FunctionRouter] Failed to store console log:", logError);
+        });
+
+        // Still store metric for failed executions
+        this.executionMetricsService.store({
+          routeId: route.id,
+          type: "execution",
+          avgTimeMs: durationMs,
+          maxTimeMs: durationMs,
+          executionCount: 1,
+        }).catch((metricError) => {
+          globalThis.console.error("[FunctionRouter] Failed to store metric:", metricError);
+        });
+
         const executionError = new HandlerExecutionError(route.handler, error);
         return this.handleExecutionError(c, executionError, requestId);
       }
@@ -197,7 +287,7 @@ export class FunctionRouter {
     }
 
     if (error instanceof HandlerLoadError) {
-      console.error(`Handler load error [${requestId}]:`, error.originalError);
+      originalConsole.error(`Handler load error [${requestId}]:`, error.originalError);
       return c.json(
         {
           error: "Handler load failed",
@@ -209,7 +299,7 @@ export class FunctionRouter {
     }
 
     // Unknown error
-    console.error(`Unknown handler error [${requestId}]:`, error);
+    originalConsole.error(`Unknown handler error [${requestId}]:`, error);
     return c.json(
       {
         error: "Internal server error",
@@ -224,7 +314,7 @@ export class FunctionRouter {
     error: HandlerExecutionError,
     requestId: string
   ): Response {
-    console.error(
+    originalConsole.error(
       `Handler execution error [${requestId}] in ${error.handlerPath}:`,
       error.originalError
     );

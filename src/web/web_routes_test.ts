@@ -5,6 +5,8 @@ import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { RoutesService } from "../routes/routes_service.ts";
 import { FileService } from "../files/file_service.ts";
+import { ConsoleLogService } from "../logs/console_log_service.ts";
+import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
@@ -32,6 +34,35 @@ const ROUTES_SCHEMA = `
   CREATE INDEX idx_routes_route ON routes(route);
 `;
 
+const CONSOLE_LOGS_SCHEMA = `
+  CREATE TABLE console_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id TEXT NOT NULL,
+    route_id INTEGER,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    args TEXT,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX idx_console_logs_request_id ON console_logs(request_id);
+  CREATE INDEX idx_console_logs_route_id ON console_logs(route_id, id);
+`;
+
+const EXECUTION_METRICS_SCHEMA = `
+  CREATE TABLE execution_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    route_id INTEGER NOT NULL,
+    type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
+    avg_time_ms REAL NOT NULL,
+    max_time_ms INTEGER NOT NULL,
+    execution_count INTEGER NOT NULL DEFAULT 1,
+    timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX idx_execution_metrics_route_id ON execution_metrics(route_id);
+  CREATE INDEX idx_execution_metrics_type_route_timestamp ON execution_metrics(type, route_id, timestamp);
+  CREATE INDEX idx_execution_metrics_timestamp ON execution_metrics(timestamp);
+`;
+
 interface TestRoute {
   name: string;
   handler: string;
@@ -48,6 +79,8 @@ interface TestContext {
   apiKeyService: ApiKeyService;
   routesService: RoutesService;
   fileService: FileService;
+  consoleLogService: ConsoleLogService;
+  executionMetricsService: ExecutionMetricsService;
 }
 
 async function createTestApp(
@@ -61,6 +94,8 @@ async function createTestApp(
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
   await db.exec(ROUTES_SCHEMA);
+  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_METRICS_SCHEMA);
 
   // Add default management key
   await db.execute(
@@ -73,6 +108,8 @@ async function createTestApp(
   const apiKeyService = new ApiKeyService({ db });
   const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
+  const consoleLogService = new ConsoleLogService({ db });
+  const executionMetricsService = new ExecutionMetricsService({ db });
 
   // Add initial routes
   for (const route of initialRoutes) {
@@ -82,10 +119,10 @@ async function createTestApp(
   const app = new Hono();
   app.route(
     "/web",
-    createWebRoutes({ fileService, routesService, apiKeyService })
+    createWebRoutes({ fileService, routesService, apiKeyService, consoleLogService, executionMetricsService })
   );
 
-  return { app, tempDir, db, apiKeyService, routesService, fileService };
+  return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService };
 }
 
 async function cleanup(db: DatabaseService, tempDir: string) {
@@ -337,21 +374,129 @@ Deno.test("POST /web/functions/create creates function", async () => {
   }
 });
 
-Deno.test("POST /web/functions/delete removes function", async () => {
+Deno.test("POST /web/functions/delete/:id removes function", async () => {
   const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
   ];
   const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
   try {
-    const res = await app.request("/web/functions/delete?name=to-delete", {
+    const route = await routesService.getByName("to-delete");
+
+    const res = await app.request(`/web/functions/delete/${route!.id}`, {
       method: "POST",
       headers: authHeader(),
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/functions?success=");
 
-    const fn = await routesService.getByName("to-delete");
+    const fn = await routesService.getById(route!.id);
     expect(fn).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/edit/:id shows edit form", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"], description: "Test" },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    const res = await app.request(`/web/functions/edit/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Edit");
+    expect(html).toContain("test-fn");
+    // Name field should now be editable (not readonly)
+    expect(html).not.toContain("readonly");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("POST /web/functions/edit/:id updates function and allows name change", async () => {
+  const initialRoutes = [
+    { name: "old-name", handler: "old.ts", route: "/old", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("old-name");
+    const originalId = route!.id;
+
+    const formData = new FormData();
+    formData.append("name", "new-name");
+    formData.append("handler", "new.ts");
+    formData.append("route", "/new");
+    formData.append("methods", "POST");
+
+    const res = await app.request(`/web/functions/edit/${originalId}`, {
+      method: "POST",
+      headers: authHeader(),
+      body: formData,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("/web/functions?success=");
+
+    // Verify ID preserved
+    const updated = await routesService.getById(originalId);
+    expect(updated?.name).toBe("new-name");
+    expect(updated?.handler).toBe("new.ts");
+    expect(updated?.route).toBe("/new");
+    expect(updated?.methods).toContain("POST");
+
+    // Old name should not exist
+    const oldName = await routesService.getByName("old-name");
+    expect(oldName).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/edit/:id returns error for invalid ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/functions/edit/invalid", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/edit/:id returns error for non-existent ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/functions/edit/999", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/delete/:id shows confirmation", async () => {
+  const initialRoutes = [
+    { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("to-delete");
+
+    const res = await app.request(`/web/functions/delete/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Delete Function");
+    expect(html).toContain("to-delete");
   } finally {
     await cleanup(db, tempDir);
   }
@@ -538,6 +683,189 @@ Deno.test("GET /web/keys/delete-group blocks deleting all management keys", asyn
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+// Metrics pages tests
+Deno.test("GET /web/functions/metrics/:id shows metrics page", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Metrics: test-fn");
+    expect(html).toContain("Last Hour");
+    expect(html).toContain("Last 24 Hours");
+    expect(html).toContain("metrics-tabs"); // Mode switching tabs
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/metrics/:id with mode=day shows day view", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    const res = await app.request(`/web/functions/metrics/${route!.id}?mode=day`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Last 24 Hours");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/metrics/:id shows no data message for new function", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("No metrics recorded");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/metrics/:id with data shows charts", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    // Add some minute-level metrics
+    const now = new Date();
+    for (let i = 0; i < 5; i++) {
+      const timestamp = new Date(now.getTime() - i * 60 * 1000);
+      timestamp.setUTCSeconds(0, 0);
+      await executionMetricsService.store({
+        routeId: route!.id,
+        type: "minute",
+        avgTimeMs: 100 + i * 10,
+        maxTimeMs: 150 + i * 10,
+        executionCount: 5 + i,
+        timestamp,
+      });
+    }
+
+    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("executionTimeChart");
+    expect(html).toContain("requestCountChart");
+    expect(html).toContain("Avg Execution Time");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/metrics/:id returns error for invalid ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/functions/metrics/invalid", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/metrics/:id returns error for non-existent ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/functions/metrics/999", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("Functions list includes Metrics link", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, tempDir } = await createTestApp(initialRoutes);
+  try {
+    const res = await app.request("/web/functions", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("/web/functions/metrics/");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/metrics/:id shows current period from raw execution data", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    // Add raw execution records (not yet aggregated into minute records)
+    const now = new Date();
+    await executionMetricsService.store({
+      routeId: route!.id,
+      type: "execution",
+      avgTimeMs: 50,
+      maxTimeMs: 50,
+      executionCount: 1,
+      timestamp: now,
+    });
+    await executionMetricsService.store({
+      routeId: route!.id,
+      type: "execution",
+      avgTimeMs: 100,
+      maxTimeMs: 100,
+      executionCount: 1,
+      timestamp: now,
+    });
+
+    // Metrics page should show data even without aggregation running
+    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    // Should show charts because we have execution data
+    expect(html).toContain("executionTimeChart");
+    expect(html).toContain("requestCountChart");
+    // Should NOT show "no data" message
+    expect(html).not.toContain("No metrics recorded");
   } finally {
     await cleanup(db, tempDir);
   }

@@ -2,6 +2,7 @@ import { Mutex } from "@core/asyncutil/mutex";
 import type { DatabaseService } from "../database/database_service.ts";
 
 export interface FunctionRoute {
+  id: number;
   name: string;
   description?: string;
   handler: string;
@@ -9,6 +10,9 @@ export interface FunctionRoute {
   methods: string[];
   keys?: string[];
 }
+
+/** Input type for adding new routes (id is auto-generated) */
+export type NewFunctionRoute = Omit<FunctionRoute, "id">;
 
 export interface RoutesServiceOptions {
   db: DatabaseService;
@@ -63,7 +67,6 @@ export class RoutesService {
   private readonly db: DatabaseService;
   private readonly rebuildMutex = new Mutex();
   private dirty = true; // Start dirty to force initial build
-  private rebuildPromise: Promise<void> | null = null;
 
   constructor(options: RoutesServiceOptions) {
     this.db = options.db;
@@ -74,30 +77,20 @@ export class RoutesService {
   /**
    * Check if routes need rebuilding and rebuild if necessary.
    * Coordinates concurrent access to prevent duplicate rebuilds.
+   * The mutex in performRebuild ensures only one rebuild runs at a time.
    *
    * @param rebuilder - Callback function that receives the routes and performs the rebuild
    */
   async rebuildIfNeeded(
     rebuilder: (routes: FunctionRoute[]) => void
   ): Promise<void> {
-    // Fast path: not dirty, no rebuild needed
+    // Fast path: not dirty, no rebuild needed (safe to check without lock)
     if (!this.dirty) {
       return;
     }
 
-    // If a rebuild is already in progress, wait for it
-    if (this.rebuildPromise) {
-      await this.rebuildPromise;
-      return;
-    }
-
-    // Acquire the rebuild lock and perform rebuild
-    this.rebuildPromise = this.performRebuild(rebuilder);
-    try {
-      await this.rebuildPromise;
-    } finally {
-      this.rebuildPromise = null;
-    }
+    // Delegate to performRebuild which handles all synchronization
+    await this.performRebuild(rebuilder);
   }
 
   private async performRebuild(
@@ -152,20 +145,63 @@ export class RoutesService {
     return this.rowToFunctionRoute(row);
   }
 
+  /**
+   * Get a single route by ID.
+   */
+  async getById(id: number): Promise<FunctionRoute | null> {
+    const row = await this.db.queryOne<RouteRow>(
+      "SELECT id, name, description, handler, route, methods, keys FROM routes WHERE id = ?",
+      [id]
+    );
+
+    if (!row) {
+      return null;
+    }
+
+    return this.rowToFunctionRoute(row);
+  }
+
   private rowToFunctionRoute(row: RouteRow): FunctionRoute {
+    // Parse methods with error handling
+    let methods: string[];
+    try {
+      methods = JSON.parse(row.methods) as string[];
+    } catch (error) {
+      globalThis.console.error(
+        `[RoutesService] Failed to parse methods for route ${row.id}: ${row.methods}`,
+        error
+      );
+      methods = []; // Return empty array to allow other routes to load
+    }
+
+    // Parse keys with error handling
+    let keys: string[] | undefined;
+    if (row.keys) {
+      try {
+        keys = JSON.parse(row.keys) as string[];
+      } catch (error) {
+        globalThis.console.error(
+          `[RoutesService] Failed to parse keys for route ${row.id}: ${row.keys}`,
+          error
+        );
+        keys = undefined;
+      }
+    }
+
     const route: FunctionRoute = {
+      id: row.id,
       name: row.name,
       handler: row.handler,
       route: row.route,
-      methods: JSON.parse(row.methods) as string[],
+      methods,
     };
 
     if (row.description) {
       route.description = row.description;
     }
 
-    if (row.keys) {
-      route.keys = JSON.parse(row.keys) as string[];
+    if (keys) {
+      route.keys = keys;
     }
 
     return route;
@@ -177,7 +213,7 @@ export class RoutesService {
    * Add a new route to the database.
    * Waits for any in-progress rebuild to complete before modifying.
    */
-  async addRoute(route: FunctionRoute): Promise<void> {
+  async addRoute(route: NewFunctionRoute): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
@@ -234,6 +270,87 @@ export class RoutesService {
 
     const result = await this.db.execute("DELETE FROM routes WHERE name = ?", [
       name,
+    ]);
+
+    // Only mark dirty if we actually deleted something
+    if (result.changes > 0) {
+      this.markDirty();
+    }
+  }
+
+  /**
+   * Update an existing route by ID.
+   * Preserves the route ID to maintain log/metrics associations.
+   * Waits for any in-progress rebuild to complete before modifying.
+   */
+  async updateRoute(id: number, route: NewFunctionRoute): Promise<void> {
+    // Wait for any in-progress rebuild to complete
+    using _lock = await this.rebuildMutex.acquire();
+
+    // Verify route exists
+    const existing = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM routes WHERE id = ?",
+      [id]
+    );
+    if (!existing) {
+      throw new Error(`Route with id '${id}' not found`);
+    }
+
+    // Validate: check for duplicate name (excluding current route)
+    const existingByName = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM routes WHERE name = ? AND id != ?",
+      [route.name, id]
+    );
+    if (existingByName) {
+      throw new Error(`Route with name '${route.name}' already exists`);
+    }
+
+    // Validate: check for duplicate route+method combinations (excluding current route)
+    const existingRoutes = await this.db.queryAll<{ id: number; name: string; methods: string }>(
+      "SELECT id, name, methods FROM routes WHERE route = ? AND id != ?",
+      [route.route, id]
+    );
+
+    for (const existingRoute of existingRoutes) {
+      const existingMethods = JSON.parse(existingRoute.methods) as string[];
+      for (const method of route.methods) {
+        if (existingMethods.includes(method)) {
+          throw new Error(
+            `Route '${route.route}' with method '${method}' already exists (route: '${existingRoute.name}')`
+          );
+        }
+      }
+    }
+
+    // Update the route
+    await this.db.execute(
+      `UPDATE routes
+       SET name = ?, description = ?, handler = ?, route = ?, methods = ?, keys = ?
+       WHERE id = ?`,
+      [
+        route.name,
+        route.description ?? null,
+        route.handler,
+        route.route,
+        JSON.stringify(route.methods),
+        route.keys ? JSON.stringify(route.keys) : null,
+        id,
+      ]
+    );
+
+    this.markDirty();
+  }
+
+  /**
+   * Remove a route by ID.
+   * Waits for any in-progress rebuild to complete before modifying.
+   */
+  async removeRouteById(id: number): Promise<void> {
+    // Wait for any in-progress rebuild to complete
+    using _lock = await this.rebuildMutex.acquire();
+
+    const result = await this.db.execute("DELETE FROM routes WHERE id = ?", [
+      id,
     ]);
 
     // Only mark dirty if we actually deleted something

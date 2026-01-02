@@ -47,6 +47,8 @@ The server starts on port 8000 by default. The database is automatically created
 | `PORT` | HTTP server port | `8000` |
 | `MANAGEMENT_API_KEY` | Management key for admin access (API and Web UI) | - |
 | `LOG_LEVEL` | Logging verbosity: `debug`, `info`, `warn`, `error`, `none` | `info` |
+| `METRICS_AGGREGATION_INTERVAL_SECONDS` | How often to run metrics aggregation (seconds) | `60` |
+| `METRICS_RETENTION_DAYS` | Days to retain aggregated daily metrics | `90` |
 
 ### Directory Structure
 
