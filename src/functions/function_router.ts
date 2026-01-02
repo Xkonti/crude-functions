@@ -118,7 +118,9 @@ export class FunctionRouter {
             level: "exec_reject",
             message: `${method} ${fullUrl}`,
             args: JSON.stringify({ reason: "invalid_api_key" }),
-          }).catch(() => {});
+          }).catch((error) => {
+            globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
+          });
 
           return c.json(
             {
@@ -176,7 +178,9 @@ export class FunctionRouter {
         level: "exec_start",
         message: `${method} ${fullUrl}`,
         args: JSON.stringify({ origin, keyGroup, contentLength }),
-      }).catch(() => {});
+      }).catch((error) => {
+        globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
+      });
 
       try {
         const response = await runInRequestContext(requestContext, async () => {
@@ -190,7 +194,9 @@ export class FunctionRouter {
           routeId: route.id,
           level: "exec_end",
           message: `${durationMs}ms`,
-        }).catch(() => {});
+        }).catch((error) => {
+          globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
+        });
 
         // Store execution metric
         this.executionMetricsService.store({
@@ -199,7 +205,9 @@ export class FunctionRouter {
           avgTimeMs: durationMs,
           maxTimeMs: durationMs,
           executionCount: 1,
-        }).catch(() => {});
+        }).catch((error) => {
+          globalThis.console.error("[FunctionRouter] Failed to store metric:", error);
+        });
 
         return response;
       } catch (error) {
@@ -210,7 +218,9 @@ export class FunctionRouter {
           routeId: route.id,
           level: "exec_end",
           message: `${durationMs}ms (error)`,
-        }).catch(() => {});
+        }).catch((logError) => {
+          globalThis.console.error("[FunctionRouter] Failed to store console log:", logError);
+        });
 
         // Still store metric for failed executions
         this.executionMetricsService.store({
@@ -219,7 +229,9 @@ export class FunctionRouter {
           avgTimeMs: durationMs,
           maxTimeMs: durationMs,
           executionCount: 1,
-        }).catch(() => {});
+        }).catch((metricError) => {
+          globalThis.console.error("[FunctionRouter] Failed to store metric:", metricError);
+        });
 
         const executionError = new HandlerExecutionError(route.handler, error);
         return this.handleExecutionError(c, executionError, requestId);

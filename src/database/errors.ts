@@ -41,10 +41,20 @@ export class QueryError extends DatabaseError {
   public readonly originalError: unknown;
 
   constructor(sql: string, originalError: unknown) {
-    const truncatedSql = sql.length > 100 ? `${sql.substring(0, 100)}...` : sql;
-    super(`Query execution failed: ${truncatedSql}`);
+    // In production, don't include SQL in error message to prevent information leakage
+    const isProduction = Deno.env.get("DENO_ENV") === "production";
+    let message: string;
+
+    if (isProduction) {
+      message = "Query execution failed";
+    } else {
+      const truncatedSql = sql.length > 100 ? `${sql.substring(0, 100)}...` : sql;
+      message = `Query execution failed: ${truncatedSql}`;
+    }
+
+    super(message);
     this.name = "QueryError";
-    this.sql = sql;
+    this.sql = sql; // Still stored for debugging/logging purposes
     this.originalError = originalError;
   }
 }
