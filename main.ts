@@ -16,6 +16,8 @@ import { ConsoleInterceptor } from "./src/logs/console_interceptor.ts";
 import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
 import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_service.ts";
 import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
+import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
+import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 
 const app = new Hono();
 
@@ -63,6 +65,21 @@ const metricsAggregationService = new MetricsAggregationService({
   config: metricsAggregationConfig,
 });
 metricsAggregationService.start();
+
+// Initialize and start log trimming service
+const logTrimmingConfig: LogTrimmingConfig = {
+  trimmingIntervalSeconds: parseInt(
+    Deno.env.get("LOG_TRIMMING_INTERVAL_SECONDS") || "300"
+  ),
+  maxLogsPerRoute: parseInt(
+    Deno.env.get("LOG_MAX_PER_ROUTE") || "2000"
+  ),
+};
+const logTrimmingService = new LogTrimmingService({
+  logService: consoleLogService,
+  config: logTrimmingConfig,
+});
+logTrimmingService.start();
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -120,13 +137,17 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
-    // Stop aggregation service first (waits for current processing)
+    // Stop log trimming service first (waits for current processing)
+    await logTrimmingService.stop();
+    console.log("Log trimming service stopped");
+
+    // Stop aggregation service (waits for current processing)
     await metricsAggregationService.stop();
     console.log("Metrics aggregation service stopped");
 

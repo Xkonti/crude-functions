@@ -70,22 +70,44 @@ export class ConsoleLogService {
 
   /**
    * Retrieve logs for a specific route.
-   * Results are ordered from oldest to newest.
+   * Results are ordered from newest to oldest.
    */
   async getByRouteId(routeId: number, limit?: number): Promise<ConsoleLog[]> {
     const sql = limit
       ? `SELECT id, request_id, route_id, level, message, args, timestamp
          FROM console_logs
          WHERE route_id = ?
-         ORDER BY id ASC
+         ORDER BY id DESC
          LIMIT ?`
       : `SELECT id, request_id, route_id, level, message, args, timestamp
          FROM console_logs
          WHERE route_id = ?
-         ORDER BY id ASC`;
+         ORDER BY id DESC`;
 
     const params = limit ? [routeId, limit] : [routeId];
     const rows = await this.db.queryAll<ConsoleLogRow>(sql, params);
+
+    return rows.map((row) => this.rowToConsoleLog(row));
+  }
+
+  /**
+   * Retrieve logs for a specific route before a given log id.
+   * Used for pagination (next page).
+   * Results are ordered from newest to oldest.
+   */
+  async getByRouteIdBeforeId(
+    routeId: number,
+    beforeId: number,
+    limit: number
+  ): Promise<ConsoleLog[]> {
+    const rows = await this.db.queryAll<ConsoleLogRow>(
+      `SELECT id, request_id, route_id, level, message, args, timestamp
+       FROM console_logs
+       WHERE route_id = ? AND id < ?
+       ORDER BY id DESC
+       LIMIT ?`,
+      [routeId, beforeId, limit]
+    );
 
     return rows.map((row) => this.rowToConsoleLog(row));
   }
@@ -126,6 +148,50 @@ export class ConsoleLogService {
     const result = await this.db.execute(
       `DELETE FROM console_logs WHERE route_id = ?`,
       [routeId]
+    );
+
+    return result.changes;
+  }
+
+  /**
+   * Get all distinct route IDs that have logs.
+   */
+  async getDistinctRouteIds(): Promise<number[]> {
+    const rows = await this.db.queryAll<{ route_id: number }>(
+      `SELECT DISTINCT route_id FROM console_logs WHERE route_id IS NOT NULL`
+    );
+    return rows.map((row) => row.route_id);
+  }
+
+  /**
+   * Trim logs for a route to keep only the newest N logs.
+   * Returns the number of deleted logs.
+   *
+   * Uses an efficient two-step approach:
+   * - Gets the id of the Nth newest log
+   * - Deletes all logs with id less than that threshold
+   */
+  async trimToLimit(routeId: number, maxLogs: number): Promise<number> {
+    // Find the id threshold - the id of the (maxLogs)th newest log
+    // Logs older than this will be deleted
+    const thresholdRow = await this.db.queryOne<{ id: number }>(
+      `SELECT id FROM console_logs
+       WHERE route_id = ?
+       ORDER BY id DESC
+       LIMIT 1 OFFSET ?`,
+      [routeId, maxLogs - 1]
+    );
+
+    // If no threshold found, there are fewer than maxLogs entries
+    if (!thresholdRow) {
+      return 0;
+    }
+
+    // Delete all logs for this route with id less than threshold
+    const result = await this.db.execute(
+      `DELETE FROM console_logs
+       WHERE route_id = ? AND id < ?`,
+      [routeId, thresholdRow.id]
     );
 
     return result.changes;

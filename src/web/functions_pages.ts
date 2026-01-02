@@ -384,7 +384,19 @@ function calculateSummary(dataPoints: ChartDataPoint[]): MetricsSummary {
   };
 }
 
-function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[]): string {
+interface LogsPaginationOptions {
+  limit: number;
+  beforeId: number | null;
+  oldestLogId: number | null;
+  hasMore: boolean;
+}
+
+function renderLogsPage(
+  functionName: string,
+  routeId: number,
+  logs: ConsoleLog[],
+  pagination: LogsPaginationOptions
+): string {
   const logsTableStyles = `
     <style>
       .logs-table { font-size: 0.85em; }
@@ -415,6 +427,8 @@ function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[
         text-decoration: underline dotted;
       }
       .request-id-copy:hover { color: #17a2b8; }
+      .logs-controls { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+      .logs-controls select { width: auto; margin: 0; padding: 0.4em 0.6em; }
     </style>
   `;
 
@@ -435,8 +449,24 @@ function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[
           setTimeout(() => { el.textContent = original; }, 1000);
         });
       }
+      function changePageSize(select) {
+        const limit = select.value;
+        window.location.href = '/web/functions/logs/${routeId}?limit=' + limit;
+      }
+      function goToNextPage() {
+        const beforeId = ${pagination.oldestLogId ?? "null"};
+        if (beforeId) {
+          window.location.href = '/web/functions/logs/${routeId}?limit=${pagination.limit}&before_id=' + beforeId;
+        }
+      }
+      function resetToNewest() {
+        window.location.href = '/web/functions/logs/${routeId}?limit=${pagination.limit}';
+      }
     </script>
   `;
+
+  const pageSizeOptions = [50, 100, 250, 500, 1000];
+  const isViewingOlder = pagination.beforeId !== null;
 
   return `
     ${logsTableStyles}
@@ -445,15 +475,24 @@ function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[
       <div>
         <a href="/web/functions" role="button" class="secondary outline">&larr; Back to Functions</a>
       </div>
-      <div style="text-align: right;">
-        <a href="/web/functions/logs/${routeId}" role="button" class="outline">Refresh</a>
+      <div style="text-align: right;" class="logs-controls">
+        <label style="margin: 0;">Show:</label>
+        <select onchange="changePageSize(this)">
+          ${pageSizeOptions.map((size) => `<option value="${size}"${size === pagination.limit ? " selected" : ""}>${size}</option>`).join("")}
+        </select>
+        ${isViewingOlder ? `<button class="outline" onclick="resetToNewest()">Reset to Newest</button>` : ""}
+        <a href="/web/functions/logs/${routeId}?limit=${pagination.limit}${isViewingOlder ? "&before_id=" + pagination.beforeId : ""}" role="button" class="outline">Refresh</a>
       </div>
     </div>
     ${
       logs.length === 0
         ? "<p><em>No logs recorded for this function.</em></p>"
         : `
-      <p style="color: #6c757d;">Showing ${logs.length} most recent log${logs.length === 1 ? "" : "s"}. Click a row to expand.</p>
+      <p style="color: #6c757d;">
+        Showing ${logs.length} log${logs.length === 1 ? "" : "s"}${isViewingOlder ? " (viewing older)" : " (newest)"}:
+        <strong>${formatTimestampFull(logs[logs.length - 1].timestamp)}</strong> to <strong>${formatTimestampFull(logs[0].timestamp)}</strong>.
+        Click a row to expand.
+      </p>
       <table class="logs-table">
         <thead>
           <tr>
@@ -487,6 +526,13 @@ function renderLogsPage(functionName: string, routeId: number, logs: ConsoleLog[
             .join("")}
         </tbody>
       </table>
+      ${pagination.hasMore ? `
+        <div style="margin-top: 1rem; text-align: center;">
+          <button onclick="goToNextPage()">Load Older Logs &rarr;</button>
+        </div>
+      ` : `
+        <p style="margin-top: 1rem; text-align: center; color: #6c757d;"><em>No more logs</em></p>
+      `}
       ${logsTableScript}
     `
     }
@@ -1101,11 +1147,31 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
-    // Get last 200 logs, newest first
-    const logs = await consoleLogService.getByRouteId(id, 200);
-    logs.reverse(); // getByRouteId returns oldest first, we want newest first
+    // Parse pagination params
+    const limitParam = c.req.query("limit");
+    const beforeIdParam = c.req.query("before_id");
+    const validLimits = [50, 100, 250, 500, 1000];
+    const limit = limitParam && validLimits.includes(parseInt(limitParam, 10))
+      ? parseInt(limitParam, 10)
+      : 100;
+    const beforeId = beforeIdParam ? parseInt(beforeIdParam, 10) : null;
 
-    const content = renderLogsPage(route.name, id, logs);
+    // Get logs - either newest or before a specific log id
+    const logs = beforeId
+      ? await consoleLogService.getByRouteIdBeforeId(id, beforeId, limit)
+      : await consoleLogService.getByRouteId(id, limit);
+
+    // Get oldest log id for next page navigation
+    const oldestLogId = logs.length > 0
+      ? logs[logs.length - 1].id
+      : null;
+
+    const content = renderLogsPage(route.name, id, logs, {
+      limit,
+      beforeId,
+      oldestLogId,
+      hasMore: logs.length === limit,
+    });
     return c.html(layout(`Logs: ${route.name}`, content));
   });
 
