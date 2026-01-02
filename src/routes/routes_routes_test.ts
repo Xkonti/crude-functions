@@ -318,3 +318,168 @@ Deno.test("DELETE /api/routes/:name returns 404 for non-existent name", async ()
     await cleanup(db);
   }
 });
+
+// PUT /api/routes/:id tests
+Deno.test("PUT /api/routes/:id updates route", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    const res = await app.request(`/api/routes/${route!.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "updated",
+        handler: "updated.ts",
+        route: "/updated",
+        methods: ["POST"],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+
+    // Verify update preserved ID
+    const updated = await service.getById(route!.id);
+    expect(updated?.name).toBe("updated");
+    expect(updated?.handler).toBe("updated.ts");
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id returns 404 for non-existent ID", async () => {
+  const { app, db } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/routes/999", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "test",
+        handler: "test.ts",
+        route: "/test",
+        methods: ["GET"],
+      }),
+    });
+
+    expect(res.status).toBe(404);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id returns 409 on duplicate name", async () => {
+  const routes = [
+    { name: "first", handler: "first.ts", route: "/first", methods: ["GET"] },
+    { name: "second", handler: "second.ts", route: "/second", methods: ["POST"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const secondRoute = await service.getByName("second");
+
+    const res = await app.request(`/api/routes/${secondRoute!.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "first", // duplicate
+        handler: "second.ts",
+        route: "/second",
+        methods: ["POST"],
+      }),
+    });
+
+    expect(res.status).toBe(409);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id returns 400 for invalid ID", async () => {
+  const { app, db } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/routes/invalid", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "test",
+        handler: "test.ts",
+        route: "/test",
+        methods: ["GET"],
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id returns 400 for missing fields", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    const res = await app.request(`/api/routes/${route!.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "updated",
+        // missing handler, route, methods
+      }),
+    });
+
+    expect(res.status).toBe(400);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+// DELETE /api/routes/:id tests (numeric ID)
+Deno.test("DELETE /api/routes/:id removes route by numeric ID", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    const res = await app.request(`/api/routes/${route!.id}`, {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(200);
+
+    const deleted = await service.getById(route!.id);
+    expect(deleted).toBe(null);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("DELETE /api/routes/:id returns 404 for non-existent ID", async () => {
+  const { app, db } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/routes/999", {
+      method: "DELETE",
+    });
+
+    expect(res.status).toBe(404);
+  } finally {
+    await cleanup(db);
+  }
+});

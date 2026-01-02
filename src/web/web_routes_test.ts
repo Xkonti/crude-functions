@@ -355,21 +355,129 @@ Deno.test("POST /web/functions/create creates function", async () => {
   }
 });
 
-Deno.test("POST /web/functions/delete removes function", async () => {
+Deno.test("POST /web/functions/delete/:id removes function", async () => {
   const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
   ];
   const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
   try {
-    const res = await app.request("/web/functions/delete?name=to-delete", {
+    const route = await routesService.getByName("to-delete");
+
+    const res = await app.request(`/web/functions/delete/${route!.id}`, {
       method: "POST",
       headers: authHeader(),
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/functions?success=");
 
-    const fn = await routesService.getByName("to-delete");
+    const fn = await routesService.getById(route!.id);
     expect(fn).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/edit/:id shows edit form", async () => {
+  const initialRoutes = [
+    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"], description: "Test" },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("test-fn");
+
+    const res = await app.request(`/web/functions/edit/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Edit");
+    expect(html).toContain("test-fn");
+    // Name field should now be editable (not readonly)
+    expect(html).not.toContain("readonly");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("POST /web/functions/edit/:id updates function and allows name change", async () => {
+  const initialRoutes = [
+    { name: "old-name", handler: "old.ts", route: "/old", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("old-name");
+    const originalId = route!.id;
+
+    const formData = new FormData();
+    formData.append("name", "new-name");
+    formData.append("handler", "new.ts");
+    formData.append("route", "/new");
+    formData.append("methods", "POST");
+
+    const res = await app.request(`/web/functions/edit/${originalId}`, {
+      method: "POST",
+      headers: authHeader(),
+      body: formData,
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("/web/functions?success=");
+
+    // Verify ID preserved
+    const updated = await routesService.getById(originalId);
+    expect(updated?.name).toBe("new-name");
+    expect(updated?.handler).toBe("new.ts");
+    expect(updated?.route).toBe("/new");
+    expect(updated?.methods).toContain("POST");
+
+    // Old name should not exist
+    const oldName = await routesService.getByName("old-name");
+    expect(oldName).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/edit/:id returns error for invalid ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/functions/edit/invalid", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/edit/:id returns error for non-existent ID", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/functions/edit/999", {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/functions/delete/:id shows confirmation", async () => {
+  const initialRoutes = [
+    { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
+  ];
+  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  try {
+    const route = await routesService.getByName("to-delete");
+
+    const res = await app.request(`/web/functions/delete/${route!.id}`, {
+      headers: authHeader(),
+    });
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Delete Function");
+    expect(html).toContain("to-delete");
   } finally {
     await cleanup(db, tempDir);
   }

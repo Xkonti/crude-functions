@@ -262,4 +262,85 @@ export class RoutesService {
       this.markDirty();
     }
   }
+
+  /**
+   * Update an existing route by ID.
+   * Preserves the route ID to maintain log/metrics associations.
+   * Waits for any in-progress rebuild to complete before modifying.
+   */
+  async updateRoute(id: number, route: NewFunctionRoute): Promise<void> {
+    // Wait for any in-progress rebuild to complete
+    using _lock = await this.rebuildMutex.acquire();
+
+    // Verify route exists
+    const existing = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM routes WHERE id = ?",
+      [id]
+    );
+    if (!existing) {
+      throw new Error(`Route with id '${id}' not found`);
+    }
+
+    // Validate: check for duplicate name (excluding current route)
+    const existingByName = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM routes WHERE name = ? AND id != ?",
+      [route.name, id]
+    );
+    if (existingByName) {
+      throw new Error(`Route with name '${route.name}' already exists`);
+    }
+
+    // Validate: check for duplicate route+method combinations (excluding current route)
+    const existingRoutes = await this.db.queryAll<{ id: number; name: string; methods: string }>(
+      "SELECT id, name, methods FROM routes WHERE route = ? AND id != ?",
+      [route.route, id]
+    );
+
+    for (const existingRoute of existingRoutes) {
+      const existingMethods = JSON.parse(existingRoute.methods) as string[];
+      for (const method of route.methods) {
+        if (existingMethods.includes(method)) {
+          throw new Error(
+            `Route '${route.route}' with method '${method}' already exists (route: '${existingRoute.name}')`
+          );
+        }
+      }
+    }
+
+    // Update the route
+    await this.db.execute(
+      `UPDATE routes
+       SET name = ?, description = ?, handler = ?, route = ?, methods = ?, keys = ?
+       WHERE id = ?`,
+      [
+        route.name,
+        route.description ?? null,
+        route.handler,
+        route.route,
+        JSON.stringify(route.methods),
+        route.keys ? JSON.stringify(route.keys) : null,
+        id,
+      ]
+    );
+
+    this.markDirty();
+  }
+
+  /**
+   * Remove a route by ID.
+   * Waits for any in-progress rebuild to complete before modifying.
+   */
+  async removeRouteById(id: number): Promise<void> {
+    // Wait for any in-progress rebuild to complete
+    using _lock = await this.rebuildMutex.acquire();
+
+    const result = await this.db.execute("DELETE FROM routes WHERE id = ?", [
+      id,
+    ]);
+
+    // Only mark dirty if we actually deleted something
+    if (result.changes > 0) {
+      this.markDirty();
+    }
+  }
 }

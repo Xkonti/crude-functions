@@ -165,7 +165,7 @@ function renderFunctionForm(
   route: Partial<FunctionRoute> = {},
   error?: string
 ): string {
-  const isEdit = !!route.name;
+  const isEdit = route.id !== undefined;
 
   return `
     <h1>${isEdit ? "Edit" : "Create"} Function</h1>
@@ -174,8 +174,8 @@ function renderFunctionForm(
       <label>
         Name
         <input type="text" name="name" value="${escapeHtml(route.name ?? "")}"
-               ${isEdit ? "readonly" : "required"} placeholder="my-function">
-        <small>Unique identifier for this function${isEdit ? " (cannot be changed)" : ""}</small>
+               required placeholder="my-function">
+        <small>Unique identifier for this function</small>
       </label>
       <label>
         Description
@@ -313,8 +313,8 @@ export function createFunctionsPages(
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
                   <a href="/web/functions/logs/${fn.id}">Logs</a>
-                  <a href="/web/functions/edit?name=${encodeURIComponent(fn.name)}">Edit</a>
-                  <a href="/web/functions/delete?name=${encodeURIComponent(fn.name)}">Delete</a>
+                  <a href="/web/functions/edit/${fn.id}">Edit</a>
+                  <a href="/web/functions/delete/${fn.id}">Delete</a>
                 </td>
               </tr>
             `
@@ -365,33 +365,41 @@ export function createFunctionsPages(
   });
 
   // Edit form
-  routes.get("/edit", async (c) => {
-    const name = c.req.query("name");
+  routes.get("/edit/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
     const error = c.req.query("error");
 
-    if (!name) {
-      return c.redirect("/web/functions?error=" + encodeURIComponent("No function name specified"));
+    if (isNaN(id)) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
-    const route = await routesService.getByName(name);
+    const route = await routesService.getById(id);
     if (!route) {
-      return c.redirect("/web/functions?error=" + encodeURIComponent(`Function not found: ${name}`));
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
     return c.html(
       layout(
-        `Edit: ${name}`,
-        renderFunctionForm(`/web/functions/edit?name=${encodeURIComponent(name)}`, route, error)
+        `Edit: ${route.name}`,
+        renderFunctionForm(`/web/functions/edit/${id}`, route, error)
       )
     );
   });
 
-  // Handle edit (delete + create)
-  routes.post("/edit", async (c) => {
-    const originalName = c.req.query("name");
+  // Handle edit (update in place)
+  routes.post("/edit/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
 
-    if (!originalName) {
-      return c.redirect("/web/functions?error=" + encodeURIComponent("No function name specified"));
+    if (isNaN(id)) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
+    }
+
+    // Verify route exists
+    const existingRoute = await routesService.getById(id);
+    if (!existingRoute) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
     let formData: FormData;
@@ -399,45 +407,35 @@ export function createFunctionsPages(
       formData = await c.req.formData();
     } catch {
       return c.redirect(
-        `/web/functions/edit?name=${encodeURIComponent(originalName)}&error=` +
-          encodeURIComponent("Invalid form data")
+        `/web/functions/edit/${id}?error=` + encodeURIComponent("Invalid form data")
       );
     }
 
     const { route, errors } = parseFormData(formData);
-    // Use original name for edits
-    route.name = originalName;
 
     if (errors.length > 0) {
+      // Need to include id for the form template to detect edit mode
+      const routeWithId = { ...route, id };
       return c.html(
         layout(
-          `Edit: ${originalName}`,
-          renderFunctionForm(
-            `/web/functions/edit?name=${encodeURIComponent(originalName)}`,
-            route,
-            errors.join(". ")
-          )
+          `Edit: ${existingRoute.name}`,
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, errors.join(". "))
         ),
         400
       );
     }
 
     try {
-      // Delete old route first
-      await routesService.removeRoute(originalName);
-      // Create new route
-      await routesService.addRoute(route);
+      // Update route in place - preserves ID and associated logs/metrics
+      await routesService.updateRoute(id, route);
       return c.redirect("/web/functions?success=" + encodeURIComponent(`Function updated: ${route.name}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update function";
+      const routeWithId = { ...route, id };
       return c.html(
         layout(
-          `Edit: ${originalName}`,
-          renderFunctionForm(
-            `/web/functions/edit?name=${encodeURIComponent(originalName)}`,
-            route,
-            message
-          )
+          `Edit: ${existingRoute.name}`,
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, message)
         ),
         400
       );
@@ -445,39 +443,45 @@ export function createFunctionsPages(
   });
 
   // Delete confirmation
-  routes.get("/delete", async (c) => {
-    const name = c.req.query("name");
+  routes.get("/delete/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
 
-    if (!name) {
-      return c.redirect("/web/functions?error=" + encodeURIComponent("No function name specified"));
+    if (isNaN(id)) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
-    const route = await routesService.getByName(name);
+    const route = await routesService.getById(id);
     if (!route) {
-      return c.redirect("/web/functions?error=" + encodeURIComponent(`Function not found: ${name}`));
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
     return c.html(
       confirmPage(
         "Delete Function",
-        `Are you sure you want to delete the function "${name}"? This action cannot be undone.`,
-        `/web/functions/delete?name=${encodeURIComponent(name)}`,
+        `Are you sure you want to delete the function "${route.name}"? This action cannot be undone.`,
+        `/web/functions/delete/${id}`,
         "/web/functions"
       )
     );
   });
 
   // Handle delete
-  routes.post("/delete", async (c) => {
-    const name = c.req.query("name");
+  routes.post("/delete/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
 
-    if (!name) {
-      return c.redirect("/web/functions?error=" + encodeURIComponent("No function name specified"));
+    if (isNaN(id)) {
+      return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
+    // Get the route name for the success message before deletion
+    const route = await routesService.getById(id);
+    const routeName = route?.name ?? `ID ${id}`;
+
     try {
-      await routesService.removeRoute(name);
-      return c.redirect("/web/functions?success=" + encodeURIComponent(`Function deleted: ${name}`));
+      await routesService.removeRouteById(id);
+      return c.redirect("/web/functions?success=" + encodeURIComponent(`Function deleted: ${routeName}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete function";
       return c.redirect("/web/functions?error=" + encodeURIComponent(message));

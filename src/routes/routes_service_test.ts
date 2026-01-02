@@ -505,3 +505,243 @@ Deno.test("multiple writes are serialized", async () => {
     await db.close();
   }
 });
+
+// ============== updateRoute Tests ==============
+
+Deno.test("RoutesService.updateRoute updates route in place", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "original",
+      handler: "original.ts",
+      route: "/original",
+      methods: ["GET"],
+    });
+
+    const originalRoute = await service.getByName("original");
+    const originalId = originalRoute!.id;
+
+    await service.updateRoute(originalId, {
+      name: "updated",
+      handler: "updated.ts",
+      route: "/updated",
+      methods: ["POST"],
+      description: "Updated description",
+    });
+
+    // Original name should not exist
+    const byOldName = await service.getByName("original");
+    expect(byOldName).toBe(null);
+
+    // New name should exist with same ID
+    const byNewName = await service.getByName("updated");
+    expect(byNewName?.id).toBe(originalId);
+    expect(byNewName?.handler).toBe("updated.ts");
+    expect(byNewName?.route).toBe("/updated");
+    expect(byNewName?.methods).toEqual(["POST"]);
+    expect(byNewName?.description).toBe("Updated description");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.updateRoute throws on non-existent ID", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await expect(
+      service.updateRoute(999, {
+        name: "test",
+        handler: "test.ts",
+        route: "/test",
+        methods: ["GET"],
+      })
+    ).rejects.toThrow("not found");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.updateRoute throws on duplicate name", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "first",
+      handler: "first.ts",
+      route: "/first",
+      methods: ["GET"],
+    });
+    await service.addRoute({
+      name: "second",
+      handler: "second.ts",
+      route: "/second",
+      methods: ["POST"],
+    });
+
+    const secondRoute = await service.getByName("second");
+
+    await expect(
+      service.updateRoute(secondRoute!.id, {
+        name: "first", // duplicate
+        handler: "second.ts",
+        route: "/second",
+        methods: ["POST"],
+      })
+    ).rejects.toThrow("already exists");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.updateRoute allows keeping same name", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
+
+    const route = await service.getByName("test");
+
+    // Should not throw - keeping same name
+    await service.updateRoute(route!.id, {
+      name: "test",
+      handler: "updated.ts",
+      route: "/test",
+      methods: ["GET", "POST"],
+    });
+
+    const updated = await service.getByName("test");
+    expect(updated?.handler).toBe("updated.ts");
+    expect(updated?.methods).toContain("POST");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.updateRoute throws on duplicate route+method", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "first",
+      handler: "first.ts",
+      route: "/users",
+      methods: ["GET"],
+    });
+    await service.addRoute({
+      name: "second",
+      handler: "second.ts",
+      route: "/other",
+      methods: ["POST"],
+    });
+
+    const secondRoute = await service.getByName("second");
+
+    await expect(
+      service.updateRoute(secondRoute!.id, {
+        name: "second",
+        handler: "second.ts",
+        route: "/users", // same route as first
+        methods: ["GET"], // conflicting method
+      })
+    ).rejects.toThrow("already exists");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.updateRoute allows keeping same route+method", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET", "POST"],
+    });
+
+    const route = await service.getByName("test");
+
+    // Should not throw - same route/methods
+    await service.updateRoute(route!.id, {
+      name: "test-renamed",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET", "POST"],
+    });
+
+    const updated = await service.getByName("test-renamed");
+    expect(updated?.route).toBe("/test");
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.updateRoute marks dirty flag", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
+
+    let rebuildCount = 0;
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1);
+
+    const route = await service.getByName("test");
+    await service.updateRoute(route!.id, {
+      name: "test",
+      handler: "updated.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
+
+    // Should rebuild after update
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(2);
+  } finally {
+    await db.close();
+  }
+});
+
+// ============== removeRouteById Tests ==============
+
+Deno.test("RoutesService.removeRouteById removes by ID", async () => {
+  const { service, db } = await createTestService();
+  try {
+    await service.addRoute({
+      name: "test",
+      handler: "test.ts",
+      route: "/test",
+      methods: ["GET"],
+    });
+
+    const route = await service.getByName("test");
+    await service.removeRouteById(route!.id);
+
+    const result = await service.getByName("test");
+    expect(result).toBe(null);
+  } finally {
+    await db.close();
+  }
+});
+
+Deno.test("RoutesService.removeRouteById is no-op for non-existent ID", async () => {
+  const { service, db } = await createTestService();
+  try {
+    let rebuildCount = 0;
+    await service.rebuildIfNeeded(() => rebuildCount++);
+
+    await service.removeRouteById(999);
+
+    // Should NOT mark dirty
+    await service.rebuildIfNeeded(() => rebuildCount++);
+    expect(rebuildCount).toBe(1);
+  } finally {
+    await db.close();
+  }
+});
