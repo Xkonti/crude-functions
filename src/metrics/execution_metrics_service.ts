@@ -11,7 +11,9 @@ interface ExecutionMetricRow {
   id: number;
   route_id: number;
   type: string;
-  time_value_ms: number;
+  avg_time_ms: number;
+  max_time_ms: number;
+  execution_count: number;
   timestamp: string;
 }
 
@@ -34,11 +36,32 @@ export class ExecutionMetricsService {
    */
   async store(metric: NewExecutionMetric): Promise<void> {
     try {
-      await this.db.execute(
-        `INSERT INTO execution_metrics (route_id, type, time_value_ms)
-         VALUES (?, ?, ?)`,
-        [metric.routeId, metric.type, metric.timeValueMs]
-      );
+      if (metric.timestamp) {
+        await this.db.execute(
+          `INSERT INTO execution_metrics (route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            metric.routeId,
+            metric.type,
+            metric.avgTimeMs,
+            metric.maxTimeMs,
+            metric.executionCount,
+            metric.timestamp.toISOString(),
+          ]
+        );
+      } else {
+        await this.db.execute(
+          `INSERT INTO execution_metrics (route_id, type, avg_time_ms, max_time_ms, execution_count)
+           VALUES (?, ?, ?, ?, ?)`,
+          [
+            metric.routeId,
+            metric.type,
+            metric.avgTimeMs,
+            metric.maxTimeMs,
+            metric.executionCount,
+          ]
+        );
+      }
     } catch (error) {
       // Fail silently
       globalThis.console.error("[ExecutionMetricsService] Failed to store metric:", error);
@@ -58,7 +81,7 @@ export class ExecutionMetricsService {
 
     if (type && limit) {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, time_value_ms, timestamp
+        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
          FROM execution_metrics
          WHERE route_id = ? AND type = ?
          ORDER BY id DESC
@@ -67,7 +90,7 @@ export class ExecutionMetricsService {
       );
     } else if (type) {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, time_value_ms, timestamp
+        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
          FROM execution_metrics
          WHERE route_id = ? AND type = ?
          ORDER BY id DESC`,
@@ -75,7 +98,7 @@ export class ExecutionMetricsService {
       );
     } else if (limit) {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, time_value_ms, timestamp
+        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
          FROM execution_metrics
          WHERE route_id = ?
          ORDER BY id DESC
@@ -84,7 +107,7 @@ export class ExecutionMetricsService {
       );
     } else {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, time_value_ms, timestamp
+        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
          FROM execution_metrics
          WHERE route_id = ?
          ORDER BY id DESC`,
@@ -100,7 +123,7 @@ export class ExecutionMetricsService {
    */
   async getRecent(limit = 100): Promise<ExecutionMetric[]> {
     const rows = await this.db.queryAll<ExecutionMetricRow>(
-      `SELECT id, route_id, type, time_value_ms, timestamp
+      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
        FROM execution_metrics
        ORDER BY id DESC
        LIMIT ?`,
@@ -136,12 +159,123 @@ export class ExecutionMetricsService {
     return result.changes;
   }
 
+  /**
+   * Get all distinct route IDs that have metrics of any type.
+   */
+  async getDistinctRouteIds(): Promise<number[]> {
+    const rows = await this.db.queryAll<{ route_id: number }>(
+      `SELECT DISTINCT route_id FROM execution_metrics`
+    );
+    return rows.map((row) => row.route_id);
+  }
+
+  /**
+   * Get all distinct route IDs that have metrics of a specific type.
+   */
+  async getDistinctRouteIdsByType(type: MetricType): Promise<number[]> {
+    const rows = await this.db.queryAll<{ route_id: number }>(
+      `SELECT DISTINCT route_id FROM execution_metrics WHERE type = ?`,
+      [type]
+    );
+    return rows.map((row) => row.route_id);
+  }
+
+  /**
+   * Get metrics for a route within a specific time range.
+   * Start is inclusive, end is exclusive.
+   */
+  async getByRouteIdTypeAndTimeRange(
+    routeId: number,
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<ExecutionMetric[]> {
+    const rows = await this.db.queryAll<ExecutionMetricRow>(
+      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
+       FROM execution_metrics
+       WHERE route_id = ? AND type = ? AND timestamp >= ? AND timestamp < ?
+       ORDER BY timestamp ASC`,
+      [routeId, type, start.toISOString(), end.toISOString()]
+    );
+
+    return rows.map((row) => this.rowToMetric(row));
+  }
+
+  /**
+   * Delete metrics for a route within a specific time range and type.
+   * Start is inclusive, end is exclusive.
+   * Returns the number of deleted metrics.
+   */
+  async deleteByRouteIdTypeAndTimeRange(
+    routeId: number,
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<number> {
+    const result = await this.db.execute(
+      `DELETE FROM execution_metrics
+       WHERE route_id = ? AND type = ? AND timestamp >= ? AND timestamp < ?`,
+      [routeId, type, start.toISOString(), end.toISOString()]
+    );
+
+    return result.changes;
+  }
+
+  /**
+   * Get the most recent metric of a specific type.
+   * Returns null if no metrics exist for that type.
+   */
+  async getMostRecentByType(type: MetricType): Promise<ExecutionMetric | null> {
+    const row = await this.db.queryOne<ExecutionMetricRow>(
+      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
+       FROM execution_metrics
+       WHERE type = ?
+       ORDER BY timestamp DESC
+       LIMIT 1`,
+      [type]
+    );
+
+    return row ? this.rowToMetric(row) : null;
+  }
+
+  /**
+   * Get the oldest metric of a specific type.
+   * Returns null if no metrics exist for that type.
+   */
+  async getOldestByType(type: MetricType): Promise<ExecutionMetric | null> {
+    const row = await this.db.queryOne<ExecutionMetricRow>(
+      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
+       FROM execution_metrics
+       WHERE type = ?
+       ORDER BY timestamp ASC
+       LIMIT 1`,
+      [type]
+    );
+
+    return row ? this.rowToMetric(row) : null;
+  }
+
+  /**
+   * Delete metrics of a specific type older than the specified date.
+   * Returns the number of deleted metrics.
+   */
+  async deleteByTypeOlderThan(type: MetricType, date: Date): Promise<number> {
+    const result = await this.db.execute(
+      `DELETE FROM execution_metrics WHERE type = ? AND timestamp < ?`,
+      [type, date.toISOString()]
+    );
+
+    return result.changes;
+  }
+
   private rowToMetric(row: ExecutionMetricRow): ExecutionMetric {
     return {
       id: row.id,
       routeId: row.route_id,
       type: row.type as MetricType,
-      timeValueMs: row.time_value_ms,
+      avgTimeMs: row.avg_time_ms,
+      maxTimeMs: row.max_time_ms,
+      executionCount: row.execution_count,
       timestamp: new Date(row.timestamp),
     };
   }

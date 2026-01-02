@@ -195,8 +195,10 @@ export class FunctionRouter {
         // Store execution metric
         this.executionMetricsService.store({
           routeId: route.id,
-          type: "single_execution",
-          timeValueMs: durationMs,
+          type: "execution",
+          avgTimeMs: durationMs,
+          maxTimeMs: durationMs,
+          executionCount: 1,
         }).catch(() => {});
 
         return response;
@@ -213,8 +215,10 @@ export class FunctionRouter {
         // Still store metric for failed executions
         this.executionMetricsService.store({
           routeId: route.id,
-          type: "single_execution",
-          timeValueMs: durationMs,
+          type: "execution",
+          avgTimeMs: durationMs,
+          maxTimeMs: durationMs,
+          executionCount: 1,
         }).catch(() => {});
 
         const executionError = new HandlerExecutionError(route.handler, error);

@@ -50,11 +50,15 @@ const EXECUTION_METRICS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS execution_metrics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   route_id INTEGER NOT NULL,
-  type TEXT NOT NULL,
-  time_value_ms INTEGER NOT NULL,
-  timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+  type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
+  avg_time_ms REAL NOT NULL,
+  max_time_ms INTEGER NOT NULL,
+  execution_count INTEGER NOT NULL DEFAULT 1,
+  timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_execution_metrics_route_id ON execution_metrics(route_id);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_type_route_timestamp ON execution_metrics(type, route_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_timestamp ON execution_metrics(timestamp);
 `;
 
 interface TestRoute {

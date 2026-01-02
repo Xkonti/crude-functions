@@ -14,6 +14,8 @@ import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
 import { ConsoleInterceptor } from "./src/logs/console_interceptor.ts";
 import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
+import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_service.ts";
+import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
 
 const app = new Hono();
 
@@ -46,6 +48,21 @@ consoleInterceptor.install();
 
 // Initialize execution metrics service
 const executionMetricsService = new ExecutionMetricsService({ db });
+
+// Initialize and start metrics aggregation service
+const metricsAggregationConfig: MetricsAggregationConfig = {
+  aggregationIntervalSeconds: parseInt(
+    Deno.env.get("METRICS_AGGREGATION_INTERVAL_SECONDS") || "60"
+  ),
+  retentionDays: parseInt(
+    Deno.env.get("METRICS_RETENTION_DAYS") || "90"
+  ),
+};
+const metricsAggregationService = new MetricsAggregationService({
+  metricsService: executionMetricsService,
+  config: metricsAggregationConfig,
+});
+metricsAggregationService.start();
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -108,6 +125,10 @@ export { app, apiKeyService, routesService, functionRouter, fileService, console
 async function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
+    // Stop aggregation service first (waits for current processing)
+    await metricsAggregationService.stop();
+    console.log("Metrics aggregation service stopped");
+
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {
