@@ -1,5 +1,5 @@
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
-import type { MetricType, MetricsAggregationConfig, ExecutionMetric } from "./types.ts";
+import type { MetricsAggregationConfig, ExecutionMetric } from "./types.ts";
 import { logger } from "../utils/logger.ts";
 
 export interface MetricsAggregationServiceOptions {
@@ -122,9 +122,6 @@ export class MetricsAggregationService {
     let currentMinute = this.floorToMinute(oldestExecution.timestamp);
     const endMinute = this.floorToMinute(now); // Don't process current incomplete minute
 
-    let lastProcessedHour: Date | null = null;
-    let lastProcessedDay: Date | null = null;
-
     while (currentMinute < endMinute) {
       if (this.stopRequested) return;
 
@@ -152,8 +149,6 @@ export class MetricsAggregationService {
           await this.aggregateHour(routeId, currentHour, hourEnd);
         }
 
-        lastProcessedHour = currentHour;
-
         // Check if we just completed a day
         const nextDay = this.floorToDay(nextHour);
         if (nextDay > currentDay && nextDay <= this.floorToDay(now)) {
@@ -166,8 +161,6 @@ export class MetricsAggregationService {
           for (const routeId of hourRouteIds) {
             await this.aggregateDay(routeId, currentDay, dayEnd);
           }
-
-          lastProcessedDay = currentDay;
         }
       }
 
