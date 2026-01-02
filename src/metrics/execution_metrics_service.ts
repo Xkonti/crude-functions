@@ -1,6 +1,15 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { ExecutionMetric, NewExecutionMetric, MetricType } from "./types.ts";
 
+/**
+ * Format a Date for SQLite timestamp comparison.
+ * SQLite's CURRENT_TIMESTAMP uses 'YYYY-MM-DD HH:MM:SS' format,
+ * so we need to match that for string comparisons to work correctly.
+ */
+function formatDateForSqlite(date: Date): string {
+  return date.toISOString().replace("T", " ").replace("Z", "").slice(0, 19);
+}
+
 export interface ExecutionMetricsServiceOptions {
   db: DatabaseService;
 }
@@ -46,7 +55,7 @@ export class ExecutionMetricsService {
             metric.avgTimeMs,
             metric.maxTimeMs,
             metric.executionCount,
-            metric.timestamp.toISOString(),
+            formatDateForSqlite(metric.timestamp),
           ]
         );
       } else {
@@ -140,7 +149,7 @@ export class ExecutionMetricsService {
   async deleteOlderThan(date: Date): Promise<number> {
     const result = await this.db.execute(
       `DELETE FROM execution_metrics WHERE timestamp < ?`,
-      [date.toISOString()]
+      [formatDateForSqlite(date)]
     );
 
     return result.changes;
@@ -195,7 +204,7 @@ export class ExecutionMetricsService {
        FROM execution_metrics
        WHERE route_id = ? AND type = ? AND timestamp >= ? AND timestamp < ?
        ORDER BY timestamp ASC`,
-      [routeId, type, start.toISOString(), end.toISOString()]
+      [routeId, type, formatDateForSqlite(start), formatDateForSqlite(end)]
     );
 
     return rows.map((row) => this.rowToMetric(row));
@@ -215,7 +224,7 @@ export class ExecutionMetricsService {
     const result = await this.db.execute(
       `DELETE FROM execution_metrics
        WHERE route_id = ? AND type = ? AND timestamp >= ? AND timestamp < ?`,
-      [routeId, type, start.toISOString(), end.toISOString()]
+      [routeId, type, formatDateForSqlite(start), formatDateForSqlite(end)]
     );
 
     return result.changes;
@@ -269,6 +278,17 @@ export class ExecutionMetricsService {
   }
 
   private rowToMetric(row: ExecutionMetricRow): ExecutionMetric {
+    // Parse timestamp as UTC (SQLite stores without timezone, but we use UTC)
+    // Handle both old ISO format and new SQLite format
+    let timestamp: Date;
+    if (row.timestamp.includes("T")) {
+      // ISO format: 2026-01-02T18:08:36.000Z
+      timestamp = new Date(row.timestamp);
+    } else {
+      // SQLite format: 2026-01-02 18:08:36 - treat as UTC
+      timestamp = new Date(row.timestamp + "Z");
+    }
+
     return {
       id: row.id,
       routeId: row.route_id,
@@ -276,7 +296,7 @@ export class ExecutionMetricsService {
       avgTimeMs: row.avg_time_ms,
       maxTimeMs: row.max_time_ms,
       executionCount: row.execution_count,
-      timestamp: new Date(row.timestamp),
+      timestamp,
     };
   }
 }

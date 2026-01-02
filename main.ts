@@ -112,6 +112,7 @@ app.route("/web", createWebRoutes({
   routesService,
   apiKeyService,
   consoleLogService,
+  executionMetricsService,
 }));
 
 // Dynamic function router - catch all /run/* requests
