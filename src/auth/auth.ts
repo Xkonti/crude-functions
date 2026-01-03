@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { Database } from "@db/sqlite";
+import { DenoSqlite3Dialect } from "@soapbox/kysely-deno-sqlite";
 
 /**
  * Options for creating the Better Auth instance.
@@ -18,17 +19,20 @@ export interface AuthOptions {
 /**
  * Creates and configures the Better Auth instance.
  *
- * Creates its own SQLite connection to the database file.
- * Better Auth wraps it with Kysely internally.
- * This is safe because SQLite in WAL mode supports multiple connections.
+ * Uses DenoSqlite3Dialect for Kysely compatibility with Deno's @db/sqlite.
+ * Creates its own SQLite connection - safe because SQLite WAL mode supports
+ * multiple connections.
  */
 export function createAuth(options: AuthOptions) {
-  // Create a new database connection for Better Auth
-  // Better Auth will wrap it with Kysely internally
+  // Create a Kysely dialect compatible with Deno's @db/sqlite
   const sqliteDb = new Database(options.databasePath);
+  const dialect = new DenoSqlite3Dialect({ database: sqliteDb });
 
   return betterAuth({
-    database: sqliteDb,
+    database: {
+      dialect,
+      type: "sqlite",
+    },
     baseURL: options.baseUrl,
     secret: options.secret,
 
