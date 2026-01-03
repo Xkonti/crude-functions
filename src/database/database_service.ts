@@ -77,6 +77,9 @@ export class DatabaseService {
         this.db.exec("PRAGMA journal_mode = WAL");
         this.db.exec("PRAGMA synchronous = NORMAL");
       }
+
+      // Enable foreign key constraints (required for CASCADE DELETE)
+      this.db.exec("PRAGMA foreign_keys = ON");
     } catch (error) {
       throw new DatabaseAccessError(this.databasePath, error);
     }
@@ -100,6 +103,15 @@ export class DatabaseService {
    */
   get isOpen(): boolean {
     return this.db !== null;
+  }
+
+  /**
+   * Returns the raw SQLite database instance.
+   * Used by external libraries (e.g., Better Auth via Kysely) that need direct access.
+   * Returns null if the connection is not open.
+   */
+  get rawDb(): Database | null {
+    return this.db;
   }
 
   // ============== Query Execution ==============

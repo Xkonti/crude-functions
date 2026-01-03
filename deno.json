@@ -9,6 +9,8 @@
     "@std/expect": "jsr:@std/expect",
     "@std/testing": "jsr:@std/testing",
     "@db/sqlite": "jsr:@db/sqlite",
-    "@core/asyncutil": "jsr:@core/asyncutil"
+    "@core/asyncutil": "jsr:@core/asyncutil",
+    "better-auth": "npm:better-auth",
+    "better-auth/": "npm:better-auth/"
   }
 }

@@ -85,6 +85,7 @@ export function layout(title: string, content: string): string {
         <li><a href="/web/code">Code</a></li>
         <li><a href="/web/functions">Functions</a></li>
         <li><a href="/web/keys">Keys</a></li>
+        <li><a href="/web/logout">Logout</a></li>
       </ul>
     </nav>
     ${content}

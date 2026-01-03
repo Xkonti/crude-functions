@@ -7,6 +7,29 @@ import { RoutesService } from "../routes/routes_service.ts";
 import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
+import type { Auth } from "../auth/auth.ts";
+
+/**
+ * Creates a mock Auth object for testing.
+ * The mock always returns a valid session for authenticated tests.
+ */
+function createMockAuth(options: { authenticated: boolean } = { authenticated: true }): Auth {
+  return {
+    api: {
+      getSession: async () => {
+        if (options.authenticated) {
+          return {
+            user: { id: "test-user", email: "test@example.com", name: "Test User", emailVerified: true },
+            session: { id: "test-session", token: "test-token", userId: "test-user", expiresAt: new Date(Date.now() + 86400000) },
+          };
+        }
+        return null;
+      },
+      signOut: async () => {},
+    },
+    handler: () => new Response("OK"),
+  } as unknown as Auth;
+}
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
@@ -83,9 +106,15 @@ interface TestContext {
   executionMetricsService: ExecutionMetricsService;
 }
 
+interface CreateTestAppOptions {
+  initialRoutes?: TestRoute[];
+  authenticated?: boolean;
+}
+
 async function createTestApp(
-  initialRoutes: TestRoute[] = []
+  options: CreateTestAppOptions = {}
 ): Promise<TestContext> {
+  const { initialRoutes = [], authenticated = true } = options;
   const tempDir = await Deno.makeTempDir();
   const codePath = `${tempDir}/code`;
 
@@ -117,9 +146,10 @@ async function createTestApp(
   }
 
   const app = new Hono();
+  const auth = createMockAuth({ authenticated });
   app.route(
     "/web",
-    createWebRoutes({ fileService, routesService, apiKeyService, consoleLogService, executionMetricsService })
+    createWebRoutes({ auth, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService })
   );
 
   return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService };
@@ -130,40 +160,24 @@ async function cleanup(db: DatabaseService, tempDir: string) {
   await Deno.remove(tempDir, { recursive: true });
 }
 
-function authHeader(password = "testkey123") {
-  const encoded = btoa(`admin:${password}`);
-  return { Authorization: `Basic ${encoded}` };
-}
-
 // Authentication tests
-Deno.test("GET /web returns 401 without credentials", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test("GET /web redirects to login without session", async () => {
+  const { app, db, tempDir } = await createTestApp({ authenticated: false });
   try {
     const res = await app.request("/web");
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(302);
+    const location = res.headers.get("Location");
+    // Middleware redirects to login with callbackUrl
+    expect(location?.startsWith("/web/login")).toBe(true);
   } finally {
     await cleanup(db, tempDir);
   }
 });
 
-Deno.test("GET /web returns 401 with wrong password", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test("GET /web returns 200 with valid session", async () => {
+  const { app, db, tempDir } = await createTestApp({ authenticated: true });
   try {
-    const res = await app.request("/web", {
-      headers: authHeader("wrongpassword"),
-    });
-    expect(res.status).toBe(401);
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
-Deno.test("GET /web returns 200 with valid credentials", async () => {
-  const { app, db, tempDir } = await createTestApp();
-  try {
-    const res = await app.request("/web", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Dashboard");
@@ -176,9 +190,7 @@ Deno.test("GET /web returns 200 with valid credentials", async () => {
 Deno.test("Dashboard contains links to all sections", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web");
     const html = await res.text();
     expect(html).toContain('href="/web/code"');
     expect(html).toContain('href="/web/functions"');
@@ -194,9 +206,7 @@ Deno.test("GET /web/code lists files", async () => {
   try {
     await fileService.writeFile("test.ts", "console.log('test');");
 
-    const res = await app.request("/web/code", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/code");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("test.ts");
@@ -211,9 +221,7 @@ Deno.test("GET /web/code/edit shows file content", async () => {
   try {
     await fileService.writeFile("hello.ts", "export default () => 'hello';");
 
-    const res = await app.request("/web/code/edit?path=hello.ts", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/code/edit?path=hello.ts");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("export default () =&gt; &#039;hello&#039;;");
@@ -233,7 +241,6 @@ Deno.test("POST /web/code/edit saves file and redirects", async () => {
 
     const res = await app.request("/web/code/edit?path=test.ts", {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -249,9 +256,7 @@ Deno.test("POST /web/code/edit saves file and redirects", async () => {
 Deno.test("GET /web/code/upload shows form", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/code/upload", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/code/upload");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Upload New File");
@@ -271,7 +276,6 @@ Deno.test("POST /web/code/upload creates file", async () => {
 
     const res = await app.request("/web/code/upload", {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -291,7 +295,6 @@ Deno.test("POST /web/code/delete removes file", async () => {
 
     const res = await app.request("/web/code/delete?path=delete-me.ts", {
       method: "POST",
-      headers: authHeader(),
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/code?success=");
@@ -314,11 +317,9 @@ Deno.test("GET /web/functions lists functions", async () => {
       description: "Test function",
     },
   ];
-  const { app, db, tempDir } = await createTestApp(initialRoutes);
+  const { app, db, tempDir } = await createTestApp({ initialRoutes });
   try {
-    const res = await app.request("/web/functions", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("test-fn");
@@ -332,9 +333,7 @@ Deno.test("GET /web/functions lists functions", async () => {
 Deno.test("GET /web/functions/create shows form", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/functions/create", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions/create");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Create Function");
@@ -358,7 +357,6 @@ Deno.test("POST /web/functions/create creates function", async () => {
 
     const res = await app.request("/web/functions/create", {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -378,13 +376,12 @@ Deno.test("POST /web/functions/delete/:id removes function", async () => {
   const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("to-delete");
 
     const res = await app.request(`/web/functions/delete/${route!.id}`, {
       method: "POST",
-      headers: authHeader(),
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/functions?success=");
@@ -400,13 +397,11 @@ Deno.test("GET /web/functions/edit/:id shows edit form", async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"], description: "Test" },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
-    const res = await app.request(`/web/functions/edit/${route!.id}`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/edit/${route!.id}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Edit");
@@ -422,7 +417,7 @@ Deno.test("POST /web/functions/edit/:id updates function and allows name change"
   const initialRoutes = [
     { name: "old-name", handler: "old.ts", route: "/old", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("old-name");
     const originalId = route!.id;
@@ -435,7 +430,6 @@ Deno.test("POST /web/functions/edit/:id updates function and allows name change"
 
     const res = await app.request(`/web/functions/edit/${originalId}`, {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -459,9 +453,7 @@ Deno.test("POST /web/functions/edit/:id updates function and allows name change"
 Deno.test("GET /web/functions/edit/:id returns error for invalid ID", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/functions/edit/invalid", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions/edit/invalid");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
@@ -472,9 +464,7 @@ Deno.test("GET /web/functions/edit/:id returns error for invalid ID", async () =
 Deno.test("GET /web/functions/edit/:id returns error for non-existent ID", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/functions/edit/999", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions/edit/999");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
@@ -486,13 +476,11 @@ Deno.test("GET /web/functions/delete/:id shows confirmation", async () => {
   const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("to-delete");
 
-    const res = await app.request(`/web/functions/delete/${route!.id}`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/delete/${route!.id}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Delete Function");
@@ -509,9 +497,7 @@ Deno.test("GET /web/keys lists keys grouped by group", async () => {
     // Add additional key
     await apiKeyService.addKey("api", "key1", "user");
 
-    const res = await app.request("/web/keys", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/keys");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("management");
@@ -526,9 +512,7 @@ Deno.test("GET /web/keys lists keys grouped by group", async () => {
 Deno.test("GET /web/keys/create shows form", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/keys/create", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/keys/create");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Create API Key");
@@ -542,9 +526,7 @@ Deno.test("GET /web/keys/create shows form", async () => {
 Deno.test("GET /web/keys/create with group param prefills form", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/keys/create?group=mykey", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/keys/create?group=mykey");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('value="mykey"');
@@ -564,7 +546,6 @@ Deno.test("POST /web/keys/create creates key", async () => {
 
     const res = await app.request("/web/keys/create", {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -589,7 +570,6 @@ Deno.test("POST /web/keys/delete removes key by ID", async () => {
 
     const res = await app.request(`/web/keys/delete?id=${val1Key.id}`, {
       method: "POST",
-      headers: authHeader(),
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/keys?success=");
@@ -611,7 +591,6 @@ Deno.test("POST /web/keys/delete-group removes all keys for group", async () => 
 
     const res = await app.request("/web/keys/delete-group?group=toremove", {
       method: "POST",
-      headers: authHeader(),
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/keys?success=");
@@ -627,9 +606,7 @@ Deno.test("POST /web/keys/delete-group removes all keys for group", async () => 
 Deno.test("GET /web/code/edit without path redirects with error", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/code/edit", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/code/edit");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
@@ -646,7 +623,6 @@ Deno.test("POST /web/code/upload rejects path traversal", async () => {
 
     const res = await app.request("/web/code/upload", {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -665,7 +641,6 @@ Deno.test("POST /web/keys/create rejects invalid key group", async () => {
 
     const res = await app.request("/web/keys/create", {
       method: "POST",
-      headers: authHeader(),
       body: formData,
     });
     expect(res.status).toBe(302);
@@ -678,9 +653,7 @@ Deno.test("POST /web/keys/create rejects invalid key group", async () => {
 Deno.test("GET /web/keys/delete-group blocks deleting all management keys", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/keys/delete-group?group=management", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/keys/delete-group?group=management");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
@@ -693,13 +666,11 @@ Deno.test("GET /web/functions/metrics/:id shows metrics page", async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/metrics/${route!.id}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Metrics: test-fn");
@@ -715,13 +686,11 @@ Deno.test("GET /web/functions/metrics/:id with mode=day shows day view", async (
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}?mode=day`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/metrics/${route!.id}?mode=day`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Last 24 Hours");
@@ -734,13 +703,11 @@ Deno.test("GET /web/functions/metrics/:id shows no data message for new function
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/metrics/${route!.id}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("No metrics recorded");
@@ -753,7 +720,7 @@ Deno.test("GET /web/functions/metrics/:id with data shows charts", async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -772,9 +739,7 @@ Deno.test("GET /web/functions/metrics/:id with data shows charts", async () => {
       });
     }
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/metrics/${route!.id}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("executionTimeChart");
@@ -788,9 +753,7 @@ Deno.test("GET /web/functions/metrics/:id with data shows charts", async () => {
 Deno.test("GET /web/functions/metrics/:id returns error for invalid ID", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/functions/metrics/invalid", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions/metrics/invalid");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
@@ -801,9 +764,7 @@ Deno.test("GET /web/functions/metrics/:id returns error for invalid ID", async (
 Deno.test("GET /web/functions/metrics/:id returns error for non-existent ID", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/functions/metrics/999", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions/metrics/999");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
@@ -815,11 +776,9 @@ Deno.test("Functions list includes Metrics link", async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir } = await createTestApp(initialRoutes);
+  const { app, db, tempDir } = await createTestApp({ initialRoutes });
   try {
-    const res = await app.request("/web/functions", {
-      headers: authHeader(),
-    });
+    const res = await app.request("/web/functions");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("/web/functions/metrics/");
@@ -832,7 +791,7 @@ Deno.test("GET /web/functions/metrics/:id shows current period from raw executio
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp(initialRoutes);
+  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -856,9 +815,7 @@ Deno.test("GET /web/functions/metrics/:id shows current period from raw executio
     });
 
     // Metrics page should show data even without aggregation running
-    const res = await app.request(`/web/functions/metrics/${route!.id}`, {
-      headers: authHeader(),
-    });
+    const res = await app.request(`/web/functions/metrics/${route!.id}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     // Should show charts because we have execution data

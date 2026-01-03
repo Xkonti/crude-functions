@@ -1,9 +1,11 @@
 import { Hono } from "@hono/hono";
-import { createWebAuthMiddleware } from "./web_auth.ts";
+import { createAuthPages } from "./auth_pages.ts";
 import { createCodePages } from "./code_pages.ts";
 import { createFunctionsPages } from "./functions_pages.ts";
 import { createKeysPages } from "./keys_pages.ts";
 import { layout } from "./templates.ts";
+import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
+import type { Auth } from "../auth/auth.ts";
 import type { FileService } from "../files/file_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
@@ -11,6 +13,7 @@ import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 
 export interface WebRoutesOptions {
+  auth: Auth;
   fileService: FileService;
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
@@ -19,11 +22,14 @@ export interface WebRoutesOptions {
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { fileService, routesService, apiKeyService, consoleLogService, executionMetricsService } = options;
+  const { auth, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService } = options;
   const routes = new Hono();
 
-  // Apply Basic Auth to all web routes
-  routes.use("/*", createWebAuthMiddleware(apiKeyService));
+  // Mount auth pages first (login/logout - no auth required)
+  routes.route("/", createAuthPages(auth));
+
+  // Apply session auth to all other web routes
+  routes.use("/*", createSessionAuthMiddleware({ auth }));
 
   // Dashboard
   routes.get("/", (c) => {
