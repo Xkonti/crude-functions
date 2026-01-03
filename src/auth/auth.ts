@@ -11,6 +11,8 @@ export interface AuthOptions {
   baseUrl: string;
   /** Secret key for signing sessions */
   secret: string;
+  /** Whether users exist in the database (controls sign-up availability) */
+  hasUsers: boolean;
 }
 
 /**
@@ -31,9 +33,10 @@ export function createAuth(options: AuthOptions) {
     secret: options.secret,
 
     // Email/password authentication only (no OAuth providers)
+    // Sign-up is only enabled during first-run setup (when no users exist)
     emailAndPassword: {
       enabled: true,
-      disableSignUp: true, // Only admin can create accounts
+      disableSignUp: options.hasUsers,
     },
 
     // Session configuration

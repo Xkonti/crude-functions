@@ -3,7 +3,6 @@ import "@std/dotenv/load";
 import { DatabaseService } from "./src/database/database_service.ts";
 import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
-import { AdminSeeder } from "./src/auth/admin_seeder.ts";
 import { createHybridAuthMiddleware } from "./src/auth/auth_middleware.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
@@ -78,21 +77,18 @@ if (migrationResult.appliedCount > 0) {
   );
 }
 
+// Check if any users exist (determines whether sign-up is enabled)
+const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
+const hasUsers = userExists !== null;
+
 // Initialize Better Auth
+// Sign-up is only enabled during first-run setup (when no users exist)
 const auth = createAuth({
   databasePath: "./data/database.db",
   baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || "http://localhost:8000",
   secret: Deno.env.get("BETTER_AUTH_SECRET") || "dev-secret-change-in-production",
+  hasUsers,
 });
-
-// Seed admin user (if credentials provided via env vars)
-const adminSeeder = new AdminSeeder({
-  auth,
-  db,
-  adminEmail: Deno.env.get("ADMIN_EMAIL"),
-  adminPassword: Deno.env.get("ADMIN_PASSWORD"),
-});
-await adminSeeder.seed();
 
 // Initialize console log capture
 // Must be installed after migrations but before handling requests
@@ -176,6 +172,7 @@ app.route("/api/files", createFileRoutes(fileService));
 // Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({
   auth,
+  db,
   fileService,
   routesService,
   apiKeyService,

@@ -1,6 +1,17 @@
 import { Hono } from "@hono/hono";
 import { layout } from "./templates.ts";
 import type { Auth } from "../auth/auth.ts";
+import type { DatabaseService } from "../database/database_service.ts";
+
+/**
+ * Options for creating the auth pages router.
+ */
+export interface AuthPagesOptions {
+  /** Better Auth instance */
+  auth: Auth;
+  /** Database service for user existence check */
+  db: DatabaseService;
+}
 
 /**
  * Creates the authentication pages router.
@@ -8,11 +19,18 @@ import type { Auth } from "../auth/auth.ts";
  * Provides login and logout pages for the Web UI.
  * These routes are public (no auth middleware).
  */
-export function createAuthPages(auth: Auth): Hono {
+export function createAuthPages(options: AuthPagesOptions): Hono {
+  const { auth, db } = options;
   const routes = new Hono();
 
   // GET /login - Login form
-  routes.get("/login", (c) => {
+  routes.get("/login", async (c) => {
+    // If no users exist, redirect to setup page
+    const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
+    if (!userExists) {
+      return c.redirect("/web/setup");
+    }
+
     const callbackUrl = c.req.query("callbackUrl") ?? "/web";
     const error = c.req.query("error");
 
