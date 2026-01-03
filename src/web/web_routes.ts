@@ -1,6 +1,8 @@
 import { Hono } from "@hono/hono";
 import { createAuthPages } from "./auth_pages.ts";
 import { createSetupPages } from "./setup_pages.ts";
+import { createPasswordPages } from "./password_pages.ts";
+import { createUsersPages } from "./users_pages.ts";
 import { createCodePages } from "./code_pages.ts";
 import { createFunctionsPages } from "./functions_pages.ts";
 import { createKeysPages } from "./keys_pages.ts";
@@ -69,6 +71,8 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   });
 
   // Mount sub-routers
+  routes.route("/password", createPasswordPages());
+  routes.route("/users", createUsersPages({ db }));
   routes.route("/code", createCodePages(fileService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService));
   routes.route("/keys", createKeysPages(apiKeyService));

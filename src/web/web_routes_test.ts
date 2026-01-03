@@ -149,7 +149,7 @@ async function createTestApp(
   const auth = createMockAuth({ authenticated });
   app.route(
     "/web",
-    createWebRoutes({ auth, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService })
+    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService })
   );
 
   return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService };
