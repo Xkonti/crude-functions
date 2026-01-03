@@ -33,9 +33,47 @@ export function formatSize(bytes: number): string {
 }
 
 /**
+ * User info for layout.
+ */
+export interface LayoutUser {
+  email: string;
+}
+
+/**
+ * Session user type from context.
+ */
+interface SessionUser {
+  id: string;
+  email: string;
+  name?: string;
+}
+
+/**
+ * Extracts layout user from Hono context.
+ * Use this in route handlers to get the user for layout().
+ */
+// deno-lint-ignore no-explicit-any
+export function getLayoutUser(c: any): LayoutUser | undefined {
+  const sessionUser = c.get("user") as SessionUser | undefined;
+  return sessionUser ? { email: sessionUser.email } : undefined;
+}
+
+/**
  * Wraps content in a full HTML page with PicoCSS styling.
  */
-export function layout(title: string, content: string): string {
+export function layout(title: string, content: string, user?: LayoutUser): string {
+  const userDropdown = user
+    ? `
+        <li class="user-dropdown">
+          <a href="#" class="user-dropdown-toggle">${escapeHtml(user.email)}</a>
+          <ul class="user-dropdown-menu">
+            <li><a href="/web/password">Change Password</a></li>
+            <li><a href="/web/logout">Logout</a></li>
+          </ul>
+        </li>
+      `
+    : `<li><a href="/web/logout">Logout</a></li>`;
+
   return `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
@@ -75,6 +113,37 @@ export function layout(title: string, content: string): string {
       color: #721c24;
       border: 1px solid #f5c6cb;
     }
+    /* User dropdown styles */
+    .user-dropdown {
+      position: relative;
+    }
+    .user-dropdown-toggle {
+      cursor: pointer;
+    }
+    .user-dropdown-menu {
+      display: none;
+      position: absolute;
+      right: 0;
+      top: 100%;
+      background: var(--pico-background-color);
+      border: 1px solid var(--pico-muted-border-color);
+      border-radius: 0.25rem;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      min-width: 160px;
+      z-index: 1000;
+      padding: 0.5rem 0;
+      flex-direction: column;
+    }
+    .user-dropdown-menu li {
+      padding: 0;
+    }
+    .user-dropdown-menu a {
+      display: block;
+      padding: 0.5rem 1rem;
+    }
+    .user-dropdown:hover .user-dropdown-menu {
+      display: flex;
+    }
   </style>
 </head>
 <body>
@@ -85,6 +154,8 @@ export function layout(title: string, content: string): string {
         <li><a href="/web/code">Code</a></li>
         <li><a href="/web/functions">Functions</a></li>
         <li><a href="/web/keys">Keys</a></li>
+        <li><a href="/web/users">Users</a></li>
+        ${userDropdown}
       </ul>
     </nav>
     ${content}
@@ -120,7 +191,8 @@ export function confirmPage(
   title: string,
   message: string,
   actionUrl: string,
-  cancelUrl: string
+  cancelUrl: string,
+  user?: LayoutUser
 ): string {
   return layout(
     title,
@@ -135,7 +207,8 @@ export function confirmPage(
         <a href="${escapeHtml(cancelUrl)}" role="button" class="secondary">Cancel</a>
       </footer>
     </article>
-  `
+  `,
+    user
   );
 }
 

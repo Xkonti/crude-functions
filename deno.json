@@ -9,6 +9,10 @@
     "@std/expect": "jsr:@std/expect",
     "@std/testing": "jsr:@std/testing",
     "@db/sqlite": "jsr:@db/sqlite",
-    "@core/asyncutil": "jsr:@core/asyncutil"
+    "@soapbox/kysely-deno-sqlite": "jsr:@soapbox/kysely-deno-sqlite",
+    "@core/asyncutil": "jsr:@core/asyncutil",
+    "better-auth": "npm:better-auth@^1.4.10",
+    "better-auth/plugins": "npm:better-auth@^1.4.10/plugins",
+    "better-auth/plugins/access": "npm:better-auth@^1.4.10/plugins/access"
   }
 }

@@ -2,9 +2,10 @@ import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
 import { DatabaseService } from "./src/database/database_service.ts";
 import { MigrationService } from "./src/database/migration_service.ts";
+import { createAuth } from "./src/auth/auth.ts";
+import { createHybridAuthMiddleware } from "./src/auth/auth_middleware.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
-import { createManagementAuthMiddleware } from "./src/middleware/management_auth.ts";
 import { RoutesService } from "./src/routes/routes_service.ts";
 import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
@@ -76,6 +77,19 @@ if (migrationResult.appliedCount > 0) {
   );
 }
 
+// Check if any users exist (determines whether sign-up is enabled)
+const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
+const hasUsers = userExists !== null;
+
+// Initialize Better Auth
+// Sign-up is only enabled during first-run setup (when no users exist)
+const auth = createAuth({
+  databasePath: "./data/database.db",
+  baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || "http://localhost:8000",
+  secret: Deno.env.get("BETTER_AUTH_SECRET") || "dev-secret-change-in-production",
+  hasUsers,
+});
+
 // Initialize console log capture
 // Must be installed after migrations but before handling requests
 const consoleLogService = new ConsoleLogService({ db });
@@ -130,13 +144,19 @@ const functionRouter = new FunctionRouter({
 // Public endpoints
 app.get("/ping", (c) => c.json({ pong: true }));
 
+// Better Auth handler - handles /api/auth/* endpoints
+app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+
+// Hybrid auth middleware (accepts session OR API key)
+const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService });
+
 // Protected API management routes
-app.use("/api/keys/*", createManagementAuthMiddleware(apiKeyService));
-app.use("/api/keys", createManagementAuthMiddleware(apiKeyService));
+app.use("/api/keys/*", hybridAuth);
+app.use("/api/keys", hybridAuth);
 app.route("/api/keys", createApiKeyRoutes(apiKeyService));
 
-app.use("/api/routes/*", createManagementAuthMiddleware(apiKeyService));
-app.use("/api/routes", createManagementAuthMiddleware(apiKeyService));
+app.use("/api/routes/*", hybridAuth);
+app.use("/api/routes", hybridAuth);
 app.route("/api/routes", createRoutesRoutes(routesService));
 
 // Initialize file service
@@ -145,12 +165,14 @@ const fileService = new FileService({
 });
 
 // Protected file management routes
-app.use("/api/files/*", createManagementAuthMiddleware(apiKeyService));
-app.use("/api/files", createManagementAuthMiddleware(apiKeyService));
+app.use("/api/files/*", hybridAuth);
+app.use("/api/files", hybridAuth);
 app.route("/api/files", createFileRoutes(fileService));
 
-// Web UI routes (Basic Auth applied internally)
+// Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({
+  auth,
+  db,
   fileService,
   routesService,
   apiKeyService,

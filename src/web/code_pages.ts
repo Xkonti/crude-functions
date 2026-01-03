@@ -13,6 +13,7 @@ import {
   formatDate,
   formatSize,
   buttonLink,
+  getLayoutUser,
 } from "./templates.ts";
 
 export function createCodePages(fileService: FileService): Hono {
@@ -64,7 +65,7 @@ export function createCodePages(fileService: FileService): Hono {
       `
       }
     `;
-    return c.html(layout("Code Files", content));
+    return c.html(layout("Code Files", content, getLayoutUser(c)));
   });
 
   // Edit file form
@@ -96,7 +97,7 @@ export function createCodePages(fileService: FileService): Hono {
         </div>
       </form>
     `;
-    return c.html(layout(`Edit: ${path}`, pageContent));
+    return c.html(layout(`Edit: ${path}`, pageContent, getLayoutUser(c)));
   });
 
   // Save file
@@ -170,7 +171,8 @@ export function createCodePages(fileService: FileService): Hono {
         "Delete File",
         `Are you sure you want to delete "${path}"? This action cannot be undone.`,
         `/web/code/delete?path=${encodeURIComponent(path)}`,
-        "/web/code"
+        "/web/code",
+        getLayoutUser(c)
       )
     );
   });
@@ -237,7 +239,7 @@ export function createCodePages(fileService: FileService): Hono {
         });
       </script>
     `;
-    return c.html(layout("Upload File", content));
+    return c.html(layout("Upload File", content, getLayoutUser(c)));
   });
 
   // Handle upload
