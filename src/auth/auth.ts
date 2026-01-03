@@ -1,6 +1,34 @@
 import { betterAuth } from "better-auth";
+import { admin } from "npm:better-auth@^1.4.10/plugins";
+import { createAccessControl } from "npm:better-auth@^1.4.10/plugins/access";
 import { Database } from "@db/sqlite";
 import { DenoSqlite3Dialect } from "@soapbox/kysely-deno-sqlite";
+
+/**
+ * Access control statement defining resources and their available actions.
+ * Used by the admin plugin for role-based access control.
+ */
+const statement = {
+  user: ["create", "list", "set-role", "ban", "impersonate", "delete", "set-password"],
+} as const;
+
+const ac = createAccessControl(statement);
+
+/**
+ * Custom role for user management access.
+ * Users with this role can manage other users through the admin API.
+ */
+const userMgmt = ac.newRole({
+  user: ["create", "list", "set-role", "delete", "set-password"],
+});
+
+/**
+ * Custom role for read-only user access.
+ * Users with this role can only list users, not make changes.
+ */
+const userRead = ac.newRole({
+  user: ["list"],
+});
 
 /**
  * Options for creating the Better Auth instance.
@@ -57,17 +85,18 @@ export function createAuth(options: AuthOptions) {
       joins: true,
     },
 
-    // Custom user fields
-    user: {
-      additionalFields: {
-        permissions: {
-          type: "string",
-          required: false,
-          defaultValue: null,
-          input: false, // Don't allow user to set permissions
+    // Admin plugin for user management
+    plugins: [
+      admin({
+        ac,
+        roles: {
+          userMgmt,
+          userRead,
         },
-      },
-    },
+        defaultRole: "userMgmt",
+        adminRoles: ["userMgmt"],
+      }),
+    ],
   });
 }
 

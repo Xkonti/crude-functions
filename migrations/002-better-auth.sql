@@ -6,7 +6,10 @@ CREATE TABLE IF NOT EXISTS user (
   emailVerified INTEGER NOT NULL DEFAULT 0,
   name TEXT,
   image TEXT,
-  permissions TEXT,
+  role TEXT,
+  banned INTEGER DEFAULT 0,
+  banReason TEXT,
+  banExpires TEXT,
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS session (
   token TEXT NOT NULL UNIQUE,
   ipAddress TEXT,
   userAgent TEXT,
+  impersonatedBy TEXT,
   createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE

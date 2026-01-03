@@ -1,6 +1,6 @@
 import { Hono } from "@hono/hono";
-import { hash } from "npm:bcrypt";
 import type { DatabaseService } from "../database/database_service.ts";
+import type { Auth } from "../auth/auth.ts";
 import {
   layout,
   escapeHtml,
@@ -18,7 +18,7 @@ interface UserRow {
   id: string;
   email: string;
   name: string | null;
-  permissions: string | null;
+  role: string | null;
   createdAt: string;
   [key: string]: unknown;
 }
@@ -37,6 +37,7 @@ interface SessionUser {
  */
 export interface UsersPagesOptions {
   db: DatabaseService;
+  auth: Auth;
 }
 
 /**
@@ -45,7 +46,7 @@ export interface UsersPagesOptions {
  * Provides CRUD operations for user management.
  */
 export function createUsersPages(options: UsersPagesOptions): Hono {
-  const { db } = options;
+  const { db, auth } = options;
   const routes = new Hono();
 
   /**
@@ -63,7 +64,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const currentUser = getSessionUser(c);
 
     const users = await db.queryAll<UserRow>(
-      "SELECT id, email, name, permissions, createdAt FROM user ORDER BY createdAt DESC"
+      "SELECT id, email, name, role, createdAt FROM user ORDER BY createdAt DESC"
     );
 
     const content = `
@@ -81,7 +82,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
             <tr>
               <th>Email</th>
               <th>Name</th>
-              <th>Permissions</th>
+              <th>Role</th>
               <th>Created</th>
               <th class="actions">Actions</th>
             </tr>
@@ -93,7 +94,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
               <tr>
                 <td><strong>${escapeHtml(user.email)}</strong>${user.id === currentUser?.id ? " <em>(you)</em>" : ""}</td>
                 <td>${user.name ? escapeHtml(user.name) : "<em>-</em>"}</td>
-                <td><code>${user.permissions ? escapeHtml(user.permissions) : "<em>none</em>"}</code></td>
+                <td><code>${user.role ? escapeHtml(user.role) : "<em>none</em>"}</code></td>
                 <td>${formatDate(new Date(user.createdAt))}</td>
                 <td class="actions">
                   <a href="/web/users/edit/${encodeURIComponent(user.id)}">Edit</a>
@@ -136,37 +137,25 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     }
 
     try {
-      // Check if email already exists
-      const existing = await db.queryOne<{ id: string }>(
-        "SELECT id FROM user WHERE email = ?",
-        [userData.email]
-      );
-      if (existing) {
-        return c.html(
-          layout("Create User", renderUserForm("/web/users/create", userData, "A user with this email already exists"), getLayoutUser(c)),
-          400
-        );
+      // Use Better Auth admin API to create user
+      const createBody: {
+        email: string;
+        password: string;
+        name: string;
+        role?: string;
+      } = {
+        email: userData.email,
+        password: userData.password,
+        name: userData.name || "",
+      };
+
+      // Add role if provided (empty string defaults to "userMgmt" via admin plugin config)
+      if (userData.role) {
+        createBody.role = userData.role;
       }
 
-      // Generate user ID and hash password
-      const userId = crypto.randomUUID();
-      const hashedPassword = await hash(userData.password, 10);
-      const now = new Date().toISOString();
-
-      // Create user
-      await db.execute(
-        `INSERT INTO user (id, email, name, permissions, emailVerified, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, 0, ?, ?)`,
-        [userId, userData.email, userData.name || null, userData.permissions || null, now, now]
-      );
-
-      // Create account with password (Better Auth stores passwords in account table)
-      const accountId = crypto.randomUUID();
-      await db.execute(
-        `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
-         VALUES (?, ?, ?, 'credential', ?, ?, ?)`,
-        [accountId, userId, userData.email, hashedPassword, now, now]
-      );
+      // @ts-expect-error - Better Auth role field supports custom string values despite type definition
+      await auth.api.createUser({ body: createBody, headers: c.req.raw.headers });
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User created: ${userData.email}`));
     } catch (err) {
@@ -184,7 +173,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const error = c.req.query("error");
 
     const user = await db.queryOne<UserRow>(
-      "SELECT id, email, name, permissions, createdAt FROM user WHERE id = ?",
+      "SELECT id, email, name, role, createdAt FROM user WHERE id = ?",
       [userId]
     );
 
@@ -206,7 +195,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const userId = c.req.param("id");
 
     const user = await db.queryOne<UserRow>(
-      "SELECT id, email, name, permissions FROM user WHERE id = ?",
+      "SELECT id, email, name, role FROM user WHERE id = ?",
       [userId]
     );
 
@@ -237,20 +226,26 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     }
 
     try {
-      // Update password if provided
+      // Update password if provided (using Better Auth admin API)
       if (editData.password) {
-        const hashedPassword = await hash(editData.password, 10);
-        await db.execute(
-          "UPDATE account SET password = ?, updatedAt = CURRENT_TIMESTAMP WHERE userId = ? AND providerId = 'credential'",
-          [hashedPassword, userId]
-        );
+        await auth.api.setUserPassword({
+          body: {
+            userId: userId,
+            newPassword: editData.password,
+          },
+          headers: c.req.raw.headers,
+        });
       }
 
-      // Update permissions
-      await db.execute(
-        "UPDATE user SET permissions = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?",
-        [editData.permissions || null, userId]
-      );
+      // Update role using Better Auth admin API
+      // Cast needed because role field supports custom string values (e.g., "permanent,userMgmt")
+      await auth.api.setRole({
+        body: {
+          userId: userId,
+          role: editData.role as "userMgmt" | "userRead",
+        },
+        headers: c.req.raw.headers,
+      });
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User updated: ${user.email}`));
     } catch (err) {
@@ -315,9 +310,18 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       return c.redirect("/web/users?error=" + encodeURIComponent("User not found"));
     }
 
+    // Check if user has permanent role
+    const roles = user.role?.split(',') || [];
+    if (roles.includes('permanent')) {
+      return c.redirect("/web/users?error=" + encodeURIComponent("Cannot delete permanent admin user"));
+    }
+
     try {
-      // Delete user (CASCADE will delete related sessions and accounts)
-      await db.execute("DELETE FROM user WHERE id = ?", [userId]);
+      // Delete user using Better Auth admin API
+      await auth.api.removeUser({
+        body: { userId },
+        headers: c.req.raw.headers,
+      });
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User deleted: ${user.email}`));
     } catch (err) {
@@ -334,7 +338,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
  */
 function renderUserForm(
   action: string,
-  data: { email?: string; name?: string; permissions?: string } = {},
+  data: { email?: string; name?: string; role?: string } = {},
   error?: string
 ): string {
   return `
@@ -361,10 +365,10 @@ function renderUserForm(
         <input type="password" name="confirmPassword" required minlength="8" />
       </label>
       <label>
-        Permissions
-        <input type="text" name="permissions" value="${escapeHtml(data.permissions ?? "")}"
-               placeholder="e.g., !A for admin" />
-        <small>Permission string (e.g., "!A" for admin access)</small>
+        Role
+        <input type="text" name="role" value="${escapeHtml(data.role ?? "")}"
+               placeholder="e.g., userMgmt or permanent,userMgmt" />
+        <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
       </label>
       <div class="grid">
         <button type="submit">Create User</button>
@@ -379,7 +383,7 @@ function renderUserForm(
  */
 function renderEditForm(
   action: string,
-  user: { email: string; name?: string | null; permissions?: string | null },
+  user: { email: string; name?: string | null; role?: string | null },
   error?: string
 ): string {
   return `
@@ -401,10 +405,10 @@ function renderEditForm(
         <input type="password" name="confirmPassword" minlength="8" placeholder="Leave blank to keep current" />
       </label>
       <label>
-        Permissions
-        <input type="text" name="permissions" value="${escapeHtml(user.permissions ?? "")}"
-               placeholder="e.g., !A for admin" />
-        <small>Permission string (e.g., "!A" for admin access)</small>
+        Role
+        <input type="text" name="role" value="${escapeHtml(user.role ?? "")}"
+               placeholder="e.g., userMgmt or permanent,userMgmt" />
+        <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
       </label>
       <div class="grid">
         <button type="submit">Save Changes</button>
@@ -418,7 +422,7 @@ function renderEditForm(
  * Parse and validate create form data.
  */
 function parseCreateFormData(formData: FormData): {
-  userData: { email: string; name: string; password: string; permissions: string };
+  userData: { email: string; name: string; password: string; role: string };
   errors: string[];
 } {
   const errors: string[] = [];
@@ -427,7 +431,7 @@ function parseCreateFormData(formData: FormData): {
   const name = formData.get("name")?.toString().trim() ?? "";
   const password = formData.get("password")?.toString() ?? "";
   const confirmPassword = formData.get("confirmPassword")?.toString() ?? "";
-  const permissions = formData.get("permissions")?.toString().trim() ?? "";
+  const role = formData.get("role")?.toString().trim() ?? "";
 
   if (!email) {
     errors.push("Email is required");
@@ -446,7 +450,7 @@ function parseCreateFormData(formData: FormData): {
   }
 
   return {
-    userData: { email, name, password, permissions },
+    userData: { email, name, password, role },
     errors,
   };
 }
@@ -455,14 +459,14 @@ function parseCreateFormData(formData: FormData): {
  * Parse and validate edit form data.
  */
 function parseEditFormData(formData: FormData): {
-  editData: { password: string; permissions: string };
+  editData: { password: string; role: string };
   errors: string[];
 } {
   const errors: string[] = [];
 
   const password = formData.get("password")?.toString() ?? "";
   const confirmPassword = formData.get("confirmPassword")?.toString() ?? "";
-  const permissions = formData.get("permissions")?.toString().trim() ?? "";
+  const role = formData.get("role")?.toString().trim() ?? "";
 
   if (password) {
     if (password.length < 8) {
@@ -474,7 +478,7 @@ function parseEditFormData(formData: FormData): {
   }
 
   return {
-    editData: { password, permissions },
+    editData: { password, role },
     errors,
   };
 }

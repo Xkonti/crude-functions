@@ -72,7 +72,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
 
   // Mount sub-routers
   routes.route("/password", createPasswordPages());
-  routes.route("/users", createUsersPages({ db }));
+  routes.route("/users", createUsersPages({ db, auth }));
   routes.route("/code", createCodePages(fileService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService));
   routes.route("/keys", createKeysPages(apiKeyService));

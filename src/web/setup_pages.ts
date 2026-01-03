@@ -5,7 +5,7 @@ import type { DatabaseService } from "../database/database_service.ts";
  * Options for creating the setup pages router.
  */
 export interface SetupPagesOptions {
-  /** Database service for user existence check and permissions update */
+  /** Database service for user existence check and role update */
   db: DatabaseService;
 }
 
@@ -100,7 +100,7 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
 
           if (response.ok) {
             const data = await response.json();
-            // Set admin permissions for the new user
+            // Set admin role for the new user
             await fetch('/web/setup/finalize', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -126,7 +126,7 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
     return c.html(content);
   });
 
-  // POST /setup/finalize - Set admin permissions after account creation
+  // POST /setup/finalize - Set admin role after account creation
   routes.post("/finalize", async (c) => {
     // Guard: If more than one user exists, this is not a first-run setup
     const userCount = await db.queryOne<{ count: number }>(
@@ -144,10 +144,10 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
         return c.json({ error: "Missing user ID" }, 400);
       }
 
-      // Set admin permissions for the new user
+      // Set permanent userMgmt role for the first user
       await db.execute(
-        "UPDATE user SET permissions = ? WHERE id = ?",
-        ["!A", userId]
+        "UPDATE user SET role = ? WHERE id = ?",
+        ["permanent,userMgmt", userId]
       );
 
       return c.json({ success: true });
