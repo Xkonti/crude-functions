@@ -7,6 +7,7 @@ import {
   flashMessages,
   confirmPage,
   buttonLink,
+  getLayoutUser,
 } from "./templates.ts";
 
 export function createKeysPages(apiKeyService: ApiKeyService): Hono {
@@ -84,7 +85,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
               .join("")
       }
     `;
-    return c.html(layout("API Keys", content));
+    return c.html(layout("API Keys", content, getLayoutUser(c)));
   });
 
   // Create key form
@@ -119,7 +120,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
         </div>
       </form>
     `;
-    return c.html(layout("Create API Key", content));
+    return c.html(layout("Create API Key", content, getLayoutUser(c)));
   });
 
   // Handle create
@@ -195,7 +196,8 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
         "Delete API Key",
         `Are you sure you want to delete the key with ID ${id}? This action cannot be undone.`,
         `/web/keys/delete?id=${id}`,
-        "/web/keys"
+        "/web/keys",
+        getLayoutUser(c)
       )
     );
   });
@@ -246,7 +248,8 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
         "Delete All Keys",
         `Are you sure you want to delete ALL keys for group "${group}"? This will remove ${keys.length} key(s). This action cannot be undone.`,
         `/web/keys/delete-group?group=${encodeURIComponent(group)}`,
-        "/web/keys"
+        "/web/keys",
+        getLayoutUser(c)
       )
     );
   });

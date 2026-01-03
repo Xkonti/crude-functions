@@ -1,5 +1,5 @@
 import { Hono } from "@hono/hono";
-import { layout, escapeHtml, type LayoutUser } from "./templates.ts";
+import { layout, escapeHtml, getLayoutUser } from "./templates.ts";
 
 /**
  * Options for creating the password pages router.
@@ -22,9 +22,6 @@ export function createPasswordPages(_options: PasswordPagesOptions = {}): Hono {
     const callbackUrl = c.req.query("callbackUrl") ?? "/web";
     const error = c.req.query("error");
     const success = c.req.query("success");
-    // deno-lint-ignore no-explicit-any
-    const sessionUser = (c as any).get("user") as { email: string } | undefined;
-    const layoutUser: LayoutUser | undefined = sessionUser ? { email: sessionUser.email } : undefined;
 
     const content = `
       <article>
@@ -110,7 +107,7 @@ export function createPasswordPages(_options: PasswordPagesOptions = {}): Hono {
       </script>
     `;
 
-    return c.html(layout("Change Password", content, layoutUser));
+    return c.html(layout("Change Password", content, getLayoutUser(c)));
   });
 
   return routes;

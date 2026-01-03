@@ -6,7 +6,7 @@ import { createUsersPages } from "./users_pages.ts";
 import { createCodePages } from "./code_pages.ts";
 import { createFunctionsPages } from "./functions_pages.ts";
 import { createKeysPages } from "./keys_pages.ts";
-import { layout } from "./templates.ts";
+import { layout, getLayoutUser } from "./templates.ts";
 import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
 import type { Auth } from "../auth/auth.ts";
 import type { DatabaseService } from "../database/database_service.ts";
@@ -67,7 +67,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
         </article>
       </div>
     `;
-    return c.html(layout("Dashboard", content));
+    return c.html(layout("Dashboard", content, getLayoutUser(c)));
   });
 
   // Mount sub-routers

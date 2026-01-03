@@ -8,7 +8,7 @@ import {
   confirmPage,
   buttonLink,
   formatDate,
-  type LayoutUser,
+  getLayoutUser,
 } from "./templates.ts";
 
 /**
@@ -47,15 +47,6 @@ export interface UsersPagesOptions {
 export function createUsersPages(options: UsersPagesOptions): Hono {
   const { db } = options;
   const routes = new Hono();
-
-  /**
-   * Helper to get layout user from context.
-   */
-  // deno-lint-ignore no-explicit-any
-  function getLayoutUser(c: any): LayoutUser | undefined {
-    const sessionUser = c.get("user") as SessionUser | undefined;
-    return sessionUser ? { email: sessionUser.email } : undefined;
-  }
 
   /**
    * Helper to get session user from context.
@@ -299,7 +290,8 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
         "Delete User",
         `Are you sure you want to delete the user "${user.email}"? This action cannot be undone.`,
         `/web/users/delete/${encodeURIComponent(userId)}`,
-        "/web/users"
+        "/web/users",
+        getLayoutUser(c)
       )
     );
   });

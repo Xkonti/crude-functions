@@ -15,6 +15,7 @@ import {
   flashMessages,
   confirmPage,
   buttonLink,
+  getLayoutUser,
 } from "./templates.ts";
 import { validateId } from "../utils/validation.ts";
 
@@ -971,13 +972,13 @@ export function createFunctionsPages(
       `
       }
     `;
-    return c.html(layout("Functions", content));
+    return c.html(layout("Functions", content, getLayoutUser(c)));
   });
 
   // Create form
   routes.get("/create", (c) => {
     const error = c.req.query("error");
-    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, error)));
+    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, error), getLayoutUser(c)));
   });
 
   // Handle create
@@ -993,7 +994,7 @@ export function createFunctionsPages(
 
     if (errors.length > 0) {
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, errors.join(". "))),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, errors.join(". ")), getLayoutUser(c)),
         400
       );
     }
@@ -1004,7 +1005,7 @@ export function createFunctionsPages(
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create function";
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, message)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, message), getLayoutUser(c)),
         400
       );
     }
@@ -1027,7 +1028,8 @@ export function createFunctionsPages(
     return c.html(
       layout(
         `Edit: ${route.name}`,
-        renderFunctionForm(`/web/functions/edit/${id}`, route, error)
+        renderFunctionForm(`/web/functions/edit/${id}`, route, error),
+        getLayoutUser(c)
       )
     );
   });
@@ -1063,7 +1065,8 @@ export function createFunctionsPages(
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, errors.join(". "))
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, errors.join(". ")),
+          getLayoutUser(c)
         ),
         400
       );
@@ -1079,7 +1082,8 @@ export function createFunctionsPages(
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, message)
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, message),
+          getLayoutUser(c)
         ),
         400
       );
@@ -1104,7 +1108,8 @@ export function createFunctionsPages(
         "Delete Function",
         `Are you sure you want to delete the function "${route.name}"? This action cannot be undone.`,
         `/web/functions/delete/${id}`,
-        "/web/functions"
+        "/web/functions",
+        getLayoutUser(c)
       )
     );
   });
@@ -1168,7 +1173,7 @@ export function createFunctionsPages(
       oldestLogId,
       hasMore: logs.length === limit,
     });
-    return c.html(layout(`Logs: ${route.name}`, content));
+    return c.html(layout(`Logs: ${route.name}`, content, getLayoutUser(c)));
   });
 
   // View metrics for a function
@@ -1214,7 +1219,7 @@ export function createFunctionsPages(
       retentionDays
     );
 
-    return c.html(layout(`Metrics: ${route.name}`, content));
+    return c.html(layout(`Metrics: ${route.name}`, content, getLayoutUser(c)));
   });
 
   return routes;

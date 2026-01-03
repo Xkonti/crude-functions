@@ -40,6 +40,25 @@ export interface LayoutUser {
 }
 
 /**
+ * Session user type from context.
+ */
+interface SessionUser {
+  id: string;
+  email: string;
+  name?: string;
+}
+
+/**
+ * Extracts layout user from Hono context.
+ * Use this in route handlers to get the user for layout().
+ */
+// deno-lint-ignore no-explicit-any
+export function getLayoutUser(c: any): LayoutUser | undefined {
+  const sessionUser = c.get("user") as SessionUser | undefined;
+  return sessionUser ? { email: sessionUser.email } : undefined;
+}
+
+/**
  * Wraps content in a full HTML page with PicoCSS styling.
  */
 export function layout(title: string, content: string, user?: LayoutUser): string {
@@ -172,7 +191,8 @@ export function confirmPage(
   title: string,
   message: string,
   actionUrl: string,
-  cancelUrl: string
+  cancelUrl: string,
+  user?: LayoutUser
 ): string {
   return layout(
     title,
@@ -187,7 +207,8 @@ export function confirmPage(
         <a href="${escapeHtml(cancelUrl)}" role="button" class="secondary">Cancel</a>
       </footer>
     </article>
-  `
+  `,
+    user
   );
 }
 
