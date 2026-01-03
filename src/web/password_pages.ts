@@ -4,9 +4,7 @@ import { layout, escapeHtml, getLayoutUser } from "./templates.ts";
 /**
  * Options for creating the password pages router.
  */
-export interface PasswordPagesOptions {
-  // No dependencies needed - uses client-side fetch to Better Auth API
-}
+export type PasswordPagesOptions = Record<string, never>;
 
 /**
  * Creates the password change page router.

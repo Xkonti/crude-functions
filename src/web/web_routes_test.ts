@@ -16,7 +16,7 @@ import type { Auth } from "../auth/auth.ts";
 function createMockAuth(options: { authenticated: boolean } = { authenticated: true }): Auth {
   return {
     api: {
-      getSession: async () => {
+      getSession: () => {
         if (options.authenticated) {
           return {
             user: { id: "test-user", email: "test@example.com", name: "Test User", emailVerified: true },

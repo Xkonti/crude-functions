@@ -20,7 +20,6 @@
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/testing@*": "1.0.16",
     "npm:bcrypt@*": "6.0.0",
-    "npm:better-auth@*": "1.4.10_@better-auth+utils@0.3.0_@better-fetch+fetch@1.1.21_better-call@1.1.7__zod@4.3.4_jose@6.1.3_kysely@0.28.9_nanostores@1.1.0_@better-auth+core@1.4.10__@better-auth+utils@0.3.0__@better-fetch+fetch@1.1.21__better-call@1.1.7___zod@4.3.4__jose@6.1.3__kysely@0.28.9__nanostores@1.1.0__zod@4.3.4_zod@4.3.4",
     "npm:better-auth@^1.4.10": "1.4.10_@better-auth+utils@0.3.0_@better-fetch+fetch@1.1.21_better-call@1.1.7__zod@4.3.4_jose@6.1.3_kysely@0.28.9_nanostores@1.1.0_@better-auth+core@1.4.10__@better-auth+utils@0.3.0__@better-fetch+fetch@1.1.21__better-call@1.1.7___zod@4.3.4__jose@6.1.3__kysely@0.28.9__nanostores@1.1.0__zod@4.3.4_zod@4.3.4",
     "npm:kysely@~0.27.2": "0.27.6",
     "npm:lodash-es@*": "4.17.22"
@@ -221,7 +220,7 @@
       "jsr:@std/dotenv@*",
       "jsr:@std/expect@*",
       "jsr:@std/testing@*",
-      "npm:better-auth@*"
+      "npm:better-auth@^1.4.10"
     ]
   }
 }

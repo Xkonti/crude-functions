@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
-import { admin } from "npm:better-auth@^1.4.10/plugins";
-import { createAccessControl } from "npm:better-auth@^1.4.10/plugins/access";
+import { admin } from "better-auth/plugins";
+import { createAccessControl } from "better-auth/plugins/access";
 import { Database } from "@db/sqlite";
 import { DenoSqlite3Dialect } from "@soapbox/kysely-deno-sqlite";
 
