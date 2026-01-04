@@ -189,6 +189,112 @@ The `ctx` object provides metadata about the current request:
 | `ctx.requestedAt` | `Date` | Timestamp when request was received |
 | `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
 | `ctx.route` | `object` | Route configuration (name, methods, etc.) |
+| `ctx.getSecret()` | `function` | Get a secret value (see Secrets section below) |
+| `ctx.getCompleteSecret()` | `function` | Get secret details across all scopes (see Secrets section below) |
+
+## Secrets
+
+Function handlers can access secrets through the `ctx` object. Secrets are scoped (global, function, group, or key) and automatically resolved based on the current request context.
+
+### `ctx.getSecret(name, scope?): Promise<string | undefined>`
+
+Retrieves a secret value by name. If no scope is specified, returns the merged value (most specific scope wins).
+
+**Parameters:**
+- `name` - The secret name to look up
+- `scope` (optional) - One of `'global'`, `'function'`, `'group'`, `'key'`. If omitted, returns the merged value.
+
+**Returns:** A promise resolving to the secret value, or `undefined` if not found.
+
+**Examples:**
+
+```typescript
+export default async function (c, ctx) {
+  // Get from merged scope (most common usage)
+  const smtpHost = await ctx.getSecret('SMTP_HOST');
+
+  // Get from specific scope
+  const globalDefault = await ctx.getSecret('SMTP_HOST', 'global');
+  const callerOverride = await ctx.getSecret('SMTP_HOST', 'key');
+
+  // Parallel fetching when multiple secrets needed
+  const [smtpUser, smtpPass] = await Promise.all([
+    ctx.getSecret('SMTP_USER'),
+    ctx.getSecret('SMTP_PASS'),
+  ]);
+
+  if (!smtpHost) {
+    return c.json({ error: "SMTP not configured" }, 500);
+  }
+
+  // Use the secret...
+  return c.json({ ok: true });
+}
+```
+
+### `ctx.getCompleteSecret(name): Promise<object | undefined>`
+
+Retrieves a secret's values across all scopes. Useful for debugging or when a function needs to inspect the full override chain.
+
+**Parameters:**
+- `name` - The secret name to look up
+
+**Returns:** A promise resolving to an object containing all scope values, or `undefined` if the secret doesn't exist in any scope.
+
+**Return structure:**
+
+```typescript
+{
+  global?: string,
+  function?: string,
+  group?: { value: string, groupId: number, groupName: string },
+  key?: { value: string, groupId: number, groupName: string, keyId: number, keyValue: string }
+}
+```
+
+**Example:**
+
+```typescript
+export default async function (c, ctx) {
+  const details = await ctx.getCompleteSecret('SENDER_EMAIL');
+
+  // Example result:
+  // {
+  //   global: "default@example.com",
+  //   function: "noreply@myapp.com",
+  //   group: { value: "noreply@email-service.com", groupId: 5, groupName: "email" },
+  //   key: { value: "noreply@acme.com", groupId: 5, groupName: "email", keyId: 10, keyValue: "customer-acme" }
+  // }
+
+  console.log(`Using SENDER_EMAIL from ${Object.keys(details).pop()} scope`);
+
+  return c.json({ details });
+}
+```
+
+### Scope Resolution
+
+When multiple scopes define a secret with the same name, the more specific scope wins:
+
+```
+Global → Function → Group → Key
+```
+
+**Example:**
+- Global defines `LOG_LEVEL=info`
+- Function defines `LOG_LEVEL=debug`
+- Group defines nothing
+- Key defines `LOG_LEVEL=warn`
+
+Result: `await ctx.getSecret('LOG_LEVEL')` returns `"warn"` (Key scope wins)
+
+### Public Routes (No API Key Required)
+
+When a route does not require authentication (`keys: []` or undefined):
+- Global and Function scoped secrets are available
+- Group and Key scoped secrets return `undefined`
+
+This is expected behavior - there is no caller identity to resolve group/key secrets from.
 
 ## Examples
 
