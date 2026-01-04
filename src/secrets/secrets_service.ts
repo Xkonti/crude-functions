@@ -201,6 +201,188 @@ export class SecretsService {
     }
   }
 
+  // ============== Function Scope Operations ==============
+
+  /**
+   * Get all secrets for a specific function (with decrypted values)
+   */
+  async getFunctionSecrets(functionId: number): Promise<Secret[]> {
+    const rows = await this.db.queryAll<{
+      id: number;
+      name: string;
+      value: string;
+      comment: string | null;
+      scope: number;
+      function_id: number | null;
+      api_group_id: number | null;
+      api_key_id: number | null;
+      created_at: string;
+      modified_at: string;
+    }>(
+      `SELECT id, name, value, comment, scope,
+              function_id, api_group_id, api_key_id,
+              created_at, modified_at
+       FROM secrets
+       WHERE scope = ? AND function_id = ?
+       ORDER BY name ASC`,
+      [SecretScope.Function, functionId]
+    );
+
+    // Decrypt all values
+    const secrets: Secret[] = [];
+    for (const row of rows) {
+      const decryptedValue = await this.encryptionService.decrypt(row.value);
+      secrets.push({
+        id: row.id,
+        name: row.name,
+        value: decryptedValue,
+        comment: row.comment,
+        scope: row.scope,
+        functionId: row.function_id,
+        apiGroupId: row.api_group_id,
+        apiKeyId: row.api_key_id,
+        createdAt: row.created_at,
+        modifiedAt: row.modified_at,
+      });
+    }
+
+    return secrets;
+  }
+
+  /**
+   * Get a function secret by ID (with decrypted value)
+   */
+  async getFunctionSecretById(
+    functionId: number,
+    secretId: number
+  ): Promise<Secret | null> {
+    const row = await this.db.queryOne<{
+      id: number;
+      name: string;
+      value: string;
+      comment: string | null;
+      scope: number;
+      function_id: number | null;
+      api_group_id: number | null;
+      api_key_id: number | null;
+      created_at: string;
+      modified_at: string;
+    }>(
+      `SELECT id, name, value, comment, scope,
+              function_id, api_group_id, api_key_id,
+              created_at, modified_at
+       FROM secrets
+       WHERE id = ? AND scope = ? AND function_id = ?`,
+      [secretId, SecretScope.Function, functionId]
+    );
+
+    if (!row) return null;
+
+    const decryptedValue = await this.encryptionService.decrypt(row.value);
+
+    return {
+      id: row.id,
+      name: row.name,
+      value: decryptedValue,
+      comment: row.comment,
+      scope: row.scope,
+      functionId: row.function_id,
+      apiGroupId: row.api_group_id,
+      apiKeyId: row.api_key_id,
+      createdAt: row.created_at,
+      modifiedAt: row.modified_at,
+    };
+  }
+
+  /**
+   * Create a new function secret
+   * @throws Error if name is invalid or already exists for this function
+   */
+  async createFunctionSecret(
+    functionId: number,
+    name: string,
+    value: string,
+    comment?: string
+  ): Promise<void> {
+    // Validate name format
+    this.validateSecretName(name);
+
+    // Check for duplicates within this function's scope
+    const isDuplicate = await this.checkDuplicateFunction(functionId, name);
+    if (isDuplicate) {
+      throw new Error(
+        `A secret with name '${name}' already exists for this function`
+      );
+    }
+
+    // Encrypt value
+    const encryptedValue = await this.encryptionService.encrypt(value);
+
+    // Insert into database
+    await this.db.execute(
+      `INSERT INTO secrets (name, value, comment, scope, function_id, created_at, modified_at)
+       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      [name, encryptedValue, comment ?? null, SecretScope.Function, functionId]
+    );
+  }
+
+  /**
+   * Update a function secret's value and/or comment
+   * @throws Error if secret not found
+   */
+  async updateFunctionSecret(
+    functionId: number,
+    secretId: number,
+    value: string,
+    comment?: string
+  ): Promise<void> {
+    // Verify secret exists and belongs to this function
+    const existing = await this.getFunctionSecretById(functionId, secretId);
+    if (!existing) {
+      throw new Error(
+        `Secret with ID ${secretId} not found for this function`
+      );
+    }
+
+    // Encrypt new value
+    const encryptedValue = await this.encryptionService.encrypt(value);
+
+    // Update in database
+    await this.db.execute(
+      `UPDATE secrets
+       SET value = ?, comment = ?, modified_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND scope = ? AND function_id = ?`,
+      [
+        encryptedValue,
+        comment ?? null,
+        secretId,
+        SecretScope.Function,
+        functionId,
+      ]
+    );
+  }
+
+  /**
+   * Delete a function secret
+   * @throws Error if secret not found
+   */
+  async deleteFunctionSecret(
+    functionId: number,
+    secretId: number
+  ): Promise<void> {
+    const result = await this.db.execute(
+      `DELETE FROM secrets
+       WHERE id = ? AND scope = ? AND function_id = ?`,
+      [secretId, SecretScope.Function, functionId]
+    );
+
+    if (result.changes === 0) {
+      throw new Error(
+        `Secret with ID ${secretId} not found for this function`
+      );
+    }
+  }
+
   // ============== Validation ==============
 
   /**
@@ -226,6 +408,23 @@ export class SecretsService {
     const row = await this.db.queryOne<{ count: number }>(
       `SELECT COUNT(*) as count FROM secrets WHERE name = ? AND scope = ?`,
       [name, SecretScope.Global]
+    );
+
+    return (row?.count ?? 0) > 0;
+  }
+
+  /**
+   * Check if a function secret with the given name already exists
+   */
+  private async checkDuplicateFunction(
+    functionId: number,
+    name: string
+  ): Promise<boolean> {
+    const row = await this.db.queryOne<{ count: number }>(
+      `SELECT COUNT(*) as count
+       FROM secrets
+       WHERE name = ? AND scope = ? AND function_id = ?`,
+      [name, SecretScope.Function, functionId]
     );
 
     return (row?.count ?? 0) > 0;

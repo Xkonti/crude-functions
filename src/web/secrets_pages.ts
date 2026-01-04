@@ -85,8 +85,8 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
                 <td>${formatDate(new Date(secret.createdAt))}</td>
                 <td>${formatDate(new Date(secret.modifiedAt))}</td>
                 <td class="actions">
-                  <a href="/web/secrets/edit/${secret.id}">Edit</a>
-                  <a href="/web/secrets/delete/${secret.id}">Delete</a>
+                  <a href="/web/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+                  <a href="/web/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                 </td>
               </tr>
             `

@@ -55,11 +55,11 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                       ${groupInfo?.description ? `<br><small style="color: var(--pico-muted-color);">${escapeHtml(groupInfo.description)}</small>` : ""}
                     </div>
                     <div>
-                      ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Edit Group</a>` : ""}
-                      <a href="/web/keys/create?group=${encodeURIComponent(groupName)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Add Key</a>
+                      ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
+                      <a href="/web/keys/create?group=${encodeURIComponent(groupName)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>
                       ${
                         groupName !== "management"
-                          ? `<a href="/web/keys/delete-group?group=${encodeURIComponent(groupName)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete Group</a>`
+                          ? `<a href="/web/keys/delete-group?group=${encodeURIComponent(groupName)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
                           : ""
                       }
                     </div>
@@ -89,7 +89,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                           ${
                             key.id === -1
                               ? "<em>env</em>"
-                              : `<a href="/web/keys/delete?id=${key.id}">Delete</a>`
+                              : `<a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>`
                           }
                         </td>
                       </tr>

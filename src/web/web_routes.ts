@@ -17,6 +17,7 @@ import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import type { EncryptionService } from "../encryption/encryption_service.ts";
+import { SecretsService } from "../secrets/secrets_service.ts";
 
 export interface WebRoutesOptions {
   auth: Auth;
@@ -32,6 +33,9 @@ export interface WebRoutesOptions {
 export function createWebRoutes(options: WebRoutesOptions): Hono {
   const { auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService } = options;
   const routes = new Hono();
+
+  // Initialize secrets service
+  const secretsService = new SecretsService({ db, encryptionService });
 
   // Mount setup pages (public - only accessible when no users exist)
   routes.route("/setup", createSetupPages({ db }));
@@ -84,7 +88,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   routes.route("/password", createPasswordPages());
   routes.route("/users", createUsersPages({ db, auth }));
   routes.route("/code", createCodePages(fileService));
-  routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService));
+  routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService, secretsService));
   routes.route("/keys", createKeysPages(apiKeyService));
   routes.route("/secrets", createSecretsPages({ db, encryptionService }));
 

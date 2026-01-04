@@ -97,8 +97,8 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
                 <td><code>${user.role ? escapeHtml(user.role) : "<em>none</em>"}</code></td>
                 <td>${formatDate(new Date(user.createdAt))}</td>
                 <td class="actions">
-                  <a href="/web/users/edit/${encodeURIComponent(user.id)}">Edit</a>
-                  ${user.id !== currentUser?.id ? `<a href="/web/users/delete/${encodeURIComponent(user.id)}">Delete</a>` : ""}
+                  <a href="/web/users/edit/${encodeURIComponent(user.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+                  ${user.id !== currentUser?.id ? `<a href="/web/users/delete/${encodeURIComponent(user.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>` : ""}
                 </td>
               </tr>
             `

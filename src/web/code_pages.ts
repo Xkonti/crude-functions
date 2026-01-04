@@ -53,8 +53,8 @@ export function createCodePages(fileService: FileService): Hono {
                 <td>${formatSize(file.size)}</td>
                 <td>${formatDate(file.mtime)}</td>
                 <td class="actions">
-                  <a href="/web/code/edit?path=${encodeURIComponent(file.path)}">Edit</a>
-                  <a href="/web/code/delete?path=${encodeURIComponent(file.path)}">Delete</a>
+                  <a href="/web/code/edit?path=${encodeURIComponent(file.path)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+                  <a href="/web/code/delete?path=${encodeURIComponent(file.path)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                 </td>
               </tr>
             `
