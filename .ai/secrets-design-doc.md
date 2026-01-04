@@ -315,6 +315,365 @@ Secrets are fetched on-demand, not pre-computed. A function that uses zero secre
 - Missing caller context (no API key) results in empty group/key secrets, not errors
 - Functions can check for presence and handle accordingly
 
+## Implementation
+
+### Database Schema
+
+All secrets are stored in a single `secrets` table. This simplifies the implementation compared to separate tables per scope, while still allowing efficient queries for any scope.
+
+#### Table Definition
+
+```sql
+CREATE TABLE secrets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  comment TEXT,
+  scope INTEGER NOT NULL,
+  function_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+  api_group_id INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  api_key_id INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+#### Column Details
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER | Primary key |
+| `name` | TEXT | Secret name. Allowed characters: `a-zA-Z0-9_-` |
+| `value` | TEXT | Encrypted secret value (see Encryption section) |
+| `comment` | TEXT | Optional description for UI display |
+| `scope` | INTEGER | Scope discriminator: 0=global, 1=function, 2=group, 3=key |
+| `function_id` | INTEGER | Foreign key to `routes.id`. Set when scope=1, NULL otherwise |
+| `api_group_id` | INTEGER | Foreign key to `api_key_groups.id`. Set when scope=2, NULL otherwise |
+| `api_key_id` | INTEGER | Foreign key to `api_keys.id`. Set when scope=3, NULL otherwise |
+| `created_at` | TEXT | Creation timestamp |
+| `modified_at` | TEXT | Last modification timestamp |
+
+#### Scope Values
+
+```
+0 = global     (no reference needed)
+1 = function   (function_id required)
+2 = group      (api_group_id required)
+3 = key        (api_key_id required)
+```
+
+#### Foreign Key Behavior
+
+All foreign keys use `ON DELETE CASCADE` for automatic cleanup:
+
+- `function_id` - when a route is deleted, its secrets are automatically removed
+- `api_group_id` - when an API key group is deleted, its secrets are automatically removed
+- `api_key_id` - when an API key is deleted, its secrets are automatically removed
+
+#### Indexes
+
+```sql
+-- Primary lookup: find secrets by name across relevant scopes
+CREATE INDEX idx_secrets_name_scope ON secrets(name, scope);
+
+-- Scope-specific lookups with partial indexes (smaller, faster)
+CREATE INDEX idx_secrets_function
+  ON secrets(function_id)
+  WHERE function_id IS NOT NULL;
+
+CREATE INDEX idx_secrets_group
+  ON secrets(api_group_id)
+  WHERE api_group_id IS NOT NULL;
+
+CREATE INDEX idx_secrets_key
+  ON secrets(api_key_id)
+  WHERE api_key_id IS NOT NULL;
+```
+
+#### Uniqueness
+
+SQLite doesn't handle `UNIQUE` constraints well with multiple nullable columns. Uniqueness is enforced at the application level:
+
+- Before inserting a global secret: check `WHERE name = ? AND scope = 0`
+- Before inserting a function secret: check `WHERE name = ? AND scope = 1 AND function_id = ?`
+- Before inserting a group secret: check `WHERE name = ? AND scope = 2 AND api_group_id = ?`
+- Before inserting a key secret: check `WHERE name = ? AND scope = 3 AND api_key_id = ?`
+
+#### Query Patterns
+
+**Single scope lookup:**
+
+```sql
+SELECT value FROM secrets
+WHERE name = ? AND scope = 0;  -- global
+
+SELECT value FROM secrets
+WHERE name = ? AND scope = 1 AND function_id = ?;  -- function
+```
+
+**Merged scope lookup (all applicable scopes at once):**
+
+```sql
+SELECT scope, value, function_id, api_group_id, api_key_id
+FROM secrets
+WHERE name = ?
+  AND (
+    scope = 0
+    OR (scope = 1 AND function_id = ?)
+    OR (scope = 2 AND api_group_id = ?)
+    OR (scope = 3 AND api_key_id = ?)
+  );
+```
+
+The application then picks the most specific scope (highest scope value) from the results.
+
+### Encryption
+
+Secret values are encrypted at rest using AES-256-GCM. This protects against database file exposure while maintaining query capability on non-sensitive columns (name, scope, references).
+
+#### Encryption Key
+
+The encryption key is provided via environment variable:
+
+```
+SECRETS_ENCRYPTION_KEY=<base64-encoded-32-byte-key>
+```
+
+Generate a key:
+
+```bash
+openssl rand -base64 32
+```
+
+**Startup behavior:** If `SECRETS_ENCRYPTION_KEY` is not set, the server refuses to start with a clear error message. There is no fallback or unencrypted mode.
+
+#### Storage Format
+
+Each encrypted value is stored as base64-encoded bytes containing:
+
+```
+base64(IV || ciphertext || auth_tag)
+```
+
+- **IV (Initialization Vector):** 12 bytes, randomly generated per encryption
+- **Ciphertext:** Variable length, the encrypted secret
+- **Auth tag:** 16 bytes, included automatically by AES-GCM
+
+#### EncryptionService
+
+```typescript
+export interface EncryptionServiceOptions {
+  /** Base64-encoded 256-bit (32-byte) key */
+  encryptionKey: string;
+}
+
+export class EncryptionService {
+  private key: CryptoKey | null = null;
+  private readonly rawKey: Uint8Array;
+
+  constructor(options: EncryptionServiceOptions) {
+    this.rawKey = base64ToBytes(options.encryptionKey);
+    if (this.rawKey.length !== 32) {
+      throw new Error("Encryption key must be 32 bytes (256 bits)");
+    }
+  }
+
+  async encrypt(plaintext: string): Promise<string> {
+    const key = await this.getKey();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(plaintext);
+
+    const ciphertext = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      encoded
+    );
+
+    // Combine: IV + ciphertext (auth tag is appended by GCM)
+    const combined = new Uint8Array(iv.length + ciphertext.byteLength);
+    combined.set(iv);
+    combined.set(new Uint8Array(ciphertext), iv.length);
+
+    return bytesToBase64(combined);
+  }
+
+  async decrypt(encrypted: string): Promise<string> {
+    const key = await this.getKey();
+    const combined = base64ToBytes(encrypted);
+
+    const iv = combined.slice(0, 12);
+    const ciphertext = combined.slice(12);
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv },
+      key,
+      ciphertext
+    );
+
+    return new TextDecoder().decode(decrypted);
+  }
+
+  private async getKey(): Promise<CryptoKey> {
+    if (!this.key) {
+      this.key = await crypto.subtle.importKey(
+        "raw",
+        this.rawKey,
+        { name: "AES-GCM" },
+        false,
+        ["encrypt", "decrypt"]
+      );
+    }
+    return this.key;
+  }
+}
+```
+
+#### Security Properties
+
+**What encryption protects:**
+- Database file stolen or leaked
+- Database backups exposed
+- SQL injection attacks reading raw values
+
+**What encryption does not protect:**
+- Compromised server with access to both database and environment variables
+- Memory inspection of running process
+- Authorized access through the API
+
+For internal tooling, this threat model is appropriate.
+
+### API Design
+
+Secrets are managed through a unified `/api/secrets` resource. All endpoints require management authentication (session or `X-API-Key` with management group).
+
+#### Endpoints
+
+**List secrets by scope:**
+
+```
+GET /api/secrets?scope=global
+GET /api/secrets?scope=function&functionId=123
+GET /api/secrets?scope=group&groupId=456
+GET /api/secrets?scope=key&keyId=789
+```
+
+Returns array of secrets (values are decrypted for display):
+
+```json
+[
+  {
+    "id": 1,
+    "name": "SMTP_HOST",
+    "value": "smtp.example.com",
+    "comment": "Production mail server",
+    "scope": "global",
+    "createdAt": "2024-01-15T10:30:00Z",
+    "modifiedAt": "2024-01-15T10:30:00Z"
+  }
+]
+```
+
+**Create a secret:**
+
+```
+POST /api/secrets
+```
+
+Request body:
+
+```json
+{
+  "name": "SMTP_HOST",
+  "value": "smtp.example.com",
+  "comment": "Production mail server",
+  "scope": "global"
+}
+```
+
+For scoped secrets, include the reference:
+
+```json
+{
+  "name": "EMAIL_TEMPLATE",
+  "value": "welcome",
+  "scope": "function",
+  "functionId": 123
+}
+```
+
+```json
+{
+  "name": "SMTP_HOST",
+  "value": "smtp.mailservice.com",
+  "scope": "group",
+  "groupId": 456
+}
+```
+
+```json
+{
+  "name": "SENDER_NAME",
+  "value": "ACME Corp",
+  "scope": "key",
+  "keyId": 789
+}
+```
+
+**Update a secret:**
+
+```
+PUT /api/secrets/:id
+```
+
+```json
+{
+  "value": "new-value",
+  "comment": "Updated comment"
+}
+```
+
+Only `value` and `comment` can be updated. To change scope or name, delete and recreate.
+
+**Delete a secret:**
+
+```
+DELETE /api/secrets/:id
+```
+
+#### Preview Endpoint
+
+For the function edit page preview feature:
+
+```
+GET /api/secrets/preview?functionId=123
+```
+
+Returns all secrets available to the function, grouped by source:
+
+```json
+{
+  "secrets": [
+    {
+      "name": "SMTP_HOST",
+      "sources": [
+        { "scope": "global", "value": "smtp.default.com" },
+        { "scope": "group", "groupId": 5, "groupName": "email", "value": "smtp.email.com" }
+      ]
+    },
+    {
+      "name": "SENDER_EMAIL",
+      "sources": [
+        { "scope": "global", "value": "noreply@default.com" },
+        { "scope": "key", "keyId": 10, "groupName": "email", "keyValue": "customer-acme", "value": "noreply@acme.com" },
+        { "scope": "key", "keyId": 11, "groupName": "email", "keyValue": "customer-globex", "value": "noreply@globex.com" }
+      ]
+    }
+  ]
+}
+```
+
+This endpoint only includes groups that the function accepts (from its `keys` configuration).
+
 ## Future Considerations
 
 These items are out of scope for initial implementation but noted for future reference:
@@ -326,3 +685,4 @@ These items are out of scope for initial implementation but noted for future ref
 5. **Caching:** Request-scoped and global caches to reduce database lookups for frequently accessed secrets
 6. **Unified secrets management page:** Single page showing all scopes with navigation (for future SPA interface)
 7. **Simulate with specific key:** Preview feature allowing selection of a specific API key to see exact resolved values
+8. **Encryption key rotation:** Add `key_version` column to support rotating encryption keys without downtime
