@@ -217,15 +217,9 @@ export class FunctionRouter {
         },
       };
 
-      // 3. Load Handler
-      let handler;
-      try {
-        handler = await this.handlerLoader.load(route.handler);
-      } catch (error) {
-        return this.handleLoadError(c, error, requestId);
-      }
-
-      // 4. Execute Handler within request context (for console log capture)
+      // 3. Execute Handler within request context (for console log capture)
+      // Handler loading happens INSIDE the env context so module-level code
+      // sees the isolated environment, not the real system environment.
       const requestContext = { requestId, routeId: route.id };
 
       // Prepare execution logging data
@@ -247,10 +241,12 @@ export class FunctionRouter {
 
       try {
         const response = await runInRequestContext(requestContext, async () => {
-          // Wrap handler execution in isolated env context
-          // Each request gets a fresh empty environment
+          // Create isolated env context - handler loading and execution both happen inside
+          // This ensures module-level code in handlers sees isolated env (empty by default)
           const envContext = createEnvContext();
           return await runInEnvContext(envContext, async () => {
+            // Load handler INSIDE the env context
+            const handler = await this.handlerLoader.load(route.handler);
             return await handler(c, ctx);
           });
         });
@@ -279,8 +275,29 @@ export class FunctionRouter {
 
         return response;
       } catch (error) {
-        // Log execution end (error)
         const durationMs = Math.round(performance.now() - startTime);
+
+        // Check if this is a handler load error (not an execution error)
+        if (
+          error instanceof HandlerNotFoundError ||
+          error instanceof HandlerExportError ||
+          error instanceof HandlerSyntaxError ||
+          error instanceof HandlerLoadError
+        ) {
+          // Log execution end (load error) - no metrics for load failures
+          this.consoleLogService.store({
+            requestId,
+            routeId: route.id,
+            level: "exec_end",
+            message: `${durationMs}ms (load error)`,
+          }).catch((logError) => {
+            globalThis.console.error("[FunctionRouter] Failed to store console log:", logError);
+          });
+
+          return this.handleLoadError(c, error, requestId);
+        }
+
+        // Log execution end (execution error)
         this.consoleLogService.store({
           requestId,
           routeId: route.id,
@@ -290,7 +307,7 @@ export class FunctionRouter {
           globalThis.console.error("[FunctionRouter] Failed to store console log:", logError);
         });
 
-        // Still store metric for failed executions
+        // Store metric for failed executions
         this.executionMetricsService.store({
           routeId: route.id,
           type: "execution",
