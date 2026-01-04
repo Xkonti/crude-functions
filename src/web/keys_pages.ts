@@ -1,6 +1,8 @@
 import { Hono } from "@hono/hono";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import { validateKeyGroup, validateKeyValue } from "../keys/api_key_service.ts";
+import type { SecretsService } from "../secrets/secrets_service.ts";
+import type { Secret } from "../secrets/types.ts";
 import {
   layout,
   escapeHtml,
@@ -8,9 +10,13 @@ import {
   confirmPage,
   buttonLink,
   getLayoutUser,
+  formatDate,
 } from "./templates.ts";
 
-export function createKeysPages(apiKeyService: ApiKeyService): Hono {
+export function createKeysPages(
+  apiKeyService: ApiKeyService,
+  secretsService: SecretsService
+): Hono {
   const routes = new Hono();
 
   // List all keys grouped by group
@@ -55,6 +61,7 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                       ${groupInfo?.description ? `<br><small style="color: var(--pico-muted-color);">${escapeHtml(groupInfo.description)}</small>` : ""}
                     </div>
                     <div>
+                      ${groupInfo ? `<a href="/web/keys/secrets/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Manage Secrets">🔐</a>` : ""}
                       ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
                       <a href="/web/keys/create?group=${encodeURIComponent(groupName)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>
                       ${
@@ -485,5 +492,618 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
     }
   });
 
+  // ============== Group Secrets Management ==============
+
+  // GET /secrets/:groupId - List secrets for group
+  routes.get("/secrets/:groupId", async (c) => {
+    const idParam = c.req.param("groupId");
+    const groupId = parseInt(idParam);
+
+    if (isNaN(groupId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid group ID")
+      );
+    }
+
+    // Verify group exists
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    const success = c.req.query("success");
+    const error = c.req.query("error");
+
+    // Load secrets for this group
+    const secrets = await secretsService.getGroupSecrets(groupId);
+
+    const content = `
+      <h1>Secrets for ${escapeHtml(group.name)}</h1>
+      <p>
+        <a href="/web/keys" role="button" class="secondary">
+          ← Back to Keys
+        </a>
+      </p>
+      ${flashMessages(success, error)}
+      <p>
+        ${buttonLink(
+          `/web/keys/secrets/${groupId}/create`,
+          "Create New Secret"
+        )}
+      </p>
+      ${
+        secrets.length === 0
+          ? "<p>No secrets configured for this group. Create your first secret to get started.</p>"
+          : renderGroupSecretsTable(secrets, groupId)
+      }
+    `;
+
+    return c.html(
+      layout(`Secrets: ${group.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // GET /secrets/:groupId/create - Create secret form
+  routes.get("/secrets/:groupId/create", async (c) => {
+    const idParam = c.req.param("groupId");
+    const groupId = parseInt(idParam);
+
+    if (isNaN(groupId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid group ID")
+      );
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    const error = c.req.query("error");
+
+    const content = `
+      <h1>Create Secret for ${escapeHtml(group.name)}</h1>
+      <p>
+        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">
+          ← Back to Secrets
+        </a>
+      </p>
+      ${renderGroupSecretCreateForm(groupId, {}, error)}
+    `;
+
+    return c.html(
+      layout(`Create Secret: ${group.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // POST /secrets/:groupId/create - Handle secret creation
+  routes.post("/secrets/:groupId/create", async (c) => {
+    const idParam = c.req.param("groupId");
+    const groupId = parseInt(idParam);
+
+    if (isNaN(groupId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid group ID")
+      );
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      return c.redirect(
+        `/web/keys/secrets/${groupId}/create?error=` +
+          encodeURIComponent("Invalid form data")
+      );
+    }
+
+    const { secretData, errors } = parseSecretFormData(formData);
+
+    if (errors.length > 0) {
+      const content = `
+        <h1>Create Secret for ${escapeHtml(group.name)}</h1>
+        <p>
+          <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderGroupSecretCreateForm(groupId, secretData, errors.join(". "))}
+      `;
+      return c.html(
+        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+
+    try {
+      await secretsService.createGroupSecret(
+        groupId,
+        secretData.name,
+        secretData.value,
+        secretData.comment || undefined
+      );
+
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?success=` +
+          encodeURIComponent(`Secret created: ${secretData.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create secret";
+      const content = `
+        <h1>Create Secret for ${escapeHtml(group.name)}</h1>
+        <p>
+          <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderGroupSecretCreateForm(groupId, secretData, message)}
+      `;
+      return c.html(
+        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+  });
+
+  // GET /secrets/:groupId/edit/:secretId - Edit secret form
+  routes.get("/secrets/:groupId/edit/:secretId", async (c) => {
+    const idParam = c.req.param("groupId");
+    const secretIdParam = c.req.param("secretId");
+    const groupId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(groupId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    const secret = await secretsService.getGroupSecretById(
+      groupId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    const error = c.req.query("error");
+
+    const content = `
+      <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+      <p>
+        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">
+          ← Back to Secrets
+        </a>
+      </p>
+      ${renderGroupSecretEditForm(groupId, secret, error)}
+    `;
+
+    return c.html(
+      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // POST /secrets/:groupId/edit/:secretId - Handle secret update
+  routes.post("/secrets/:groupId/edit/:secretId", async (c) => {
+    const idParam = c.req.param("groupId");
+    const secretIdParam = c.req.param("secretId");
+    const groupId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(groupId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    const secret = await secretsService.getGroupSecretById(
+      groupId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      return c.redirect(
+        `/web/keys/secrets/${groupId}/edit/${secretId}?error=` +
+          encodeURIComponent("Invalid form data")
+      );
+    }
+
+    const { editData, errors } = parseSecretEditFormData(formData);
+
+    if (errors.length > 0) {
+      const content = `
+        <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+        <p>
+          <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderGroupSecretEditForm(
+          groupId,
+          { ...secret, ...editData },
+          errors.join(". ")
+        )}
+      `;
+      return c.html(
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+
+    try {
+      await secretsService.updateGroupSecret(
+        groupId,
+        secretId,
+        editData.value,
+        editData.comment || undefined
+      );
+
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?success=` +
+          encodeURIComponent(`Secret updated: ${secret.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update secret";
+      const content = `
+        <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+        <p>
+          <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderGroupSecretEditForm(
+          groupId,
+          { ...secret, ...editData },
+          message
+        )}
+      `;
+      return c.html(
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+  });
+
+  // GET /secrets/:groupId/delete/:secretId - Delete confirmation
+  routes.get("/secrets/:groupId/delete/:secretId", async (c) => {
+    const idParam = c.req.param("groupId");
+    const secretIdParam = c.req.param("secretId");
+    const groupId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(groupId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    const secret = await secretsService.getGroupSecretById(
+      groupId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    return c.html(
+      confirmPage(
+        "Delete Secret",
+        `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
+        `/web/keys/secrets/${groupId}/delete/${secretId}`,
+        `/web/keys/secrets/${groupId}`,
+        getLayoutUser(c)
+      )
+    );
+  });
+
+  // POST /secrets/:groupId/delete/:secretId - Handle deletion
+  routes.post("/secrets/:groupId/delete/:secretId", async (c) => {
+    const idParam = c.req.param("groupId");
+    const secretIdParam = c.req.param("secretId");
+    const groupId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(groupId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Group not found")
+      );
+    }
+
+    const secret = await secretsService.getGroupSecretById(
+      groupId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    try {
+      await secretsService.deleteGroupSecret(groupId, secretId);
+
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?success=` +
+          encodeURIComponent(`Secret deleted: ${secret.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete secret";
+      return c.redirect(
+        `/web/keys/secrets/${groupId}?error=` + encodeURIComponent(message)
+      );
+    }
+  });
+
   return routes;
+}
+
+// ============== Helper Functions for Group Secrets ==============
+
+/**
+ * Renders the secrets table with show/hide and copy functionality
+ */
+function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Value</th>
+          <th>Comment</th>
+          <th>Created</th>
+          <th>Modified</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${secrets
+          .map(
+            (secret) => `
+          <tr>
+            <td><code>${escapeHtml(secret.name)}</code></td>
+            <td class="secret-value">
+              <span class="masked">••••••••</span>
+              <span class="revealed" style="display:none;">
+                <code>${escapeHtml(secret.value)}</code>
+              </span>
+              <button type="button" onclick="toggleSecret(this)"
+                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                👁️
+              </button>
+              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                      class="secondary" style="padding: 0.25rem 0.5rem;">
+                📋
+              </button>
+            </td>
+            <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
+            <td>${formatDate(new Date(secret.createdAt))}</td>
+            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td class="actions">
+              <a href="/web/keys/secrets/${groupId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              <a href="/web/keys/secrets/${groupId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+            </td>
+          </tr>
+        `
+          )
+          .join("")}
+      </tbody>
+    </table>
+
+    <script>
+    function toggleSecret(btn) {
+      const td = btn.closest('td');
+      const masked = td.querySelector('.masked');
+      const revealed = td.querySelector('.revealed');
+
+      if (masked.style.display === 'none') {
+        masked.style.display = '';
+        revealed.style.display = 'none';
+        btn.textContent = '👁️';
+      } else {
+        masked.style.display = 'none';
+        revealed.style.display = '';
+        btn.textContent = '🙈';
+      }
+    }
+
+    function copySecret(btn, value) {
+      navigator.clipboard.writeText(value).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = original, 2000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+    </script>
+  `;
+}
+
+/**
+ * Renders the create secret form for a group
+ */
+function renderGroupSecretCreateForm(
+  groupId: number,
+  data: { name?: string; value?: string; comment?: string } = {},
+  error?: string
+): string {
+  return `
+    ${error ? flashMessages(undefined, error) : ""}
+    <form method="POST" action="/web/keys/secrets/${groupId}/create">
+      <label>
+        Secret Name *
+        <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
+               required autofocus
+               pattern="[a-zA-Z0-9_-]+"
+               placeholder="MY_SECRET_KEY" />
+        <small>Letters, numbers, underscores, and dashes only</small>
+      </label>
+      <label>
+        Secret Value *
+        <textarea name="value" required
+                  placeholder="your-secret-value"
+                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
+        <small>Encrypted at rest using AES-256-GCM</small>
+      </label>
+      <label>
+        Comment
+        <input type="text" name="comment" value="${escapeHtml(data.comment ?? "")}"
+               placeholder="Optional description" />
+        <small>Helps identify the purpose of this secret</small>
+      </label>
+      <div class="grid">
+        <button type="submit">Create Secret</button>
+        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  `;
+}
+
+/**
+ * Renders the edit secret form for a group
+ */
+function renderGroupSecretEditForm(
+  groupId: number,
+  secret: { id: number; name: string; value: string; comment: string | null },
+  error?: string
+): string {
+  return `
+    ${error ? flashMessages(undefined, error) : ""}
+    <form method="POST" action="/web/keys/secrets/${groupId}/edit/${secret.id}">
+      <label>
+        Secret Name
+        <input type="text" value="${escapeHtml(secret.name)}" disabled />
+        <small>Secret names cannot be changed</small>
+      </label>
+      <label>
+        Secret Value *
+        <textarea name="value" required
+                  placeholder="your-secret-value"
+                  rows="4">${escapeHtml(secret.value)}</textarea>
+        <small>Encrypted at rest using AES-256-GCM</small>
+      </label>
+      <label>
+        Comment
+        <input type="text" name="comment" value="${escapeHtml(secret.comment ?? "")}"
+               placeholder="Optional description" />
+        <small>Helps identify the purpose of this secret</small>
+      </label>
+      <div class="grid">
+        <button type="submit">Save Changes</button>
+        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  `;
+}
+
+/**
+ * Parse and validate secret create form data
+ */
+function parseSecretFormData(formData: FormData): {
+  secretData: { name: string; value: string; comment: string };
+  errors: string[];
+} {
+  const errors: string[] = [];
+
+  const name = formData.get("name")?.toString().trim() ?? "";
+  const value = formData.get("value")?.toString() ?? "";
+  const comment = formData.get("comment")?.toString().trim() ?? "";
+
+  if (!name) {
+    errors.push("Secret name is required");
+  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    errors.push(
+      "Secret name can only contain letters, numbers, underscores, and dashes"
+    );
+  }
+
+  if (!value) {
+    errors.push("Secret value is required");
+  }
+
+  return {
+    secretData: { name, value, comment },
+    errors,
+  };
+}
+
+/**
+ * Parse and validate secret edit form data
+ */
+function parseSecretEditFormData(formData: FormData): {
+  editData: { value: string; comment: string };
+  errors: string[];
+} {
+  const errors: string[] = [];
+
+  const value = formData.get("value")?.toString() ?? "";
+  const comment = formData.get("comment")?.toString().trim() ?? "";
+
+  if (!value) {
+    errors.push("Secret value is required");
+  }
+
+  return {
+    editData: { value, comment },
+    errors,
+  };
 }
