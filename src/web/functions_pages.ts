@@ -11,7 +11,7 @@ import type { ExecutionMetricsService } from "../metrics/execution_metrics_servi
 import type { ExecutionMetric, MetricType } from "../metrics/types.ts";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
-import type { Secret } from "../secrets/types.ts";
+import type { Secret, SecretPreview } from "../secrets/types.ts";
 import {
   layout,
   escapeHtml,
@@ -49,6 +49,143 @@ function renderMethodBadges(methods: string[]): string {
   return methods
     .map((m) => `<span class="method-badge">${escapeHtml(m)}</span>`)
     .join(" ");
+}
+
+/**
+ * Renders the secrets preview HTML fragment.
+ * Groups individual API key secrets with collapsible expansion.
+ */
+function renderSecretsPreview(previews: SecretPreview[]): string {
+  if (previews.length === 0) {
+    return `
+      <article style="margin-top: 1rem;">
+        <p><em>No secrets available to this function.</em></p>
+        <small>Secrets can be defined at global, function, or API key group scope.</small>
+      </article>
+    `;
+  }
+
+  return `
+    <article style="margin-top: 1rem; background: #f8f9fa; padding: 1rem;">
+      <header><strong>Available Secrets</strong></header>
+      <div style="font-family: monospace; font-size: 0.9em;">
+        ${previews.map((preview, previewIdx) => {
+          // Group key-level sources by group
+          const keySources = preview.sources.filter(s => s.scope === 'key');
+          const keysByGroup = new Map<string, typeof keySources>();
+          for (const keySource of keySources) {
+            const groupKey = keySource.groupName || 'unknown';
+            if (!keysByGroup.has(groupKey)) {
+              keysByGroup.set(groupKey, []);
+            }
+            keysByGroup.get(groupKey)!.push(keySource);
+          }
+
+          return `
+          <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #dee2e6;">
+            <div style="font-weight: bold; margin-bottom: 0.5rem;">
+              ${escapeHtml(preview.name)}
+            </div>
+            ${preview.sources.filter(s => s.scope !== 'key').map(source => {
+              const scopeLabel = source.scope === 'global'
+                ? 'via global scope'
+                : source.scope === 'function'
+                ? 'via function scope'
+                : `via '${escapeHtml(source.groupName || '')}' API key group`;
+
+              return `
+                <div class="secret-value" style="margin-left: 1rem; margin-bottom: 0.25rem;">
+                  <span style="color: #6c757d;">└─ ${scopeLabel}:</span>
+                  <span class="masked">••••••••</span>
+                  <span class="revealed" style="display:none;">
+                    <code>${escapeHtml(source.value)}</code>
+                  </span>
+                  <button type="button" onclick="toggleSecret(this)"
+                          class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                    👁️
+                  </button>
+                  <button type="button" onclick="copySecret(this, '${escapeHtml(source.value).replace(/'/g, "\\'")}')"
+                          class="secondary" style="padding: 0.25rem 0.5rem;">
+                    📋
+                  </button>
+                </div>
+              `;
+            }).join('')}
+            ${Array.from(keysByGroup.entries()).map(([groupName, keys]) => `
+              <div style="margin-left: 1rem; margin-bottom: 0.25rem;">
+                <span style="color: #6c757d;">└─ via ${keys.length} API key${keys.length !== 1 ? 's' : ''} in '${escapeHtml(groupName)}' group</span>
+                <button type="button" onclick="toggleKeyExpansion('keys-${previewIdx}-${escapeHtml(groupName)}')"
+                        class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                  ▼
+                </button>
+                <div id="keys-${previewIdx}-${escapeHtml(groupName)}" style="display: none; margin-left: 1rem; margin-top: 0.5rem;">
+                  ${keys.map(keySource => `
+                    <div class="secret-value" style="margin-bottom: 0.25rem;">
+                      <span style="color: #6c757d;">• ${escapeHtml(groupName)}/${escapeHtml(keySource.keyValue || '')}:</span>
+                      <span class="masked">••••••••</span>
+                      <span class="revealed" style="display:none;">
+                        <code>${escapeHtml(keySource.value)}</code>
+                      </span>
+                      <button type="button" onclick="toggleSecret(this)"
+                              class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                        👁️
+                      </button>
+                      <button type="button" onclick="copySecret(this, '${escapeHtml(keySource.value).replace(/'/g, "\\'")}')"
+                              class="secondary" style="padding: 0.25rem 0.5rem;">
+                        📋
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+        }).join('')}
+      </div>
+    </article>
+
+    <script>
+    function toggleSecret(btn) {
+      const container = btn.closest('.secret-value');
+      const masked = container.querySelector('.masked');
+      const revealed = container.querySelector('.revealed');
+
+      if (masked.style.display === 'none') {
+        masked.style.display = '';
+        revealed.style.display = 'none';
+        btn.textContent = '👁️';
+      } else {
+        masked.style.display = 'none';
+        revealed.style.display = '';
+        btn.textContent = '🙈';
+      }
+    }
+
+    function copySecret(btn, value) {
+      navigator.clipboard.writeText(value).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = original, 2000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+
+    function toggleKeyExpansion(id) {
+      const container = document.getElementById(id);
+      const btn = event.target;
+      if (container.style.display === 'none') {
+        container.style.display = 'block';
+        btn.textContent = '▲';
+      } else {
+        container.style.display = 'none';
+        btn.textContent = '▼';
+      }
+    }
+    </script>
+  `;
 }
 
 function renderLogLevelBadge(level: string): string {
@@ -873,11 +1010,62 @@ function renderFunctionForm(
               ).join("")
         }
       </fieldset>
+      ${isEdit ? `
+      <div style="margin: 1rem 0;">
+        <button type="button" id="secrets-preview-btn"
+                onclick="loadSecretsPreview(${route.id})"
+                class="secondary">
+          Show Secrets Preview
+        </button>
+      </div>
+      <div id="secrets-preview-container"></div>
+      ` : `
+      <div style="margin: 1rem 0;">
+        <p style="color: #6c757d; font-size: 0.9em;">
+          <em>Save this function first to preview available secrets.</em>
+        </p>
+      </div>
+      `}
       <div class="grid">
         <button type="submit">${isEdit ? "Save Changes" : "Create Function"}</button>
         <a href="/web/functions" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+
+    ${isEdit ? `
+    <script>
+    async function loadSecretsPreview(functionId) {
+      const btn = document.getElementById('secrets-preview-btn');
+      const container = document.getElementById('secrets-preview-container');
+
+      // Show loading state
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      container.innerHTML = '<p><em>Loading secrets preview...</em></p>';
+
+      try {
+        const response = await fetch('/web/functions/preview-secrets/' + functionId);
+
+        if (!response.ok) {
+          throw new Error('Failed to load secrets preview');
+        }
+
+        const html = await response.text();
+        container.innerHTML = html;
+
+        // Update button to "Refresh"
+        btn.textContent = 'Refresh Preview';
+        btn.setAttribute('data-loaded', 'true');
+      } catch (error) {
+        console.error('Error loading secrets preview:', error);
+        container.innerHTML = '<p style="color: #dc3545;"><em>Error loading secrets preview. Please try again.</em></p>';
+        btn.textContent = 'Show Secrets Preview';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    </script>
+    ` : ''}
   `;
 }
 
@@ -1323,6 +1511,28 @@ export function createFunctionsPages(
         400
       );
     }
+  });
+
+  // Preview secrets for a function (returns HTML fragment)
+  routes.get("/preview-secrets/:id", async (c) => {
+    const id = validateId(c.req.param("id"));
+
+    if (id === null) {
+      return c.text("Invalid function ID", 400);
+    }
+
+    // Get the function route to determine accepted groups
+    const route = await routesService.getById(id);
+    if (!route) {
+      return c.text("Function not found", 404);
+    }
+
+    // Get secrets preview
+    const acceptedGroups = route.keys || [];
+    const previews = await secretsService.getSecretsPreviewForFunction(id, acceptedGroups);
+
+    // Return HTML fragment (not full page layout)
+    return c.html(renderSecretsPreview(previews));
   });
 
   // Delete confirmation

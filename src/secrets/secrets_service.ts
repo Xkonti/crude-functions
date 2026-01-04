@@ -1,6 +1,6 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { EncryptionService } from "../encryption/encryption_service.ts";
-import type { Secret, SecretRow } from "./types.ts";
+import type { Secret, SecretRow, SecretPreview } from "./types.ts";
 import { SecretScope } from "./types.ts";
 
 export interface SecretsServiceOptions {
@@ -627,5 +627,109 @@ export class SecretsService {
     );
 
     return (row?.count ?? 0) > 0;
+  }
+
+  // ============== Preview Operations ==============
+
+  /**
+   * Get all secrets available to a function for preview purposes.
+   * Returns secrets grouped by name with their sources across all scopes.
+   * Only includes group/key secrets from groups the function accepts.
+   */
+  async getSecretsPreviewForFunction(
+    functionId: number,
+    acceptedGroupNames: string[]
+  ): Promise<SecretPreview[]> {
+    const previewMap = new Map<string, SecretPreview>();
+
+    // 1. Load global secrets
+    const globalSecrets = await this.getGlobalSecretsWithValues();
+    for (const secret of globalSecrets) {
+      if (!previewMap.has(secret.name)) {
+        previewMap.set(secret.name, { name: secret.name, sources: [] });
+      }
+      previewMap.get(secret.name)!.sources.push({
+        scope: 'global',
+        value: secret.value,
+      });
+    }
+
+    // 2. Load function-specific secrets
+    const functionSecrets = await this.getFunctionSecrets(functionId);
+    for (const secret of functionSecrets) {
+      if (!previewMap.has(secret.name)) {
+        previewMap.set(secret.name, { name: secret.name, sources: [] });
+      }
+      previewMap.get(secret.name)!.sources.push({
+        scope: 'function',
+        value: secret.value,
+      });
+    }
+
+    // 3. Load group and key secrets (only for accepted groups)
+    if (acceptedGroupNames.length > 0) {
+      // Get group IDs for accepted group names
+      const placeholders = acceptedGroupNames.map(() => '?').join(',');
+      const groupsQuery = `
+        SELECT id, name FROM api_key_groups
+        WHERE name IN (${placeholders})
+      `;
+      const groups = await this.db.queryAll<{ id: number; name: string }>(
+        groupsQuery,
+        acceptedGroupNames
+      );
+
+      for (const group of groups) {
+        // Get group-level secrets
+        const groupSecrets = await this.getGroupSecrets(group.id);
+        for (const secret of groupSecrets) {
+          if (!previewMap.has(secret.name)) {
+            previewMap.set(secret.name, { name: secret.name, sources: [] });
+          }
+          previewMap.get(secret.name)!.sources.push({
+            scope: 'group',
+            value: secret.value,
+            groupId: group.id,
+            groupName: group.name,
+          });
+        }
+
+        // Get key-level secrets for this group
+        const keySecretsQuery = `
+          SELECT s.id, s.name, s.value, s.api_key_id, k.value as key_value
+          FROM secrets s
+          JOIN api_keys k ON s.api_key_id = k.id
+          WHERE s.scope = ? AND k.group_id = ?
+          ORDER BY s.name ASC, k.value ASC
+        `;
+        const keySecretRows = await this.db.queryAll<{
+          id: number;
+          name: string;
+          value: string;
+          api_key_id: number;
+          key_value: string;
+        }>(keySecretsQuery, [SecretScope.Key, group.id]);
+
+        for (const row of keySecretRows) {
+          const decryptedValue = await this.encryptionService.decrypt(row.value);
+          if (!previewMap.has(row.name)) {
+            previewMap.set(row.name, { name: row.name, sources: [] });
+          }
+          previewMap.get(row.name)!.sources.push({
+            scope: 'key',
+            value: decryptedValue,
+            groupId: group.id,
+            groupName: group.name,
+            keyId: row.api_key_id,
+            keyValue: row.key_value,
+          });
+        }
+      }
+    }
+
+    // Convert map to sorted array
+    return Array.from(previewMap.values()).sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
   }
 }

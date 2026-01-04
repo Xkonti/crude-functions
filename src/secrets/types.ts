@@ -41,3 +41,23 @@ export enum SecretScope {
   Group = 2,
   Key = 3,
 }
+
+/**
+ * Preview source for secrets preview feature
+ */
+export interface SecretPreviewSource {
+  scope: 'global' | 'function' | 'group' | 'key';
+  value: string;
+  groupId?: number;
+  groupName?: string;
+  keyId?: number;
+  keyValue?: string;
+}
+
+/**
+ * Secret preview data structure
+ */
+export interface SecretPreview {
+  name: string;
+  sources: SecretPreviewSource[];
+}
