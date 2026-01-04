@@ -154,6 +154,7 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
         <li><a href="/web/code">Code</a></li>
         <li><a href="/web/functions">Functions</a></li>
         <li><a href="/web/keys">Keys</a></li>
+        <li><a href="/web/secrets">Secrets</a></li>
         <li><a href="/web/users">Users</a></li>
         ${userDropdown}
       </ul>

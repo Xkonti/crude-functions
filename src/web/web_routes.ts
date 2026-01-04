@@ -6,6 +6,7 @@ import { createUsersPages } from "./users_pages.ts";
 import { createCodePages } from "./code_pages.ts";
 import { createFunctionsPages } from "./functions_pages.ts";
 import { createKeysPages } from "./keys_pages.ts";
+import { createSecretsPages } from "./secrets_pages.ts";
 import { layout, getLayoutUser } from "./templates.ts";
 import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
 import type { Auth } from "../auth/auth.ts";
@@ -15,6 +16,7 @@ import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
+import type { EncryptionService } from "../encryption/encryption_service.ts";
 
 export interface WebRoutesOptions {
   auth: Auth;
@@ -24,10 +26,11 @@ export interface WebRoutesOptions {
   apiKeyService: ApiKeyService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
+  encryptionService: EncryptionService;
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService } = options;
+  const { auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService } = options;
   const routes = new Hono();
 
   // Mount setup pages (public - only accessible when no users exist)
@@ -65,6 +68,13 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
             <a href="/web/keys" role="button">Manage Keys</a>
           </footer>
         </article>
+        <article>
+          <header><strong>Secrets</strong></header>
+          <p>Manage encrypted global secrets available to all functions.</p>
+          <footer>
+            <a href="/web/secrets" role="button">Manage Secrets</a>
+          </footer>
+        </article>
       </div>
     `;
     return c.html(layout("Dashboard", content, getLayoutUser(c)));
@@ -76,6 +86,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   routes.route("/code", createCodePages(fileService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService));
   routes.route("/keys", createKeysPages(apiKeyService));
+  routes.route("/secrets", createSecretsPages({ db, encryptionService }));
 
   return routes;
 }
