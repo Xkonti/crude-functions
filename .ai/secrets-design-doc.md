@@ -372,6 +372,23 @@ All foreign keys use `ON DELETE CASCADE` for automatic cleanup:
 
 #### Indexes
 
+**Current Implementation: No Indexes**
+
+The initial implementation includes no indexes on the `secrets` table. This decision is based on expected dataset size and query patterns:
+
+**Dataset Size Analysis:**
+- Global secrets: ~50
+- Function secrets: ~100 functions × 3 secrets = ~300
+- Group secrets: ~30 groups × 5 secrets = ~150
+- Key secrets: ~30 groups × 10 keys × 3 secrets = ~900
+- **Total: ~1,400 secrets** (up to ~5,000 expected)
+
+At this scale, full table scans are measured in microseconds. The overhead of maintaining indexes (write performance, storage, schema complexity) outweighs the negligible query performance gains.
+
+**When to Add Indexes:**
+
+If the dataset grows beyond ~10,000 secrets or query performance becomes measurable, consider adding:
+
 ```sql
 -- Primary lookup: find secrets by name across relevant scopes
 CREATE INDEX idx_secrets_name_scope ON secrets(name, scope);
@@ -389,6 +406,8 @@ CREATE INDEX idx_secrets_key
   ON secrets(api_key_id)
   WHERE api_key_id IS NOT NULL;
 ```
+
+These can be added later without migration complexity using simple `CREATE INDEX` statements.
 
 #### Uniqueness
 
