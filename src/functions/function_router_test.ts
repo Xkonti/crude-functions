@@ -6,6 +6,10 @@ import { ApiKeyService } from "../keys/api_key_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { FunctionRouter } from "./function_router.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
+
+// Test encryption key (32 bytes base64-encoded)
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 
 const API_KEYS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS api_key_groups (
@@ -100,7 +104,10 @@ async function createTestSetup(
   await db.exec(EXECUTION_METRICS_SCHEMA);
 
   const routesService = new RoutesService({ db });
-  const apiKeyService = new ApiKeyService({ db });
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+  const apiKeyService = new ApiKeyService({ db, encryptionService });
   const consoleLogService = new ConsoleLogService({ db });
   const executionMetricsService = new ExecutionMetricsService({ db });
 

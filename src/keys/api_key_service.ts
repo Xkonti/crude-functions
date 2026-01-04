@@ -1,4 +1,5 @@
 import type { DatabaseService } from "../database/database_service.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
 
 /**
  * Represents an API key group
@@ -49,6 +50,8 @@ export interface ApiKeyServiceOptions {
   db: DatabaseService;
   /** Management API key from environment variable (optional) */
   managementKeyFromEnv?: string;
+  /** Encryption service for encrypting API keys at rest */
+  encryptionService: EncryptionService;
 }
 
 /** Synthetic ID for environment-provided management key */
@@ -61,10 +64,12 @@ const ENV_KEY_ID = -1;
 export class ApiKeyService {
   private readonly db: DatabaseService;
   private readonly managementKeyFromEnv?: string;
+  private readonly encryptionService: EncryptionService;
 
   constructor(options: ApiKeyServiceOptions) {
     this.db = options.db;
     this.managementKeyFromEnv = options.managementKeyFromEnv;
+    this.encryptionService = options.encryptionService;
   }
 
   // ============== Group Operations ==============
@@ -189,8 +194,17 @@ export class ApiKeyService {
       ORDER BY g.name, ak.value
     `);
 
+    // Decrypt all keys in parallel
+    const decryptedRows = await Promise.all(
+      rows.map(async (row) => ({
+        ...row,
+        value: await this.decryptKey(row.value),
+      }))
+    );
+
+    // Group by group_name
     const result = new Map<string, ApiKey[]>();
-    for (const row of rows) {
+    for (const row of decryptedRows) {
       const existing = result.get(row.group_name) || [];
       existing.push({
         id: row.id,
@@ -243,13 +257,16 @@ export class ApiKeyService {
         groupRow.id,
       ]);
 
-      for (const r of rows) {
-        keys.push({
+      // Decrypt all keys in parallel
+      const decryptedKeys = await Promise.all(
+        rows.map(async (r) => ({
           id: r.id,
-          value: r.value,
+          value: await this.decryptKey(r.value),
           description: r.description ?? undefined,
-        });
-      }
+        }))
+      );
+
+      keys.push(...decryptedKeys);
     }
 
     // Add env key for management group
@@ -287,11 +304,21 @@ export class ApiKeyService {
       return false;
     }
 
-    const row = await this.db.queryOne(
-      "SELECT 1 FROM api_keys WHERE group_id = ? AND value = ?",
-      [groupRow.id, keyValue]
+    // Fetch all encrypted keys for this group
+    const rows = await this.db.queryAll<{ value: string }>(
+      "SELECT value FROM api_keys WHERE group_id = ?",
+      [groupRow.id]
     );
-    return row !== null;
+
+    // Decrypt each key and compare
+    for (const row of rows) {
+      const decryptedValue = await this.decryptKey(row.value);
+      if (decryptedValue === keyValue) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -309,13 +336,23 @@ export class ApiKeyService {
   ): Promise<void> {
     const normalizedGroup = group.toLowerCase();
 
+    // Check if key already exists (silently ignore duplicates)
+    // With encryption, we can't rely on DB unique constraint since each
+    // encryption produces different ciphertext
+    if (await this.hasKey(normalizedGroup, value)) {
+      return; // Silently ignore duplicate
+    }
+
     // Get or create the group
     const groupId = await this.getOrCreateGroup(normalizedGroup);
 
-    // Use INSERT OR IGNORE to handle duplicate (group_id, value) silently
+    // Encrypt the key value before storage
+    const encryptedValue = await this.encryptKey(value);
+
+    // Insert the encrypted key
     await this.db.execute(
-      "INSERT OR IGNORE INTO api_keys (group_id, value, description) VALUES (?, ?, ?)",
-      [groupId, value, description ?? null]
+      "INSERT INTO api_keys (group_id, value, description) VALUES (?, ?, ?)",
+      [groupId, encryptedValue, description ?? null]
     );
   }
 
@@ -341,10 +378,21 @@ export class ApiKeyService {
       return; // Group doesn't exist, nothing to remove
     }
 
-    await this.db.execute(
-      "DELETE FROM api_keys WHERE group_id = ? AND value = ?",
-      [groupRow.id, keyValue]
+    // Fetch all encrypted keys for this group and find the matching one
+    // (can't use SQL WHERE with encrypted values)
+    const rows = await this.db.queryAll<{ id: number; value: string }>(
+      "SELECT id, value FROM api_keys WHERE group_id = ?",
+      [groupRow.id]
     );
+
+    // Find and delete the key that matches when decrypted
+    for (const row of rows) {
+      const decryptedValue = await this.decryptKey(row.value);
+      if (decryptedValue === keyValue) {
+        await this.db.execute("DELETE FROM api_keys WHERE id = ?", [row.id]);
+        return;
+      }
+    }
   }
 
   /**
@@ -394,5 +442,25 @@ export class ApiKeyService {
     await this.db.execute("DELETE FROM api_key_groups WHERE id = ?", [
       groupRow.id,
     ]);
+  }
+
+  // ============== Private Encryption Helpers ==============
+
+  /**
+   * Encrypts an API key value for storage
+   * @param plaintext - The plaintext API key
+   * @returns Base64-encoded encrypted value
+   */
+  private async encryptKey(plaintext: string): Promise<string> {
+    return await this.encryptionService.encrypt(plaintext);
+  }
+
+  /**
+   * Decrypts an encrypted API key value
+   * @param encrypted - Base64-encoded encrypted value
+   * @returns Plaintext API key
+   */
+  private async decryptKey(encrypted: string): Promise<string> {
+    return await this.encryptionService.decrypt(encrypted);
   }
 }

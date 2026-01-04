@@ -3,6 +3,10 @@ import { Hono } from "@hono/hono";
 import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "./api_key_service.ts";
 import { createApiKeyRoutes } from "./api_key_routes.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
+
+// Test encryption key (32 bytes base64-encoded)
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_key_groups (
@@ -33,9 +37,14 @@ async function createTestApp(managementKeyFromEnv?: string): Promise<{
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
 
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+
   const service = new ApiKeyService({
     db,
     managementKeyFromEnv: managementKeyFromEnv ?? "env-mgmt-key",
+    encryptionService,
   });
 
   const app = new Hono();

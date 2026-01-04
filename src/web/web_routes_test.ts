@@ -7,7 +7,11 @@ import { RoutesService } from "../routes/routes_service.ts";
 import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
 import type { Auth } from "../auth/auth.ts";
+
+// Test encryption key (32 bytes base64-encoded)
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 
 /**
  * Creates a mock Auth object for testing.
@@ -134,7 +138,10 @@ async function createTestApp(
 
   await Deno.mkdir(codePath);
 
-  const apiKeyService = new ApiKeyService({ db });
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+  const apiKeyService = new ApiKeyService({ db, encryptionService });
 
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "testkey123", "admin");
@@ -152,7 +159,7 @@ async function createTestApp(
   const auth = createMockAuth({ authenticated });
   app.route(
     "/web",
-    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService })
+    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService })
   );
 
   return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService };

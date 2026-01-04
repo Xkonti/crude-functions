@@ -5,6 +5,11 @@ import {
   validateKeyGroup,
   validateKeyValue,
 } from "./api_key_service.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
+
+// Test encryption key (32 bytes base64-encoded)
+// Generated with: openssl rand -base64 32
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_key_groups (
@@ -34,7 +39,15 @@ async function createTestSetup(managementKeyFromEnv?: string): Promise<{
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
 
-  const service = new ApiKeyService({ db, managementKeyFromEnv });
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+
+  const service = new ApiKeyService({
+    db,
+    managementKeyFromEnv,
+    encryptionService,
+  });
   return { service, db, tempDir };
 }
 
@@ -499,4 +512,98 @@ Deno.test("ApiKeyService.addKey creates group if needed", async () => {
   } finally {
     await cleanup(db, tempDir);
   }
+});
+
+// =====================
+// Encryption tests
+// =====================
+
+Deno.test("ApiKeyService - Encryption at rest", async (t) => {
+  await t.step("stores keys encrypted in database", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("test-group", "my-secret-key", "Test key");
+
+      // Query raw database value
+      const row = await db.queryOne<{ value: string }>(
+        "SELECT value FROM api_keys LIMIT 1"
+      );
+
+      // Should NOT be plaintext
+      expect(row!.value).not.toBe("my-secret-key");
+      // Should be base64 (encrypted format)
+      expect(row!.value).toMatch(/^[A-Za-z0-9+/=]+$/);
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("retrieves keys decrypted", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("test-group", "my-secret-key", "Test key");
+      const keys = await service.getKeys("test-group");
+
+      // Should return plaintext
+      expect(keys).not.toBeNull();
+      expect(keys![0].value).toBe("my-secret-key");
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("validates keys correctly with encryption", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("test-group", "my-secret-key", "Test key");
+
+      // Should validate against plaintext input
+      const valid = await service.hasKey("test-group", "my-secret-key");
+      expect(valid).toBe(true);
+
+      const invalid = await service.hasKey("test-group", "wrong-key");
+      expect(invalid).toBe(false);
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("environment key remains unencrypted", async () => {
+    const { service, db, tempDir } = await createTestSetup("env-provided-key");
+
+    try {
+      // Env key should validate (plaintext comparison)
+      const valid = await service.hasKey("management", "env-provided-key");
+      expect(valid).toBe(true);
+
+      // Should NOT be in database
+      const row = await db.queryOne<{ id: number }>(
+        "SELECT id FROM api_keys WHERE value = ?",
+        ["env-provided-key"]
+      );
+      expect(row).toBeNull();
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("getAll returns decrypted keys", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("group1", "key1", "First key");
+      await service.addKey("group2", "key2", "Second key");
+
+      const allKeys = await service.getAll();
+
+      // Should return decrypted values
+      expect(allKeys.get("group1")![0].value).toBe("key1");
+      expect(allKeys.get("group2")![0].value).toBe("key2");
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
 });

@@ -181,6 +181,7 @@ logTrimmingService.start();
 const apiKeyService = new ApiKeyService({
   db,
   managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
+  encryptionService,
 });
 
 // Initialize routes service
