@@ -278,14 +278,14 @@ export function createKeysPages(
         <div id="new-group-name" style="display: none;">
           <label>
             New Group Name
-            <input type="text" name="newGroupName" placeholder="my-new-group" pattern="[a-z0-9_-]+">
+            <input type="text" name="newGroupName" placeholder="my-new-group" pattern="[a-z0-9_\-]+">
             <small>Lowercase letters, numbers, dashes, and underscores only</small>
           </label>
         </div>
         <label>
           Key Value
           <input type="text" name="value" required placeholder="your-secret-key-value"
-                 pattern="[a-zA-Z0-9_-]+">
+                 pattern="[a-zA-Z0-9_\-]+">
           <small>Letters, numbers, dashes, and underscores only</small>
         </label>
         <label>
@@ -1366,7 +1366,7 @@ function renderGroupSecretCreateForm(
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
                required autofocus
-               pattern="[a-zA-Z0-9_-]+"
+               pattern="[a-zA-Z0-9_\-]+"
                placeholder="MY_SECRET_KEY" />
         <small>Letters, numbers, underscores, and dashes only</small>
       </label>
@@ -1579,7 +1579,7 @@ function renderKeySecretCreateForm(
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
                required autofocus
-               pattern="[a-zA-Z0-9_-]+"
+               pattern="[a-zA-Z0-9_\-]+"
                placeholder="MY_SECRET_KEY" />
         <small>Letters, numbers, underscores, and dashes only</small>
       </label>
