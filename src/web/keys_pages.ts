@@ -26,8 +26,11 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
       groupMap.set(g.name, g);
     }
 
-    // Sort key groups
-    const sortedGroupNames = [...allKeys.keys()].sort();
+    // Merge group names from keys and empty groups, then sort
+    const groupNamesFromKeys = [...allKeys.keys()];
+    const groupNamesFromGroups = groups.map((g) => g.name);
+    const allGroupNames = new Set([...groupNamesFromKeys, ...groupNamesFromGroups]);
+    const sortedGroupNames = [...allGroupNames].sort();
 
     const content = `
       <h1>API Keys</h1>
@@ -38,10 +41,10 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
       </p>
       ${
         sortedGroupNames.length === 0
-          ? "<p>No API keys found.</p>"
+          ? "<p>No API key groups found.</p>"
           : sortedGroupNames
               .map((groupName) => {
-                const keys = allKeys.get(groupName)!;
+                const keys = allKeys.get(groupName) ?? [];
                 const groupInfo = groupMap.get(groupName);
                 return `
               <article class="key-group">
@@ -62,7 +65,10 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                     </div>
                   </div>
                 </header>
-                <table>
+                ${
+                  keys.length === 0
+                    ? `<p style="color: var(--pico-muted-color); margin: 0;"><em>No keys in this group</em></p>`
+                    : `<table>
                   <thead>
                     <tr>
                       <th>ID</th>
@@ -91,7 +97,8 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
                       )
                       .join("")}
                   </tbody>
-                </table>
+                </table>`
+                }
               </article>
             `;
               })
