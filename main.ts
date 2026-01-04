@@ -19,6 +19,8 @@ import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_ser
 import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
 import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
 import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
+import { base64ToBytes } from "./src/encryption/utils.ts";
+import { EncryptionService } from "./src/encryption/encryption_service.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -53,6 +55,60 @@ function parseEnvInt(
 
 // AbortController for graceful shutdown - must be module-scoped
 let abortController: AbortController | null = null;
+
+// ============================================================================
+// Encryption Key Validation
+// ============================================================================
+
+// Validate secrets encryption key (REQUIRED)
+const secretsEncryptionKey = Deno.env.get("SECRETS_ENCRYPTION_KEY");
+if (!secretsEncryptionKey) {
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("FATAL ERROR: SECRETS_ENCRYPTION_KEY is required");
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("");
+  console.error("This environment variable must be set to encrypt secrets at rest.");
+  console.error("Generate a new key with:");
+  console.error("");
+  console.error("  openssl rand -base64 32");
+  console.error("");
+  console.error("Then set it in your environment or .env file:");
+  console.error("");
+  console.error("  SECRETS_ENCRYPTION_KEY=<generated-key>");
+  console.error("");
+  Deno.exit(1);
+}
+
+// Validate key format early (before database operations)
+try {
+  const keyBytes = base64ToBytes(secretsEncryptionKey);
+  if (keyBytes.length !== 32) {
+    throw new Error(
+      `Key must be 32 bytes (256 bits), got ${keyBytes.length} bytes`
+    );
+  }
+} catch (error) {
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("FATAL ERROR: Invalid SECRETS_ENCRYPTION_KEY");
+  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.error("");
+  console.error(
+    `Error: ${error instanceof Error ? error.message : String(error)}`
+  );
+  console.error("");
+  console.error("Generate a valid 32-byte base64-encoded key with:");
+  console.error("");
+  console.error("  openssl rand -base64 32");
+  console.error("");
+  Deno.exit(1);
+}
+
+console.log("✓ Encryption key validated");
+
+// Initialize encryption service (after validation)
+const encryptionService = new EncryptionService({
+  encryptionKey: secretsEncryptionKey,
+});
 
 const app = new Hono();
 
