@@ -1,5 +1,5 @@
 import { Hono } from "@hono/hono";
-import type { ApiKeyService } from "../keys/api_key_service.ts";
+import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import { validateKeyGroup, validateKeyValue } from "../keys/api_key_service.ts";
 import {
   layout,
@@ -18,32 +18,45 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
     const success = c.req.query("success");
     const error = c.req.query("error");
     const allKeys = await apiKeyService.getAll();
+    const groups = await apiKeyService.getGroups();
+
+    // Create a map of group name -> group for description lookup
+    const groupMap = new Map<string, ApiKeyGroup>();
+    for (const g of groups) {
+      groupMap.set(g.name, g);
+    }
 
     // Sort key groups
-    const sortedGroups = [...allKeys.keys()].sort();
+    const sortedGroupNames = [...allKeys.keys()].sort();
 
     const content = `
       <h1>API Keys</h1>
       ${flashMessages(success, error)}
       <p>
+        ${buttonLink("/web/keys/create-group", "Create New Group")}
         ${buttonLink("/web/keys/create", "Create New Key")}
       </p>
       ${
-        sortedGroups.length === 0
+        sortedGroupNames.length === 0
           ? "<p>No API keys found.</p>"
-          : sortedGroups
-              .map((group) => {
-                const keys = allKeys.get(group)!;
+          : sortedGroupNames
+              .map((groupName) => {
+                const keys = allKeys.get(groupName)!;
+                const groupInfo = groupMap.get(groupName);
                 return `
               <article class="key-group">
                 <header>
                   <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <strong>${escapeHtml(group)}</strong>
                     <div>
-                      <a href="/web/keys/create?group=${encodeURIComponent(group)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Add Key</a>
+                      <strong>${escapeHtml(groupName)}</strong>
+                      ${groupInfo?.description ? `<br><small style="color: var(--pico-muted-color);">${escapeHtml(groupInfo.description)}</small>` : ""}
+                    </div>
+                    <div>
+                      ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Edit Group</a>` : ""}
+                      <a href="/web/keys/create?group=${encodeURIComponent(groupName)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Add Key</a>
                       ${
-                        group !== "management"
-                          ? `<a href="/web/keys/delete-group?group=${encodeURIComponent(group)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete All</a>`
+                        groupName !== "management"
+                          ? `<a href="/web/keys/delete-group?group=${encodeURIComponent(groupName)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete Group</a>`
                           : ""
                       }
                     </div>
@@ -88,10 +101,147 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
     return c.html(layout("API Keys", content, getLayoutUser(c)));
   });
 
-  // Create key form
-  routes.get("/create", (c) => {
-    const group = c.req.query("group") ?? "";
+  // Create group form
+  routes.get("/create-group", (c) => {
     const error = c.req.query("error");
+
+    const content = `
+      <h1>Create API Key Group</h1>
+      ${error ? flashMessages(undefined, error) : ""}
+      <form method="POST" action="/web/keys/create-group">
+        <label>
+          Group Name
+          <input type="text" name="name" required placeholder="my-api-group"
+                 pattern="[a-z0-9_-]+">
+          <small>Lowercase letters, numbers, dashes, and underscores only</small>
+        </label>
+        <label>
+          Description
+          <input type="text" name="description" placeholder="Optional description for this group">
+        </label>
+        <div class="grid">
+          <button type="submit">Create Group</button>
+          <a href="/web/keys" role="button" class="secondary">Cancel</a>
+        </div>
+      </form>
+    `;
+    return c.html(layout("Create API Key Group", content, getLayoutUser(c)));
+  });
+
+  // Handle create group
+  routes.post("/create-group", async (c) => {
+    let body: { name?: string; description?: string };
+    try {
+      body = (await c.req.parseBody()) as typeof body;
+    } catch {
+      return c.redirect("/web/keys/create-group?error=" + encodeURIComponent("Invalid form data"));
+    }
+
+    const name = (body.name as string | undefined)?.trim().toLowerCase() ?? "";
+    const description = (body.description as string | undefined)?.trim() || undefined;
+
+    if (!name) {
+      return c.redirect("/web/keys/create-group?error=" + encodeURIComponent("Group name is required"));
+    }
+
+    if (!validateKeyGroup(name)) {
+      return c.redirect(
+        `/web/keys/create-group?error=` +
+          encodeURIComponent("Invalid group name format (use lowercase a-z, 0-9, -, _)")
+      );
+    }
+
+    // Check if group already exists
+    const existing = await apiKeyService.getGroupByName(name);
+    if (existing) {
+      return c.redirect(
+        `/web/keys/create-group?error=` + encodeURIComponent(`Group '${name}' already exists`)
+      );
+    }
+
+    try {
+      await apiKeyService.createGroup(name, description);
+      return c.redirect("/web/keys?success=" + encodeURIComponent(`Group created: ${name}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to create group";
+      return c.redirect(`/web/keys/create-group?error=` + encodeURIComponent(message));
+    }
+  });
+
+  // Edit group form
+  routes.get("/edit-group/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
+    const error = c.req.query("error");
+
+    if (isNaN(id)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
+    }
+
+    const group = await apiKeyService.getGroupById(id);
+    if (!group) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Group not found"));
+    }
+
+    const content = `
+      <h1>Edit Group: ${escapeHtml(group.name)}</h1>
+      ${error ? flashMessages(undefined, error) : ""}
+      <form method="POST" action="/web/keys/edit-group/${id}">
+        <label>
+          Group Name
+          <input type="text" value="${escapeHtml(group.name)}" readonly disabled>
+          <small>Group names cannot be changed</small>
+        </label>
+        <label>
+          Description
+          <input type="text" name="description" value="${escapeHtml(group.description ?? "")}" placeholder="Optional description for this group">
+        </label>
+        <div class="grid">
+          <button type="submit">Save Changes</button>
+          <a href="/web/keys" role="button" class="secondary">Cancel</a>
+        </div>
+      </form>
+    `;
+    return c.html(layout(`Edit Group: ${group.name}`, content, getLayoutUser(c)));
+  });
+
+  // Handle edit group
+  routes.post("/edit-group/:id", async (c) => {
+    const idStr = c.req.param("id");
+    const id = parseInt(idStr, 10);
+
+    if (isNaN(id)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
+    }
+
+    const group = await apiKeyService.getGroupById(id);
+    if (!group) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Group not found"));
+    }
+
+    let body: { description?: string };
+    try {
+      body = (await c.req.parseBody()) as typeof body;
+    } catch {
+      return c.redirect(`/web/keys/edit-group/${id}?error=` + encodeURIComponent("Invalid form data"));
+    }
+
+    const description = (body.description as string | undefined)?.trim() ?? "";
+
+    try {
+      await apiKeyService.updateGroup(id, description);
+      return c.redirect("/web/keys?success=" + encodeURIComponent(`Group updated: ${group.name}`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to update group";
+      return c.redirect(`/web/keys/edit-group/${id}?error=` + encodeURIComponent(message));
+    }
+  });
+
+  // Create key form
+  routes.get("/create", async (c) => {
+    const preselectedGroup = c.req.query("group") ?? "";
+    const error = c.req.query("error");
+    const groups = await apiKeyService.getGroups();
 
     const content = `
       <h1>Create API Key</h1>
@@ -99,11 +249,25 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
       <form method="POST" action="/web/keys/create">
         <label>
           Key Group
-          <input type="text" name="group" value="${escapeHtml(group)}"
-                 ${group ? "readonly" : "required"} placeholder="my-api-key"
-                 pattern="[a-z0-9_-]+">
-          <small>Lowercase letters, numbers, dashes, and underscores only${group ? " (pre-filled)" : ""}</small>
+          ${
+            preselectedGroup
+              ? `<input type="text" name="group" value="${escapeHtml(preselectedGroup)}" readonly>
+                 <small>Adding to existing group</small>`
+              : `<select name="group" required>
+                   <option value="">-- Select a group or create new --</option>
+                   ${groups.map((g) => `<option value="${escapeHtml(g.name)}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
+                   <option value="__new__">+ Create new group...</option>
+                 </select>
+                 <small>Select an existing group or create a new one</small>`
+          }
         </label>
+        <div id="new-group-name" style="display: none;">
+          <label>
+            New Group Name
+            <input type="text" name="newGroupName" placeholder="my-new-group" pattern="[a-z0-9_-]+">
+            <small>Lowercase letters, numbers, dashes, and underscores only</small>
+          </label>
+        </div>
         <label>
           Key Value
           <input type="text" name="value" required placeholder="your-secret-key-value"
@@ -119,22 +283,53 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
           <a href="/web/keys" role="button" class="secondary">Cancel</a>
         </div>
       </form>
+      <script>
+        const groupSelect = document.querySelector('select[name="group"]');
+        const newGroupDiv = document.getElementById('new-group-name');
+        const newGroupInput = document.querySelector('input[name="newGroupName"]');
+        if (groupSelect && newGroupDiv && newGroupInput) {
+          groupSelect.addEventListener('change', function() {
+            if (this.value === '__new__') {
+              newGroupDiv.style.display = 'block';
+              newGroupInput.required = true;
+            } else {
+              newGroupDiv.style.display = 'none';
+              newGroupInput.required = false;
+            }
+          });
+        }
+      </script>
     `;
     return c.html(layout("Create API Key", content, getLayoutUser(c)));
   });
 
   // Handle create
   routes.post("/create", async (c) => {
-    let body: { group?: string; value?: string; description?: string };
+    let body: { group?: string; newGroupName?: string; value?: string; description?: string };
     try {
       body = (await c.req.parseBody()) as typeof body;
     } catch {
       return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid form data"));
     }
 
-    const group = (body.group as string | undefined)?.trim().toLowerCase() ?? "";
+    let group = (body.group as string | undefined)?.trim().toLowerCase() ?? "";
+    const newGroupName = (body.newGroupName as string | undefined)?.trim().toLowerCase() ?? "";
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
+
+    // Handle "create new group" option
+    if (group === "__new__") {
+      if (!newGroupName) {
+        return c.redirect("/web/keys/create?error=" + encodeURIComponent("New group name is required"));
+      }
+      if (!validateKeyGroup(newGroupName)) {
+        return c.redirect(
+          `/web/keys/create?error=` +
+            encodeURIComponent("Invalid new group name format (use lowercase a-z, 0-9, -, _)")
+        );
+      }
+      group = newGroupName;
+    }
 
     if (!group) {
       return c.redirect("/web/keys/create?error=" + encodeURIComponent("Key group is required"));
@@ -226,28 +421,32 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
 
   // Delete group confirmation
   routes.get("/delete-group", async (c) => {
-    const group = c.req.query("group");
+    const groupName = c.req.query("group");
 
-    if (!group) {
+    if (!groupName) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No key group specified"));
     }
 
-    const keys = await apiKeyService.getKeys(group);
-    if (!keys) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent(`Key group not found: ${group}`));
+    const group = await apiKeyService.getGroupByName(groupName);
+    const keys = await apiKeyService.getKeys(groupName);
+
+    if (!group && (!keys || keys.length === 0)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent(`Key group not found: ${groupName}`));
     }
 
-    if (group.toLowerCase() === "management") {
+    if (groupName.toLowerCase() === "management") {
       return c.redirect(
-        "/web/keys?error=" + encodeURIComponent("Cannot delete all management keys")
+        "/web/keys?error=" + encodeURIComponent("Cannot delete management group")
       );
     }
 
+    const keyCount = keys?.length ?? 0;
+
     return c.html(
       confirmPage(
-        "Delete All Keys",
-        `Are you sure you want to delete ALL keys for group "${group}"? This will remove ${keys.length} key(s). This action cannot be undone.`,
-        `/web/keys/delete-group?group=${encodeURIComponent(group)}`,
+        "Delete Group",
+        `Are you sure you want to delete the group "${groupName}" and ALL its keys? This will remove ${keyCount} key(s). This action cannot be undone.`,
+        `/web/keys/delete-group?group=${encodeURIComponent(groupName)}`,
         "/web/keys",
         getLayoutUser(c)
       )
@@ -256,25 +455,25 @@ export function createKeysPages(apiKeyService: ApiKeyService): Hono {
 
   // Handle delete group
   routes.post("/delete-group", async (c) => {
-    const group = c.req.query("group");
+    const groupName = c.req.query("group");
 
-    if (!group) {
+    if (!groupName) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No key group specified"));
     }
 
-    if (group.toLowerCase() === "management") {
+    if (groupName.toLowerCase() === "management") {
       return c.redirect(
-        "/web/keys?error=" + encodeURIComponent("Cannot delete all management keys")
+        "/web/keys?error=" + encodeURIComponent("Cannot delete management group")
       );
     }
 
     try {
-      await apiKeyService.removeGroup(group);
+      await apiKeyService.removeGroupEntirely(groupName);
       return c.redirect(
-        "/web/keys?success=" + encodeURIComponent(`All keys deleted for group: ${group}`)
+        "/web/keys?success=" + encodeURIComponent(`Group and all keys deleted: ${groupName}`)
       );
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to delete keys";
+      const message = err instanceof Error ? err.message : "Failed to delete group";
       return c.redirect("/web/keys?error=" + encodeURIComponent(message));
     }
   });

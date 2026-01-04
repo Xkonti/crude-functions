@@ -32,15 +32,21 @@ function createMockAuth(options: { authenticated: boolean } = { authenticated: t
 }
 
 const API_KEYS_SCHEMA = `
+  CREATE TABLE api_key_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key_group TEXT NOT NULL,
+    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
     value TEXT NOT NULL,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(key_group, value);
-  CREATE INDEX idx_api_keys_group ON api_keys(key_group);
+  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
 `;
 
 const ROUTES_SCHEMA = `
@@ -126,15 +132,12 @@ async function createTestApp(
   await db.exec(CONSOLE_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
 
-  // Add default management key
-  await db.execute(
-    "INSERT INTO api_keys (key_group, value, description) VALUES (?, ?, ?)",
-    ["management", "testkey123", "admin"]
-  );
-
   await Deno.mkdir(codePath);
 
   const apiKeyService = new ApiKeyService({ db });
+
+  // Add default management key via service (which handles group creation)
+  await apiKeyService.addKey("management", "testkey123", "admin");
   const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
   const consoleLogService = new ConsoleLogService({ db });

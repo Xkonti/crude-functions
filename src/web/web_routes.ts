@@ -74,7 +74,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   routes.route("/password", createPasswordPages());
   routes.route("/users", createUsersPages({ db, auth }));
   routes.route("/code", createCodePages(fileService));
-  routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService));
+  routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService));
   routes.route("/keys", createKeysPages(apiKeyService));
 
   return routes;

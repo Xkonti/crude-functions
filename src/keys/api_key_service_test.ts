@@ -7,15 +7,21 @@ import {
 } from "./api_key_service.ts";
 
 const API_KEYS_SCHEMA = `
+  CREATE TABLE api_key_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
   CREATE TABLE api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key_group TEXT NOT NULL,
+    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
     value TEXT NOT NULL,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(key_group, value);
-  CREATE INDEX idx_api_keys_group ON api_keys(key_group);
+  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
 `;
 
 async function createTestSetup(managementKeyFromEnv?: string): Promise<{
@@ -341,6 +347,155 @@ Deno.test("ApiKeyService returns env key even with no DB keys", async () => {
     expect(keys!.length).toBe(1);
     expect(keys![0].value).toBe("envkey");
     expect(keys![0].id).toBe(-1);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+// =====================
+// Group CRUD tests
+// =====================
+
+Deno.test("ApiKeyService.getGroups returns empty array when no groups", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const groups = await service.getGroups();
+    expect(groups.length).toBe(0);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.createGroup creates a new group", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Email service keys");
+
+    expect(id).toBeGreaterThan(0);
+
+    const groups = await service.getGroups();
+    expect(groups.length).toBe(1);
+    expect(groups[0].name).toBe("email");
+    expect(groups[0].description).toBe("Email service keys");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getGroupByName returns group by name", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.createGroup("email", "Email keys");
+
+    const group = await service.getGroupByName("email");
+    expect(group).not.toBeNull();
+    expect(group!.name).toBe("email");
+    expect(group!.description).toBe("Email keys");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getGroupByName returns null for nonexistent group", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const group = await service.getGroupByName("nonexistent");
+    expect(group).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getGroupById returns group by ID", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Email keys");
+
+    const group = await service.getGroupById(id);
+    expect(group).not.toBeNull();
+    expect(group!.id).toBe(id);
+    expect(group!.name).toBe("email");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.updateGroup updates group description", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Old desc");
+    await service.updateGroup(id, "New desc");
+
+    const group = await service.getGroupById(id);
+    expect(group!.description).toBe("New desc");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.deleteGroup removes group", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Email keys");
+    await service.deleteGroup(id);
+
+    const group = await service.getGroupById(id);
+    expect(group).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.addKey("email", "key1");
+    await service.addKey("email", "key2");
+
+    const group = await service.getGroupByName("email");
+    await service.deleteGroup(group!.id);
+
+    // Keys should be gone due to cascade
+    expect(await service.hasKey("email", "key1")).toBe(false);
+    expect(await service.hasKey("email", "key2")).toBe(false);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getOrCreateGroup creates group if not exists", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id1 = await service.getOrCreateGroup("email");
+    expect(id1).toBeGreaterThan(0);
+
+    // Second call should return same ID
+    const id2 = await service.getOrCreateGroup("email");
+    expect(id2).toBe(id1);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.addKey creates group if needed", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    // Adding key to nonexistent group should create the group
+    await service.addKey("newgroup", "key1");
+
+    const group = await service.getGroupByName("newgroup");
+    expect(group).not.toBeNull();
+    expect(await service.hasKey("newgroup", "key1")).toBe(true);
   } finally {
     await cleanup(db, tempDir);
   }

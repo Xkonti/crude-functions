@@ -9,6 +9,7 @@ import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ConsoleLog } from "../logs/types.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import type { ExecutionMetric, MetricType } from "../metrics/types.ts";
+import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import {
   layout,
   escapeHtml,
@@ -808,9 +809,11 @@ function renderMetricsPage(
 function renderFunctionForm(
   action: string,
   route: Partial<FunctionRoute> = {},
+  availableGroups: ApiKeyGroup[] = [],
   error?: string
 ): string {
   const isEdit = route.id !== undefined;
+  const selectedKeys = route.keys ?? [];
 
   return `
     <h1>${isEdit ? "Edit" : "Create"} Function</h1>
@@ -850,12 +853,23 @@ function renderFunctionForm(
         `
         ).join("")}
       </fieldset>
-      <label>
-        Required API Keys
-        <input type="text" name="keys" value="${escapeHtml((route.keys ?? []).join(", "))}"
-               placeholder="api-key, admin-key">
-        <small>Comma-separated list of key names required to access this function (optional)</small>
-      </label>
+      <fieldset>
+        <legend>Required API Key Groups</legend>
+        <small>Select which API key groups are allowed to access this function (optional)</small>
+        ${
+          availableGroups.length === 0
+            ? '<p><em>No API key groups defined. <a href="/web/keys/create-group">Create a group</a> first.</em></p>'
+            : availableGroups.map(
+                (group) => `
+                <label>
+                  <input type="checkbox" name="keys" value="${escapeHtml(group.name)}"
+                         ${selectedKeys.includes(group.name) ? "checked" : ""}>
+                  ${escapeHtml(group.name)}${group.description ? ` <small style="color: var(--pico-muted-color);">- ${escapeHtml(group.description)}</small>` : ""}
+                </label>
+              `
+              ).join("")
+        }
+      </fieldset>
       <div class="grid">
         <button type="submit">${isEdit ? "Save Changes" : "Create Function"}</button>
         <a href="/web/functions" role="button" class="secondary">Cancel</a>
@@ -874,10 +888,12 @@ function parseFormData(formData: FormData): {
   const description = formData.get("description")?.toString().trim() || undefined;
   const handler = formData.get("handler")?.toString().trim() ?? "";
   const routePath = formData.get("route")?.toString().trim() ?? "";
-  const keysStr = formData.get("keys")?.toString().trim() ?? "";
 
   // Handle methods - use getAll for multiple checkbox values
   const methods = formData.getAll("methods").map((m) => m.toString());
+
+  // Handle keys - use getAll for multiple checkbox values
+  const keysArray = formData.getAll("keys").map((k) => k.toString());
 
   // Validation
   if (!validateRouteName(name)) {
@@ -896,10 +912,8 @@ function parseFormData(formData: FormData): {
     errors.push("At least one valid HTTP method must be selected");
   }
 
-  // Parse keys
-  const keys = keysStr
-    ? keysStr.split(",").map((k) => k.trim()).filter((k) => k.length > 0)
-    : undefined;
+  // Keys are optional - only include if any selected
+  const keys = keysArray.length > 0 ? keysArray : undefined;
 
   const route: NewFunctionRoute = {
     name,
@@ -916,7 +930,8 @@ function parseFormData(formData: FormData): {
 export function createFunctionsPages(
   routesService: RoutesService,
   consoleLogService: ConsoleLogService,
-  executionMetricsService: ExecutionMetricsService
+  executionMetricsService: ExecutionMetricsService,
+  apiKeyService: ApiKeyService
 ): Hono {
   const routes = new Hono();
 
@@ -976,9 +991,10 @@ export function createFunctionsPages(
   });
 
   // Create form
-  routes.get("/create", (c) => {
+  routes.get("/create", async (c) => {
     const error = c.req.query("error");
-    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, error), getLayoutUser(c)));
+    const groups = await apiKeyService.getGroups();
+    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error), getLayoutUser(c)));
   });
 
   // Handle create
@@ -991,10 +1007,11 @@ export function createFunctionsPages(
     }
 
     const { route, errors } = parseFormData(formData);
+    const groups = await apiKeyService.getGroups();
 
     if (errors.length > 0) {
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, errors.join(". ")), getLayoutUser(c)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". ")), getLayoutUser(c)),
         400
       );
     }
@@ -1005,7 +1022,7 @@ export function createFunctionsPages(
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create function";
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, message), getLayoutUser(c)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message), getLayoutUser(c)),
         400
       );
     }
@@ -1025,10 +1042,11 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
+    const groups = await apiKeyService.getGroups();
     return c.html(
       layout(
         `Edit: ${route.name}`,
-        renderFunctionForm(`/web/functions/edit/${id}`, route, error),
+        renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error),
         getLayoutUser(c)
       )
     );
@@ -1058,6 +1076,7 @@ export function createFunctionsPages(
     }
 
     const { route, errors } = parseFormData(formData);
+    const groups = await apiKeyService.getGroups();
 
     if (errors.length > 0) {
       // Need to include id for the form template to detect edit mode
@@ -1065,7 +1084,7 @@ export function createFunctionsPages(
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, errors.join(". ")),
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, errors.join(". ")),
           getLayoutUser(c)
         ),
         400
@@ -1082,7 +1101,7 @@ export function createFunctionsPages(
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, message),
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, message),
           getLayoutUser(c)
         ),
         400

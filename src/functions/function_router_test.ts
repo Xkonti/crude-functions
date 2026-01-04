@@ -8,15 +8,21 @@ import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts
 import { FunctionRouter } from "./function_router.ts";
 
 const API_KEYS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS api_key_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  key_group TEXT NOT NULL,
+  group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
   value TEXT NOT NULL,
   description TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value ON api_keys(key_group, value);
-CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(key_group);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value ON api_keys(group_id, value);
+CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_id);
 `;
 
 const ROUTES_SCHEMA = `
