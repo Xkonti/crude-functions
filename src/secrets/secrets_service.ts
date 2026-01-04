@@ -931,4 +931,246 @@ export class SecretsService {
       a.name.localeCompare(b.name)
     );
   }
+
+  // ============== Name-Based Lookup Methods (for Handler Context) ==============
+
+  /**
+   * Get secret value by name for a specific scope
+   * Used by ctx.getSecret() when scope is explicitly provided
+   * @param name - Secret name
+   * @param scope - Specific scope to query
+   * @param functionId - Function ID (required for Function scope)
+   * @param apiGroupId - API key group ID (required for Group scope)
+   * @param apiKeyId - API key ID (required for Key scope)
+   * @returns Decrypted secret value or undefined if not found
+   */
+  async getSecretByNameAndScope(
+    name: string,
+    scope: SecretScope,
+    functionId?: number,
+    apiGroupId?: number,
+    apiKeyId?: number
+  ): Promise<string | undefined> {
+    let query: string;
+    let params: (string | number)[];
+
+    switch (scope) {
+      case SecretScope.Global:
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ?`;
+        params = [name, SecretScope.Global];
+        break;
+
+      case SecretScope.Function:
+        if (functionId === undefined) return undefined;
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND function_id = ?`;
+        params = [name, SecretScope.Function, functionId];
+        break;
+
+      case SecretScope.Group:
+        if (apiGroupId === undefined) return undefined;
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND api_group_id = ?`;
+        params = [name, SecretScope.Group, apiGroupId];
+        break;
+
+      case SecretScope.Key:
+        if (apiKeyId === undefined) return undefined;
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND api_key_id = ?`;
+        params = [name, SecretScope.Key, apiKeyId];
+        break;
+    }
+
+    const row = await this.db.queryOne<{ value: string }>(query, params);
+    if (!row) return undefined;
+
+    return await this.encryptionService.decrypt(row.value);
+  }
+
+  /**
+   * Get secret with hierarchical resolution (most specific scope wins)
+   * Resolution order: Key > Group > Function > Global
+   * @param name - Secret name
+   * @param functionId - Function (route) ID
+   * @param apiGroupId - API key group ID (optional, if authenticated)
+   * @param apiKeyId - API key ID (optional, if authenticated)
+   * @returns Decrypted secret value or undefined if not found in any scope
+   */
+  async getSecretHierarchical(
+    name: string,
+    functionId: number,
+    apiGroupId?: number,
+    apiKeyId?: number
+  ): Promise<string | undefined> {
+    // 1. Key scope (most specific)
+    if (apiKeyId !== undefined) {
+      const keySecret = await this.getSecretByNameAndScope(
+        name,
+        SecretScope.Key,
+        undefined,
+        undefined,
+        apiKeyId
+      );
+      if (keySecret !== undefined) return keySecret;
+    }
+
+    // 2. Group scope
+    if (apiGroupId !== undefined) {
+      const groupSecret = await this.getSecretByNameAndScope(
+        name,
+        SecretScope.Group,
+        undefined,
+        apiGroupId,
+        undefined
+      );
+      if (groupSecret !== undefined) return groupSecret;
+    }
+
+    // 3. Function scope
+    const functionSecret = await this.getSecretByNameAndScope(
+      name,
+      SecretScope.Function,
+      functionId,
+      undefined,
+      undefined
+    );
+    if (functionSecret !== undefined) return functionSecret;
+
+    // 4. Global scope (least specific)
+    return await this.getSecretByNameAndScope(
+      name,
+      SecretScope.Global,
+      undefined,
+      undefined,
+      undefined
+    );
+  }
+
+  /**
+   * Get complete secret details across all scopes
+   * Used by ctx.getCompleteSecret()
+   * @param name - Secret name
+   * @param functionId - Function (route) ID
+   * @param apiGroupId - API key group ID (optional, if authenticated)
+   * @param apiKeyId - API key ID (optional, if authenticated)
+   * @returns Object with values from all scopes, or undefined if not found in any scope
+   */
+  async getCompleteSecret(
+    name: string,
+    functionId: number,
+    apiGroupId?: number,
+    apiKeyId?: number
+  ): Promise<
+    | {
+        global?: string;
+        function?: string;
+        group?: { value: string; groupId: number; groupName: string };
+        key?: {
+          value: string;
+          groupId: number;
+          groupName: string;
+          keyId: number;
+          keyValue: string;
+        };
+      }
+    | undefined
+  > {
+    let hasAnySecret = false;
+    const result: {
+      global?: string;
+      function?: string;
+      group?: { value: string; groupId: number; groupName: string };
+      key?: {
+        value: string;
+        groupId: number;
+        groupName: string;
+        keyId: number;
+        keyValue: string;
+      };
+    } = {};
+
+    // 1. Global scope
+    const globalSecret = await this.getSecretByNameAndScope(
+      name,
+      SecretScope.Global
+    );
+    if (globalSecret !== undefined) {
+      result.global = globalSecret;
+      hasAnySecret = true;
+    }
+
+    // 2. Function scope
+    const functionSecret = await this.getSecretByNameAndScope(
+      name,
+      SecretScope.Function,
+      functionId
+    );
+    if (functionSecret !== undefined) {
+      result.function = functionSecret;
+      hasAnySecret = true;
+    }
+
+    // 3. Group scope (with metadata)
+    if (apiGroupId !== undefined) {
+      const groupRow = await this.db.queryOne<{
+        value: string;
+        group_id: number;
+        group_name: string;
+      }>(
+        `SELECT s.value, s.api_group_id as group_id, g.name as group_name
+         FROM secrets s
+         JOIN api_key_groups g ON s.api_group_id = g.id
+         WHERE s.name = ? AND s.scope = ? AND s.api_group_id = ?`,
+        [name, SecretScope.Group, apiGroupId]
+      );
+
+      if (groupRow) {
+        const decryptedValue = await this.encryptionService.decrypt(
+          groupRow.value
+        );
+        result.group = {
+          value: decryptedValue,
+          groupId: groupRow.group_id,
+          groupName: groupRow.group_name,
+        };
+        hasAnySecret = true;
+      }
+    }
+
+    // 4. Key scope (with metadata)
+    if (apiKeyId !== undefined) {
+      const keyRow = await this.db.queryOne<{
+        value: string;
+        key_id: number;
+        group_id: number;
+        group_name: string;
+        key_value: string;
+      }>(
+        `SELECT s.value, s.api_key_id as key_id, g.id as group_id,
+                g.name as group_name, k.value as key_value
+         FROM secrets s
+         JOIN api_keys k ON s.api_key_id = k.id
+         JOIN api_key_groups g ON k.group_id = g.id
+         WHERE s.name = ? AND s.scope = ? AND s.api_key_id = ?`,
+        [name, SecretScope.Key, apiKeyId]
+      );
+
+      if (keyRow) {
+        const decryptedSecretValue = await this.encryptionService.decrypt(
+          keyRow.value
+        );
+        const decryptedKeyValue = await this.encryptionService.decrypt(
+          keyRow.key_value
+        );
+        result.key = {
+          value: decryptedSecretValue,
+          groupId: keyRow.group_id,
+          groupName: keyRow.group_name,
+          keyId: keyRow.key_id,
+          keyValue: decryptedKeyValue,
+        };
+        hasAnySecret = true;
+      }
+    }
+
+    return hasAnySecret ? result : undefined;
+  }
 }

@@ -3,6 +3,8 @@ import { RoutesService, type FunctionRoute } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
+import type { SecretsService } from "../secrets/secrets_service.ts";
+import { SecretScope } from "../secrets/types.ts";
 import { HandlerLoader } from "./handler_loader.ts";
 import { ApiKeyValidator } from "./api_key_validator.ts";
 import type { FunctionContext, RouteInfo } from "./types.ts";
@@ -21,6 +23,7 @@ export interface FunctionRouterOptions {
   apiKeyService: ApiKeyService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
+  secretsService: SecretsService;
   /** Base directory for code files (default: current working directory) */
   codeDirectory?: string;
 }
@@ -31,6 +34,7 @@ export class FunctionRouter {
   private readonly handlerLoader: HandlerLoader;
   private readonly consoleLogService: ConsoleLogService;
   private readonly executionMetricsService: ExecutionMetricsService;
+  private readonly secretsService: SecretsService;
   private router: Hono = this.createEmptyRouter();
 
   constructor(options: FunctionRouterOptions) {
@@ -41,6 +45,7 @@ export class FunctionRouter {
     });
     this.consoleLogService = options.consoleLogService;
     this.executionMetricsService = options.executionMetricsService;
+    this.secretsService = options.secretsService;
   }
 
   async handle(c: Context): Promise<Response> {
@@ -106,6 +111,8 @@ export class FunctionRouter {
 
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
+      let keyGroupId: number | undefined;
+      let keyId: number | undefined;
 
       if (route.keys && route.keys.length > 0) {
         const validation = await this.apiKeyValidator.validate(c, route.keys);
@@ -133,6 +140,8 @@ export class FunctionRouter {
         }
 
         authenticatedKeyGroup = validation.keyGroup;
+        keyGroupId = validation.keyGroupId;
+        keyId = validation.keyId;
       }
 
       // 2. Build FunctionContext
@@ -145,6 +154,9 @@ export class FunctionRouter {
         keys: route.keys,
       };
 
+      // Capture functionId for secret closures
+      const functionId = route.id;
+
       const ctx: FunctionContext = {
         route: routeInfo,
         params: c.req.param() as Record<string, string>,
@@ -152,6 +164,56 @@ export class FunctionRouter {
         authenticatedKeyGroup,
         requestedAt: new Date(),
         requestId,
+
+        // Secret accessor closures with embedded IDs
+        getSecret: async (
+          name: string,
+          scope?: "global" | "function" | "group" | "key"
+        ): Promise<string | undefined> => {
+          if (scope) {
+            // Convert scope string to enum
+            let scopeEnum: SecretScope;
+            switch (scope) {
+              case "global":
+                scopeEnum = SecretScope.Global;
+                break;
+              case "function":
+                scopeEnum = SecretScope.Function;
+                break;
+              case "group":
+                scopeEnum = SecretScope.Group;
+                break;
+              case "key":
+                scopeEnum = SecretScope.Key;
+                break;
+            }
+
+            return await this.secretsService.getSecretByNameAndScope(
+              name,
+              scopeEnum,
+              functionId,
+              keyGroupId,
+              keyId
+            );
+          }
+
+          // No scope specified - use hierarchical resolution
+          return await this.secretsService.getSecretHierarchical(
+            name,
+            functionId,
+            keyGroupId,
+            keyId
+          );
+        },
+
+        getCompleteSecret: async (name: string) => {
+          return await this.secretsService.getCompleteSecret(
+            name,
+            functionId,
+            keyGroupId,
+            keyId
+          );
+        },
       };
 
       // 3. Load Handler

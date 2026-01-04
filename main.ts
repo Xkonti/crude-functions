@@ -21,6 +21,7 @@ import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
 import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 import { base64ToBytes } from "./src/encryption/utils.ts";
 import { EncryptionService } from "./src/encryption/encryption_service.ts";
+import { SecretsService } from "./src/secrets/secrets_service.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -184,6 +185,12 @@ const apiKeyService = new ApiKeyService({
   encryptionService,
 });
 
+// Initialize secrets service
+const secretsService = new SecretsService({
+  db,
+  encryptionService,
+});
+
 // Initialize routes service
 const routesService = new RoutesService({
   db,
@@ -195,6 +202,7 @@ const functionRouter = new FunctionRouter({
   apiKeyService,
   consoleLogService,
   executionMetricsService,
+  secretsService,
   codeDirectory: "./code",
 });
 
@@ -243,7 +251,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, secretsService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

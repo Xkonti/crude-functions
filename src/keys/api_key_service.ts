@@ -369,6 +369,61 @@ export class ApiKeyService {
   }
 
   /**
+   * Get key and group IDs for a specific key value in a group.
+   * Similar to hasKey but returns IDs instead of boolean.
+   * Used by ApiKeyValidator to obtain IDs for secret resolution.
+   * @param group - The group name (will be normalized to lowercase)
+   * @param keyValue - The key value to look up
+   * @returns Object with keyId and groupId, or null if not found
+   */
+  async getKeyByValue(
+    group: string,
+    keyValue: string
+  ): Promise<{ keyId: number; groupId: number } | null> {
+    const normalizedGroup = group.toLowerCase();
+
+    // Check env management key first
+    if (
+      normalizedGroup === "management" &&
+      keyValue === this.managementKeyFromEnv
+    ) {
+      // For env management key, we need to get/create the group
+      const mgmtGroup = await this.getOrCreateGroup(
+        "management",
+        "Management API keys"
+      );
+      return {
+        keyId: ENV_KEY_ID, // -1 for synthetic env key
+        groupId: mgmtGroup,
+      };
+    }
+
+    const groupRow = await this.getGroupByName(normalizedGroup);
+    if (!groupRow) {
+      return null;
+    }
+
+    // Fetch all encrypted keys for this group
+    const rows = await this.db.queryAll<{ id: number; value: string }>(
+      "SELECT id, value FROM api_keys WHERE group_id = ?",
+      [groupRow.id]
+    );
+
+    // Decrypt each key and compare
+    for (const row of rows) {
+      const decryptedValue = await this.decryptKey(row.value);
+      if (decryptedValue === keyValue) {
+        return {
+          keyId: row.id,
+          groupId: groupRow.id,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Add a new API key to a group.
    * Creates the group if it doesn't exist.
    * Silently ignores if the exact (group, value) pair already exists.
