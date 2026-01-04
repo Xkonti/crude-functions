@@ -96,7 +96,7 @@ export function createKeysPages(
                           ${
                             key.id === -1
                               ? "<em>env</em>"
-                              : `<a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>`
+                              : `<a href="/web/keys/${key.id}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>`
                           }
                         </td>
                       </tr>
@@ -892,6 +892,379 @@ export function createKeysPages(
     }
   });
 
+  // ============== Key Secrets Routes ==============
+
+  // GET /:keyId/secrets - List secrets for an API key
+  routes.get("/:keyId/secrets", async (c) => {
+    const idParam = c.req.param("keyId");
+    const keyId = parseInt(idParam);
+
+    if (isNaN(keyId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid key ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    const { key } = result;
+    const success = c.req.query("success");
+    const error = c.req.query("error");
+
+    // Load secrets for this key
+    const secrets = await secretsService.getKeySecrets(keyId);
+
+    const keyDisplay = key.description || key.value;
+
+    const content = `
+      <h1>Secrets for Key: ${escapeHtml(keyDisplay)}</h1>
+      <p>
+        <a href="/web/keys" role="button" class="secondary">
+          ← Back to Keys
+        </a>
+      </p>
+      ${flashMessages(success, error)}
+      <p>
+        ${buttonLink(
+          `/web/keys/${keyId}/secrets/create`,
+          "Create New Secret"
+        )}
+      </p>
+      ${
+        secrets.length === 0
+          ? "<p>No secrets configured for this API key. Create your first secret to get started.</p>"
+          : renderKeySecretsTable(secrets, keyId)
+      }
+    `;
+
+    return c.html(
+      layout(`Secrets: ${keyDisplay}`, content, getLayoutUser(c))
+    );
+  });
+
+  // GET /:keyId/secrets/create - Create secret form
+  routes.get("/:keyId/secrets/create", async (c) => {
+    const idParam = c.req.param("keyId");
+    const keyId = parseInt(idParam);
+
+    if (isNaN(keyId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid key ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    const { key } = result;
+    const keyDisplay = key.description || key.value;
+
+    const content = `
+      <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
+      <p>
+        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">
+          ← Back to Secrets
+        </a>
+      </p>
+      ${renderKeySecretCreateForm(keyId)}
+    `;
+
+    return c.html(
+      layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c))
+    );
+  });
+
+  // POST /:keyId/secrets/create - Handle secret creation
+  routes.post("/:keyId/secrets/create", async (c) => {
+    const idParam = c.req.param("keyId");
+    const keyId = parseInt(idParam);
+
+    if (isNaN(keyId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid key ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    const { key } = result;
+    const keyDisplay = key.description || key.value;
+
+    const formData = await c.req.formData();
+    const { secretData, errors } = parseSecretFormData(formData);
+
+    if (errors.length > 0) {
+      const content = `
+        <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
+        <p>
+          <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderKeySecretCreateForm(keyId, secretData, errors.join(", "))}
+      `;
+      return c.html(
+        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c))
+      );
+    }
+
+    try {
+      await secretsService.createKeySecret(
+        keyId,
+        secretData.name,
+        secretData.value,
+        secretData.comment
+      );
+
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?success=` +
+          encodeURIComponent(`Secret created: ${secretData.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create secret";
+      const content = `
+        <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
+        <p>
+          <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderKeySecretCreateForm(keyId, secretData, message)}
+      `;
+      return c.html(
+        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c))
+      );
+    }
+  });
+
+  // GET /:keyId/secrets/edit/:secretId - Edit secret form
+  routes.get("/:keyId/secrets/edit/:secretId", async (c) => {
+    const keyIdParam = c.req.param("keyId");
+    const secretIdParam = c.req.param("secretId");
+    const keyId = parseInt(keyIdParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(keyId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    // Load secret
+    const secret = await secretsService.getKeySecretById(keyId, secretId);
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    const content = `
+      <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+      <p>
+        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">
+          ← Back to Secrets
+        </a>
+      </p>
+      ${renderKeySecretEditForm(keyId, secret)}
+    `;
+
+    return c.html(
+      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // POST /:keyId/secrets/edit/:secretId - Handle secret update
+  routes.post("/:keyId/secrets/edit/:secretId", async (c) => {
+    const keyIdParam = c.req.param("keyId");
+    const secretIdParam = c.req.param("secretId");
+    const keyId = parseInt(keyIdParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(keyId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    // Load secret to get the name for the title
+    const secret = await secretsService.getKeySecretById(keyId, secretId);
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    const formData = await c.req.formData();
+    const { editData, errors } = parseSecretEditFormData(formData);
+
+    if (errors.length > 0) {
+      const content = `
+        <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+        <p>
+          <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, errors.join(", "))}
+      `;
+      return c.html(
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+      );
+    }
+
+    try {
+      await secretsService.updateKeySecret(
+        keyId,
+        secretId,
+        editData.value,
+        editData.comment
+      );
+
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?success=` +
+          encodeURIComponent(`Secret updated: ${secret.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update secret";
+      const content = `
+        <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+        <p>
+          <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, message)}
+      `;
+      return c.html(
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+      );
+    }
+  });
+
+  // GET /:keyId/secrets/delete/:secretId - Delete confirmation
+  routes.get("/:keyId/secrets/delete/:secretId", async (c) => {
+    const keyIdParam = c.req.param("keyId");
+    const secretIdParam = c.req.param("secretId");
+    const keyId = parseInt(keyIdParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(keyId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    // Load secret
+    const secret = await secretsService.getKeySecretById(keyId, secretId);
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    return c.html(
+      confirmPage(
+        `Delete Secret: ${escapeHtml(secret.name)}`,
+        `Are you sure you want to delete the secret <strong>${escapeHtml(secret.name)}</strong>? This action cannot be undone.`,
+        `/web/keys/${keyId}/secrets/delete/${secretId}`,
+        `/web/keys/${keyId}/secrets`,
+        getLayoutUser(c)
+      )
+    );
+  });
+
+  // POST /:keyId/secrets/delete/:secretId - Handle secret deletion
+  routes.post("/:keyId/secrets/delete/:secretId", async (c) => {
+    const keyIdParam = c.req.param("keyId");
+    const secretIdParam = c.req.param("secretId");
+    const keyId = parseInt(keyIdParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(keyId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    // Verify key exists
+    const result = await apiKeyService.getById(keyId);
+    if (!result) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent("API key not found")
+      );
+    }
+
+    // Load secret to get the name for success message
+    const secret = await secretsService.getKeySecretById(keyId, secretId);
+    if (!secret) {
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    try {
+      await secretsService.deleteKeySecret(keyId, secretId);
+
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?success=` +
+          encodeURIComponent(`Secret deleted: ${secret.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete secret";
+      return c.redirect(
+        `/web/keys/${keyId}/secrets?error=` + encodeURIComponent(message)
+      );
+    }
+  });
+
   return routes;
 }
 
@@ -1106,4 +1479,164 @@ function parseSecretEditFormData(formData: FormData): {
     editData: { value, comment },
     errors,
   };
+}
+
+// ============== Helper Functions for Key Secrets ==============
+
+/**
+ * Renders the secrets table for an individual API key with show/hide and copy functionality
+ */
+function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Value</th>
+          <th>Comment</th>
+          <th>Created</th>
+          <th>Modified</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${secrets
+          .map(
+            (secret) => `
+          <tr>
+            <td><code>${escapeHtml(secret.name)}</code></td>
+            <td class="secret-value">
+              <span class="masked">••••••••</span>
+              <span class="revealed" style="display:none;">
+                <code>${escapeHtml(secret.value)}</code>
+              </span>
+              <button type="button" onclick="toggleSecret(this)"
+                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                👁️
+              </button>
+              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                      class="secondary" style="padding: 0.25rem 0.5rem;">
+                📋
+              </button>
+            </td>
+            <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
+            <td>${formatDate(new Date(secret.createdAt))}</td>
+            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td class="actions">
+              <a href="/web/keys/${keyId}/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              <a href="/web/keys/${keyId}/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+            </td>
+          </tr>
+        `
+          )
+          .join("")}
+      </tbody>
+    </table>
+
+    <script>
+    function toggleSecret(btn) {
+      const td = btn.closest('td');
+      const masked = td.querySelector('.masked');
+      const revealed = td.querySelector('.revealed');
+
+      if (masked.style.display === 'none') {
+        masked.style.display = '';
+        revealed.style.display = 'none';
+        btn.textContent = '👁️';
+      } else {
+        masked.style.display = 'none';
+        revealed.style.display = '';
+        btn.textContent = '🙈';
+      }
+    }
+
+    function copySecret(btn, value) {
+      navigator.clipboard.writeText(value).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = original, 2000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+    </script>
+  `;
+}
+
+/**
+ * Renders the create secret form for an API key
+ */
+function renderKeySecretCreateForm(
+  keyId: number,
+  data: { name?: string; value?: string; comment?: string } = {},
+  error?: string
+): string {
+  return `
+    ${error ? flashMessages(undefined, error) : ""}
+    <form method="POST" action="/web/keys/${keyId}/secrets/create">
+      <label>
+        Secret Name *
+        <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
+               required autofocus
+               pattern="[a-zA-Z0-9_-]+"
+               placeholder="MY_SECRET_KEY" />
+        <small>Letters, numbers, underscores, and dashes only</small>
+      </label>
+      <label>
+        Secret Value *
+        <textarea name="value" required
+                  placeholder="your-secret-value"
+                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
+        <small>Encrypted at rest using AES-256-GCM</small>
+      </label>
+      <label>
+        Comment
+        <input type="text" name="comment" value="${escapeHtml(data.comment ?? "")}"
+               placeholder="Optional description" />
+        <small>Helps identify the purpose of this secret</small>
+      </label>
+      <div class="grid">
+        <button type="submit">Create Secret</button>
+        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  `;
+}
+
+/**
+ * Renders the edit secret form for an API key
+ */
+function renderKeySecretEditForm(
+  keyId: number,
+  secret: { id: number; name: string; value: string; comment: string | null },
+  error?: string
+): string {
+  return `
+    ${error ? flashMessages(undefined, error) : ""}
+    <form method="POST" action="/web/keys/${keyId}/secrets/edit/${secret.id}">
+      <label>
+        Secret Name
+        <input type="text" value="${escapeHtml(secret.name)}" disabled />
+        <small>Secret names cannot be changed</small>
+      </label>
+      <label>
+        Secret Value *
+        <textarea name="value" required
+                  placeholder="your-secret-value"
+                  rows="4">${escapeHtml(secret.value)}</textarea>
+        <small>Encrypted at rest using AES-256-GCM</small>
+      </label>
+      <label>
+        Comment
+        <input type="text" name="comment" value="${escapeHtml(secret.comment ?? "")}"
+               placeholder="Optional description" />
+        <small>Helps identify the purpose of this secret</small>
+      </label>
+      <div class="grid">
+        <button type="submit">Save Changes</button>
+        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  `;
 }

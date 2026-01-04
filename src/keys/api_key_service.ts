@@ -284,6 +284,53 @@ export class ApiKeyService {
   }
 
   /**
+   * Get an API key by ID
+   * Returns both the key and its associated group
+   */
+  async getById(
+    keyId: number
+  ): Promise<{ key: ApiKey; group: ApiKeyGroup } | null> {
+    const row = await this.db.queryOne<{
+      key_id: number;
+      key_value: string;
+      key_description: string | null;
+      group_id: number;
+      group_name: string;
+      group_description: string | null;
+    }>(
+      `SELECT
+         k.id as key_id,
+         k.value as key_value,
+         k.description as key_description,
+         g.id as group_id,
+         g.name as group_name,
+         g.description as group_description
+       FROM api_keys k
+       JOIN api_key_groups g ON k.group_id = g.id
+       WHERE k.id = ?`,
+      [keyId]
+    );
+
+    if (!row) return null;
+
+    // Decrypt the key value
+    const decryptedValue = await this.decryptKey(row.key_value);
+
+    return {
+      key: {
+        id: row.key_id,
+        value: decryptedValue,
+        description: row.key_description ?? undefined,
+      },
+      group: {
+        id: row.group_id,
+        name: row.group_name,
+        description: row.group_description ?? undefined,
+      },
+    };
+  }
+
+  /**
    * Check if a specific key value exists in a group.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to check
