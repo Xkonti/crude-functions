@@ -16,6 +16,7 @@ import {
   HandlerExecutionError,
 } from "./errors.ts";
 import { runInRequestContext } from "../logs/request_context.ts";
+import { runInEnvContext, createEnvContext } from "../env/env_context.ts";
 import { originalConsole } from "../logs/console_interceptor.ts";
 
 export interface FunctionRouterOptions {
@@ -246,7 +247,12 @@ export class FunctionRouter {
 
       try {
         const response = await runInRequestContext(requestContext, async () => {
-          return await handler(c, ctx);
+          // Wrap handler execution in isolated env context
+          // Each request gets a fresh empty environment
+          const envContext = createEnvContext();
+          return await runInEnvContext(envContext, async () => {
+            return await handler(c, ctx);
+          });
         });
 
         // Log execution end (success)

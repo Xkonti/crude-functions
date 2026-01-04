@@ -5,6 +5,7 @@ import { RoutesService } from "../routes/routes_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
+import { SecretsService } from "../secrets/secrets_service.ts";
 import { FunctionRouter } from "./function_router.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
 
@@ -71,6 +72,21 @@ CREATE INDEX IF NOT EXISTS idx_execution_metrics_type_route_timestamp ON executi
 CREATE INDEX IF NOT EXISTS idx_execution_metrics_timestamp ON execution_metrics(timestamp);
 `;
 
+const SECRETS_SCHEMA = `
+CREATE TABLE secrets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  comment TEXT,
+  scope INTEGER NOT NULL,
+  function_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+  api_group_id INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  api_key_id INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+`;
+
 interface TestRoute {
   name: string;
   handler: string;
@@ -102,6 +118,7 @@ async function createTestSetup(
   await db.exec(ROUTES_SCHEMA);
   await db.exec(CONSOLE_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
+  await db.exec(SECRETS_SCHEMA);
 
   const routesService = new RoutesService({ db });
   const encryptionService = new EncryptionService({
@@ -110,6 +127,7 @@ async function createTestSetup(
   const apiKeyService = new ApiKeyService({ db, encryptionService });
   const consoleLogService = new ConsoleLogService({ db });
   const executionMetricsService = new ExecutionMetricsService({ db });
+  const secretsService = new SecretsService({ db, encryptionService });
 
   // Add initial routes
   for (const route of initialRoutes) {
@@ -126,6 +144,7 @@ async function createTestSetup(
     apiKeyService,
     consoleLogService,
     executionMetricsService,
+    secretsService,
     codeDirectory: tempDir,
   });
 

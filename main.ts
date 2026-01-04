@@ -1,5 +1,13 @@
 import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
+
+// Install environment isolation IMMEDIATELY after dotenv loads.
+// This must happen before any handlers load to ensure they see the proxy.
+// System code (services, startup) runs outside handler context and sees real env.
+import { EnvIsolator } from "./src/env/env_isolator.ts";
+const envIsolator = new EnvIsolator();
+envIsolator.install();
+
 import { DatabaseService } from "./src/database/database_service.ts";
 import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
