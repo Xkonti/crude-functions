@@ -68,7 +68,11 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
         </label>
         <label>
           Password
-          <input type="password" name="password" required minlength="8" placeholder="At least 8 characters" />
+          <input type="password" name="password" id="password" required minlength="8" placeholder="At least 8 characters" />
+        </label>
+        <label>
+          Confirm Password
+          <input type="password" name="confirmPassword" id="confirmPassword" required minlength="8" placeholder="Re-enter your password" />
         </label>
         <button type="submit">Create Account</button>
       </form>
@@ -79,6 +83,8 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
     <script>
       const form = document.getElementById('setup-form');
       const errorDiv = document.getElementById('setup-error');
+      const passwordInput = document.getElementById('password');
+      const confirmPasswordInput = document.getElementById('confirmPassword');
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -88,6 +94,15 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
         const name = formData.get('name');
         const email = formData.get('email');
         const password = formData.get('password');
+        const confirmPassword = formData.get('confirmPassword');
+
+        // Validate passwords match
+        if (password !== confirmPassword) {
+          errorDiv.textContent = 'Passwords do not match. Please try again.';
+          errorDiv.style.display = 'block';
+          confirmPasswordInput.focus();
+          return;
+        }
 
         try {
           // Create account via Better Auth sign-up
