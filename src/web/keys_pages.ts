@@ -90,7 +90,20 @@ export function createKeysPages(
                         (key) => `
                       <tr>
                         <td><code>${key.id === -1 ? "env" : key.id}</code></td>
-                        <td><code>${escapeHtml(key.value)}</code></td>
+                        <td class="secret-value">
+                          <span class="masked">••••••••</span>
+                          <span class="revealed" style="display:none;">
+                            <code>${escapeHtml(key.value)}</code>
+                          </span>
+                          <button type="button" onclick="toggleSecret(this)"
+                                  class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                            👁️
+                          </button>
+                          <button type="button" onclick="copySecret(this, '${escapeHtml(key.value).replace(/'/g, "\\'")}')"
+                                  class="secondary" style="padding: 0.25rem 0.5rem;">
+                            📋
+                          </button>
+                        </td>
                         <td>${key.description ? escapeHtml(key.description) : "<em>none</em>"}</td>
                         <td class="actions">
                           ${
@@ -111,6 +124,35 @@ export function createKeysPages(
               })
               .join("")
       }
+
+      <script>
+      function toggleSecret(btn) {
+        const td = btn.closest('td');
+        const masked = td.querySelector('.masked');
+        const revealed = td.querySelector('.revealed');
+
+        if (masked.style.display === 'none') {
+          masked.style.display = '';
+          revealed.style.display = 'none';
+          btn.textContent = '👁️';
+        } else {
+          masked.style.display = 'none';
+          revealed.style.display = '';
+          btn.textContent = '🙈';
+        }
+      }
+
+      function copySecret(btn, value) {
+        navigator.clipboard.writeText(value).then(() => {
+          const original = btn.textContent;
+          btn.textContent = '✓';
+          setTimeout(() => btn.textContent = original, 2000);
+        }).catch(err => {
+          console.error('Failed to copy:', err);
+          alert('Failed to copy to clipboard');
+        });
+      }
+      </script>
     `;
     return c.html(layout("API Keys", content, getLayoutUser(c)));
   });
