@@ -1,11 +1,11 @@
 import type { DatabaseService } from "../database/database_service.ts";
-import type { EncryptionService } from "../encryption/encryption_service.ts";
+import type { IEncryptionService } from "../encryption/types.ts";
 import type { Secret, SecretRow, SecretPreview } from "./types.ts";
 import { SecretScope } from "./types.ts";
 
 export interface SecretsServiceOptions {
   db: DatabaseService;
-  encryptionService: EncryptionService;
+  encryptionService: IEncryptionService;
 }
 
 // Secret names: A-Z, a-z, 0-9, underscore, dash
@@ -17,7 +17,7 @@ const SECRET_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
  */
 export class SecretsService {
   private readonly db: DatabaseService;
-  private readonly encryptionService: EncryptionService;
+  private readonly encryptionService: IEncryptionService;
 
   constructor(options: SecretsServiceOptions) {
     this.db = options.db;

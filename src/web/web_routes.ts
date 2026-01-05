@@ -16,7 +16,7 @@ import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
-import type { EncryptionService } from "../encryption/encryption_service.ts";
+import type { IEncryptionService } from "../encryption/types.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 
 export interface WebRoutesOptions {
@@ -27,7 +27,7 @@ export interface WebRoutesOptions {
   apiKeyService: ApiKeyService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
-  encryptionService: EncryptionService;
+  encryptionService: IEncryptionService;
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {

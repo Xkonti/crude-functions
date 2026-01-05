@@ -1,6 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { DatabaseService } from "../database/database_service.ts";
-import type { EncryptionService } from "../encryption/encryption_service.ts";
+import type { IEncryptionService } from "../encryption/types.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 import {
   layout,
@@ -17,7 +17,7 @@ import {
  */
 export interface SecretsPagesOptions {
   db: DatabaseService;
-  encryptionService: EncryptionService;
+  encryptionService: IEncryptionService;
 }
 
 /**

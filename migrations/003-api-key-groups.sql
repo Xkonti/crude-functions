@@ -23,11 +23,12 @@ CREATE TABLE api_keys_new (
   group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
   value TEXT NOT NULL,
   description TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-INSERT INTO api_keys_new (id, group_id, value, description, created_at)
-SELECT ak.id, g.id, ak.value, ak.description, ak.created_at
+INSERT INTO api_keys_new (id, group_id, value, description, created_at, modified_at)
+SELECT ak.id, g.id, ak.value, ak.description, ak.created_at, ak.created_at
 FROM api_keys ak
 JOIN api_key_groups g ON g.name = ak.key_group;
 

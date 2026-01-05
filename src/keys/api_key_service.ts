@@ -1,5 +1,5 @@
 import type { DatabaseService } from "../database/database_service.ts";
-import { EncryptionService } from "../encryption/encryption_service.ts";
+import type { IEncryptionService } from "../encryption/types.ts";
 
 /**
  * Represents an API key group
@@ -51,7 +51,7 @@ export interface ApiKeyServiceOptions {
   /** Management API key from environment variable (optional) */
   managementKeyFromEnv?: string;
   /** Encryption service for encrypting API keys at rest */
-  encryptionService: EncryptionService;
+  encryptionService: IEncryptionService;
 }
 
 /** Synthetic ID for environment-provided management key */
@@ -64,7 +64,7 @@ const ENV_KEY_ID = -1;
 export class ApiKeyService {
   private readonly db: DatabaseService;
   private readonly managementKeyFromEnv?: string;
-  private readonly encryptionService: EncryptionService;
+  private readonly encryptionService: IEncryptionService;
 
   constructor(options: ApiKeyServiceOptions) {
     this.db = options.db;
@@ -453,7 +453,7 @@ export class ApiKeyService {
 
     // Insert the encrypted key
     await this.db.execute(
-      "INSERT INTO api_keys (group_id, value, description) VALUES (?, ?, ?)",
+      "INSERT INTO api_keys (group_id, value, description, created_at, modified_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
       [groupId, encryptedValue, description ?? null]
     );
   }

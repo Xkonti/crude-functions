@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS api_keys (
   group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
   value TEXT NOT NULL,
   description TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value ON api_keys(group_id, value);
 CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_id);

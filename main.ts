@@ -33,8 +33,10 @@ import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_ser
 import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
 import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
 import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
-import { base64ToBytes } from "./src/encryption/utils.ts";
-import { EncryptionService } from "./src/encryption/encryption_service.ts";
+import { KeyStorageService } from "./src/encryption/key_storage_service.ts";
+import { VersionedEncryptionService } from "./src/encryption/versioned_encryption_service.ts";
+import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
+import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
 
 /**
@@ -72,57 +74,24 @@ function parseEnvInt(
 let abortController: AbortController | null = null;
 
 // ============================================================================
-// Encryption Key Validation
+// Encryption Key Initialization
 // ============================================================================
 
-// Validate secrets encryption key (REQUIRED)
-const secretsEncryptionKey = Deno.env.get("SECRETS_ENCRYPTION_KEY");
-if (!secretsEncryptionKey) {
-  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.error("FATAL ERROR: SECRETS_ENCRYPTION_KEY is required");
-  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.error("");
-  console.error("This environment variable must be set to encrypt secrets at rest.");
-  console.error("Generate a new key with:");
-  console.error("");
-  console.error("  openssl rand -base64 32");
-  console.error("");
-  console.error("Then set it in your environment or .env file:");
-  console.error("");
-  console.error("  SECRETS_ENCRYPTION_KEY=<generated-key>");
-  console.error("");
-  Deno.exit(1);
-}
+// Initialize key storage and load/create encryption keys
+// Keys are stored in ./data/encryption-keys.json (auto-generated on first run)
+const keyStorageService = new KeyStorageService({
+  keyFilePath: "./data/encryption-keys.json",
+});
 
-// Validate key format early (before database operations)
-try {
-  const keyBytes = base64ToBytes(secretsEncryptionKey);
-  if (keyBytes.length !== 32) {
-    throw new Error(
-      `Key must be 32 bytes (256 bits), got ${keyBytes.length} bytes`
-    );
-  }
-} catch (error) {
-  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.error("FATAL ERROR: Invalid SECRETS_ENCRYPTION_KEY");
-  console.error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  console.error("");
-  console.error(
-    `Error: ${error instanceof Error ? error.message : String(error)}`
-  );
-  console.error("");
-  console.error("Generate a valid 32-byte base64-encoded key with:");
-  console.error("");
-  console.error("  openssl rand -base64 32");
-  console.error("");
-  Deno.exit(1);
-}
+const encryptionKeys = await keyStorageService.ensureInitialized();
+console.log(`✓ Encryption keys loaded (version ${encryptionKeys.current_version})`);
 
-console.log("✓ Encryption key validated");
-
-// Initialize encryption service (after validation)
-const encryptionService = new EncryptionService({
-  encryptionKey: secretsEncryptionKey,
+// Initialize versioned encryption service
+const encryptionService = new VersionedEncryptionService({
+  currentKey: encryptionKeys.current_key,
+  currentVersion: encryptionKeys.current_version,
+  phasedOutKey: encryptionKeys.phased_out_key ?? undefined,
+  phasedOutVersion: encryptionKeys.phased_out_version ?? undefined,
 });
 
 const app = new Hono();
@@ -154,10 +123,11 @@ const hasUsers = userExists !== null;
 
 // Initialize Better Auth
 // Sign-up is only enabled during first-run setup (when no users exist)
+// Auth secret is stored in the encryption keys file (auto-generated on first run)
 const auth = createAuth({
   databasePath: "./data/database.db",
   baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || "http://localhost:8000",
-  secret: Deno.env.get("BETTER_AUTH_SECRET") || "dev-secret-change-in-production",
+  secret: encryptionKeys.better_auth_secret,
   hasUsers,
 });
 
@@ -192,6 +162,21 @@ const logTrimmingService = new LogTrimmingService({
   config: logTrimmingConfig,
 });
 logTrimmingService.start();
+
+// Initialize and start key rotation service
+const keyRotationConfig: KeyRotationConfig = {
+  checkIntervalSeconds: parseEnvInt("KEY_ROTATION_CHECK_INTERVAL_SECONDS", 10800, { min: 60 }),
+  rotationIntervalDays: parseEnvInt("KEY_ROTATION_INTERVAL_DAYS", 90, { min: 1 }),
+  batchSize: parseEnvInt("KEY_ROTATION_BATCH_SIZE", 100, { min: 1, max: 1000 }),
+  batchSleepMs: parseEnvInt("KEY_ROTATION_BATCH_SLEEP_MS", 100, { min: 10 }),
+};
+const keyRotationService = new KeyRotationService({
+  db,
+  encryptionService,
+  keyStorage: keyStorageService,
+  config: keyRotationConfig,
+});
+keyRotationService.start();
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -266,7 +251,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, secretsService, processIsolator };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, processIsolator };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
@@ -291,7 +276,11 @@ async function gracefulShutdown(signal: string) {
     await metricsAggregationService.stop();
     console.log("Metrics aggregation service stopped");
 
-    // 5. Close database last
+    // 5. Stop key rotation service (waits for current rotation batch)
+    await keyRotationService.stop();
+    console.log("Key rotation service stopped");
+
+    // 6. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {
