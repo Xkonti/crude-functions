@@ -45,20 +45,30 @@ The server starts on port 8000 by default. The database is automatically created
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
-| `MANAGEMENT_API_KEY` | Management key for admin access (API and Web UI) | - |
+| `MANAGEMENT_API_KEY` | Management key for admin access (API and Web UI) | Required |
 | `LOG_LEVEL` | Logging verbosity: `debug`, `info`, `warn`, `error`, `none` | `info` |
-| `METRICS_AGGREGATION_INTERVAL_SECONDS` | How often to run metrics aggregation (seconds) | `60` |
+| `METRICS_AGGREGATION_INTERVAL_SECONDS` | How often to aggregate metrics (seconds) | `60` |
 | `METRICS_RETENTION_DAYS` | Days to retain aggregated daily metrics | `90` |
+| `LOG_TRIMMING_INTERVAL_SECONDS` | How often to trim old logs (seconds) | `300` |
+| `LOG_MAX_PER_ROUTE` | Maximum logs to keep per function/route | `2000` |
+| `BETTER_AUTH_BASE_URL` | Base URL for redirects and callbacks | `http://localhost:8000` |
+| `KEY_ROTATION_CHECK_INTERVAL_SECONDS` | How often to check if key rotation needed (seconds) | `10800` |
+| `KEY_ROTATION_INTERVAL_DAYS` | Days between automatic key rotations | `90` |
+| `KEY_ROTATION_BATCH_SIZE` | Records to re-encrypt per batch during rotation | `100` |
+| `KEY_ROTATION_BATCH_SLEEP_MS` | Sleep between re-encryption batches (ms) | `100` |
+
+**Note:** Encryption keys are auto-generated on first startup and stored in `./data/encryption-keys.json`. The key rotation variables are optional - the system will use the defaults shown above if not specified.
 
 ### Directory Structure
 
 ```
 crude-functions/
 ├── data/
-│   └── database.db    # SQLite database (API keys & routes)
-├── code/              # Your function handlers
+│   ├── database.db           # SQLite database (routes, keys, users, secrets, logs, metrics)
+│   └── encryption-keys.json  # Auto-generated encryption keys (created on first run)
+├── code/                     # Your function handlers
 │   └── *.ts
-├── migrations/        # Database schema migrations
+├── migrations/               # Database schema migrations
 └── main.ts
 ```
 
@@ -129,6 +139,10 @@ export default async function (c, ctx) {
 | `ctx.requestedAt` | `Date` | Request timestamp |
 | `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
 | `ctx.route` | `RouteInfo` | Route configuration (name, handler, methods, etc.) |
+| `ctx.getSecret(name, scope?)` | `Promise<string \| undefined>` | Get secret value with hierarchical resolution (key > group > function > global) |
+| `ctx.getCompleteSecret(name)` | `Promise<CompleteSecret \| undefined>` | Get secret with all scope values |
+
+**Secrets:** Functions can access encrypted secrets scoped to key, group, function, or global levels. See [function_handler_design.md](./function_handler_design.md) for details.
 
 ### Hono Context (`c`)
 
@@ -199,17 +213,20 @@ curl -X POST -H "X-API-Key: your-api-key" \
 
 ## Web UI
 
-Access the management interface at `/web`. Authentication uses HTTP Basic Auth:
+Access the management interface at `/web`.
 
-- **Username:** anything (ignored)
-- **Password:** a valid management API key
+**First-time setup:** Navigate to `/web/setup` to create your first user account. Sign-up is automatically disabled after the first user is created.
+
+**Authentication:** After setup, log in with your email and password. Sessions are valid for 7 days.
 
 ### Pages
 
 - `/web` - Dashboard with links to all sections
 - `/web/code` - Manage code files (upload, edit, delete)
-- `/web/functions` - Manage function routes
-- `/web/keys` - Manage API keys
+- `/web/functions` - Manage function routes and view execution logs/metrics
+- `/web/keys` - Manage API key groups and keys
+- `/web/secrets` - Manage encrypted secrets (global, function, group, key scopes)
+- `/web/users` - Manage user accounts and roles
 
 ## Development
 
@@ -234,10 +251,34 @@ services:
     ports:
       - 8000:8000
     environment:
-      - MANAGEMENT_API_KEY=your-secret-key
+      # Management API key for admin access (Web UI and API)
+      - MANAGEMENT_API_KEY=your-secret-key-here
+
+      # Log level: debug, info, warn, error, none (default: info)
       - LOG_LEVEL=info
+
+      # Metrics configuration
+      - METRICS_AGGREGATION_INTERVAL_SECONDS=60  # Default: 60
+      - METRICS_RETENTION_DAYS=90                # Default: 90
+
+      # Log trimming configuration
+      - LOG_TRIMMING_INTERVAL_SECONDS=300        # Default: 300 (5 minutes)
+      - LOG_MAX_PER_ROUTE=2000                   # Default: 2000
+
+      # Better Auth configuration
+      # IMPORTANT: Update this to match your deployment URL
+      - BETTER_AUTH_BASE_URL=http://localhost:8000
+
+      # Encryption Key Rotation (optional - defaults shown below)
+      # Encryption keys are auto-generated on first startup
+      # - KEY_ROTATION_CHECK_INTERVAL_SECONDS=10800  # Default: 10800 (3 hours)
+      # - KEY_ROTATION_INTERVAL_DAYS=90              # Default: 90
+      # - KEY_ROTATION_BATCH_SIZE=100                # Default: 100
+      # - KEY_ROTATION_BATCH_SLEEP_MS=100            # Default: 100
     volumes:
+      # Mount the data directory for SQLite database and encryption keys
       - ./data:/app/data
+      # Mount the code directory for function handlers
       - ./code:/app/code
     restart: unless-stopped
 ```
@@ -249,7 +290,12 @@ mkdir -p data code
 docker compose up -d
 ```
 
-The database will be created automatically at `./data/database.db` on first run.
+**Important:** Update `BETTER_AUTH_BASE_URL` to match your deployment URL (e.g., `https://functions.yourdomain.com`).
+
+On first run:
+- Database is created at `./data/database.db`
+- Encryption keys are generated at `./data/encryption-keys.json`
+- Navigate to `http://localhost:8000/web/setup` to create your first user account
 
 ### Using Docker Run
 
@@ -257,10 +303,13 @@ The database will be created automatically at `./data/database.db` on first run.
 docker run -d \
   -p 8000:8000 \
   -e MANAGEMENT_API_KEY=your-secret-key \
+  -e BETTER_AUTH_BASE_URL=http://localhost:8000 \
   -v ./data:/app/data \
   -v ./code:/app/code \
   xkonti/crude-functions:latest
 ```
+
+See the Docker Compose section above for all available environment variables.
 
 ### Building from Source
 
@@ -275,10 +324,14 @@ The server automatically reloads function handlers when their files are modified
 ## Security Considerations
 
 - This is designed for **internal network use** with trusted code
-- No process isolation between functions
 - No sandboxing - functions have full Deno permissions
-- API keys are stored in plain text
+- Basic process isolation prevents handlers from calling `process.exit()` or changing working directory
+- Environment isolation provides handlers with empty `Deno.env` and `process.env` by default
+- API keys and secrets are encrypted with AES-256-GCM
+- Encryption keys are auto-generated and stored in `./data/encryption-keys.json`
+- Automatic key rotation with configurable intervals
 - Use behind a reverse proxy for TLS termination
+- **Important:** Keep `./data/encryption-keys.json` backed up and secure - loss means encrypted data cannot be recovered
 
 ## License
 

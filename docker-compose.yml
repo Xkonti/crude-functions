@@ -5,15 +5,32 @@ services:
     ports:
       - 8000:8000
     environment:
-      - MANAGEMENT_API_KEY=examplekey
+      # Management API key for admin access (Web UI and API)
+      - MANAGEMENT_API_KEY=your-secret-key-here
+
       # Log level: debug, info, warn, error, none (default: info)
       - LOG_LEVEL=info
-      # Metrics aggregation interval in seconds (default: 60)
-      - METRICS_AGGREGATION_INTERVAL_SECONDS=60
-      # Number of days to retain daily metrics (default: 90)
-      - METRICS_RETENTION_DAYS=90
+
+      # Metrics configuration
+      - METRICS_AGGREGATION_INTERVAL_SECONDS=60  # Default: 60
+      - METRICS_RETENTION_DAYS=90                # Default: 90
+
+      # Log trimming configuration
+      - LOG_TRIMMING_INTERVAL_SECONDS=300        # Default: 300 (5 minutes)
+      - LOG_MAX_PER_ROUTE=2000                   # Default: 2000
+
+      # Better Auth configuration
+      # Base URL for the application (used for redirects and callbacks)
+      - BETTER_AUTH_BASE_URL=http://localhost:8000
+
+      # Encryption Key Rotation (optional - defaults shown below)
+      # Encryption keys are auto-generated on first startup and stored in ./data/encryption-keys.json
+      # - KEY_ROTATION_CHECK_INTERVAL_SECONDS=10800  # Default: 10800 (3 hours)
+      # - KEY_ROTATION_INTERVAL_DAYS=90              # Default: 90
+      # - KEY_ROTATION_BATCH_SIZE=100                # Default: 100
+      # - KEY_ROTATION_BATCH_SLEEP_MS=100            # Default: 100
     volumes:
-      # Mount the data directory for SQLite database
+      # Mount the data directory for SQLite database and encryption keys
       - ./data:/app/data
       # Mount the code directory for function handlers
       - ./code:/app/code
