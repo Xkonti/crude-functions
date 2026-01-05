@@ -18,6 +18,8 @@ jobs:
           deno-version: v2.x
 
       - name: Run tests
+        env:
+          SECRETS_ENCRYPTION_KEY: dGVzdC1rZXktZm9yLWNpLXBpcGVsaW5lLTMyYnl0ZXM=
         run: deno task test
 
   build:
