@@ -47,9 +47,23 @@ export class KeyStorageService {
 
   /**
    * Save keys to the JSON file.
+   * Creates the parent directory if it doesn't exist.
    * @param keys - The key file contents to save.
    */
   async saveKeys(keys: EncryptionKeyFile): Promise<void> {
+    // Ensure parent directory exists
+    const parentDir = this.keyFilePath.substring(0, this.keyFilePath.lastIndexOf("/"));
+    if (parentDir) {
+      try {
+        await Deno.mkdir(parentDir, { recursive: true });
+      } catch (error) {
+        // Ignore if directory already exists
+        if (!(error instanceof Deno.errors.AlreadyExists)) {
+          throw error;
+        }
+      }
+    }
+
     const content = JSON.stringify(keys, null, 2);
     await Deno.writeTextFile(this.keyFilePath, content);
     logger.debug("[KeyStorage] Keys saved to file");
