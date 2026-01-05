@@ -149,27 +149,32 @@ export class KeyRotationService {
    * Determines if rotation is needed and performs it.
    */
   private async checkAndRotate(): Promise<void> {
-    // 1. Check in-memory lock
+    // 1. Check if stop was requested
+    if (this.stopRequested) {
+      return;
+    }
+
+    // 2. Check in-memory lock
     if (this.isRotating) {
       logger.debug("[KeyRotation] Rotation already in progress, skipping");
       return;
     }
 
-    // 2. Load current keys
+    // 3. Load current keys
     const keys = await this.keyStorage.loadKeys();
     if (!keys) {
       logger.error("[KeyRotation] No keys file found");
       return;
     }
 
-    // 3. Check if previous rotation incomplete (2 keys exist)
+    // 4. Check if previous rotation incomplete (2 keys exist)
     if (this.keyStorage.isRotationInProgress(keys)) {
       logger.info("[KeyRotation] Resuming incomplete rotation");
       await this.performRotation(keys);
       return;
     }
 
-    // 4. Check if time for new rotation
+    // 5. Check if time for new rotation
     const lastRotation = new Date(keys.last_rotation_finished_at);
     const nextRotation = new Date(
       lastRotation.getTime() +
@@ -183,7 +188,12 @@ export class KeyRotationService {
       return;
     }
 
-    // 5. Start new rotation
+    // 6. Final check before starting rotation (in case stop was called during checks)
+    if (this.stopRequested) {
+      return;
+    }
+
+    // 7. Start new rotation
     logger.info("[KeyRotation] Starting new key rotation");
     await this.startNewRotation(keys);
   }

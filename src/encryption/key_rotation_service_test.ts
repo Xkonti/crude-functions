@@ -355,7 +355,7 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
       db: ctx.db,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
-      config: { ...ctx.config, batchSize: 10 }, // 10 per batch = 3 batches
+      config: { ...ctx.config, batchSize: 10, rotationIntervalDays: 1 }, // 10 per batch = 3 batches
     });
 
     service.start();
