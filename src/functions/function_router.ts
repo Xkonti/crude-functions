@@ -17,7 +17,7 @@ import {
 } from "./errors.ts";
 import { runInRequestContext } from "../logs/request_context.ts";
 import { runInEnvContext, createEnvContext } from "../env/env_context.ts";
-import { originalConsole } from "../logs/console_interceptor.ts";
+import { originalConsole } from "../logs/stream_interceptor.ts";
 
 export interface FunctionRouterOptions {
   routesService: RoutesService;

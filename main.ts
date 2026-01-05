@@ -21,7 +21,7 @@ import { FileService } from "./src/files/file_service.ts";
 import { createFileRoutes } from "./src/files/file_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
-import { ConsoleInterceptor } from "./src/logs/console_interceptor.ts";
+import { StreamInterceptor } from "./src/logs/stream_interceptor.ts";
 import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
 import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_service.ts";
 import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
@@ -155,11 +155,12 @@ const auth = createAuth({
   hasUsers,
 });
 
-// Initialize console log capture
+// Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
+// Captures both console.* methods AND direct process.stdout/stderr writes
 const consoleLogService = new ConsoleLogService({ db });
-const consoleInterceptor = new ConsoleInterceptor({ logService: consoleLogService });
-consoleInterceptor.install();
+const streamInterceptor = new StreamInterceptor({ logService: consoleLogService });
+streamInterceptor.install();
 
 // Initialize execution metrics service
 const executionMetricsService = new ExecutionMetricsService({ db });
