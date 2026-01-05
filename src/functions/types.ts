@@ -34,6 +34,40 @@ export interface FunctionContext {
   requestedAt: Date;
   /** Unique request ID for tracing */
   requestId: string;
+
+  /**
+   * Get a secret value by name with hierarchical resolution
+   * @param name - Secret name
+   * @param scope - Optional explicit scope ('global' | 'function' | 'group' | 'key')
+   * @returns Promise resolving to secret value or undefined if not found
+   */
+  getSecret(
+    name: string,
+    scope?: "global" | "function" | "group" | "key"
+  ): Promise<string | undefined>;
+
+  /**
+   * Get complete secret information across all scopes
+   * @param name - Secret name
+   * @returns Promise resolving to object with values from all scopes, or undefined if not found
+   */
+  getCompleteSecret(
+    name: string
+  ): Promise<
+    | {
+        global?: string;
+        function?: string;
+        group?: { value: string; groupId: number; groupName: string };
+        key?: {
+          value: string;
+          groupId: number;
+          groupName: string;
+          keyId: number;
+          keyValue: string;
+        };
+      }
+    | undefined
+  >;
 }
 
 /**

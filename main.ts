@@ -1,5 +1,19 @@
 import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
+
+// Install environment isolation IMMEDIATELY after dotenv loads.
+// This must happen before any handlers load to ensure they see the proxy.
+// System code (services, startup) runs outside handler context and sees real env.
+import { EnvIsolator } from "./src/env/env_isolator.ts";
+const envIsolator = new EnvIsolator();
+envIsolator.install();
+
+// Install process isolation to prevent handlers from exiting/changing working directory.
+// This must happen before any handlers load to ensure they see the intercepted methods.
+import { ProcessIsolator } from "./src/process/process_isolator.ts";
+const processIsolator = new ProcessIsolator();
+processIsolator.install();
+
 import { DatabaseService } from "./src/database/database_service.ts";
 import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
@@ -13,12 +27,17 @@ import { FileService } from "./src/files/file_service.ts";
 import { createFileRoutes } from "./src/files/file_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
-import { ConsoleInterceptor } from "./src/logs/console_interceptor.ts";
+import { StreamInterceptor } from "./src/logs/stream_interceptor.ts";
 import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
 import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_service.ts";
 import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
 import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
 import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
+import { KeyStorageService } from "./src/encryption/key_storage_service.ts";
+import { VersionedEncryptionService } from "./src/encryption/versioned_encryption_service.ts";
+import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
+import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
+import { SecretsService } from "./src/secrets/secrets_service.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -54,6 +73,27 @@ function parseEnvInt(
 // AbortController for graceful shutdown - must be module-scoped
 let abortController: AbortController | null = null;
 
+// ============================================================================
+// Encryption Key Initialization
+// ============================================================================
+
+// Initialize key storage and load/create encryption keys
+// Keys are stored in ./data/encryption-keys.json (auto-generated on first run)
+const keyStorageService = new KeyStorageService({
+  keyFilePath: "./data/encryption-keys.json",
+});
+
+const encryptionKeys = await keyStorageService.ensureInitialized();
+console.log(`✓ Encryption keys loaded (version ${encryptionKeys.current_version})`);
+
+// Initialize versioned encryption service
+const encryptionService = new VersionedEncryptionService({
+  currentKey: encryptionKeys.current_key,
+  currentVersion: encryptionKeys.current_version,
+  phasedOutKey: encryptionKeys.phased_out_key ?? undefined,
+  phasedOutVersion: encryptionKeys.phased_out_version ?? undefined,
+});
+
 const app = new Hono();
 
 // Initialize database
@@ -83,18 +123,20 @@ const hasUsers = userExists !== null;
 
 // Initialize Better Auth
 // Sign-up is only enabled during first-run setup (when no users exist)
+// Auth secret is stored in the encryption keys file (auto-generated on first run)
 const auth = createAuth({
   databasePath: "./data/database.db",
   baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || "http://localhost:8000",
-  secret: Deno.env.get("BETTER_AUTH_SECRET") || "dev-secret-change-in-production",
+  secret: encryptionKeys.better_auth_secret,
   hasUsers,
 });
 
-// Initialize console log capture
+// Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
+// Captures both console.* methods AND direct process.stdout/stderr writes
 const consoleLogService = new ConsoleLogService({ db });
-const consoleInterceptor = new ConsoleInterceptor({ logService: consoleLogService });
-consoleInterceptor.install();
+const streamInterceptor = new StreamInterceptor({ logService: consoleLogService });
+streamInterceptor.install();
 
 // Initialize execution metrics service
 const executionMetricsService = new ExecutionMetricsService({ db });
@@ -121,10 +163,32 @@ const logTrimmingService = new LogTrimmingService({
 });
 logTrimmingService.start();
 
+// Initialize and start key rotation service
+const keyRotationConfig: KeyRotationConfig = {
+  checkIntervalSeconds: parseEnvInt("KEY_ROTATION_CHECK_INTERVAL_SECONDS", 10800, { min: 60 }),
+  rotationIntervalDays: parseEnvInt("KEY_ROTATION_INTERVAL_DAYS", 90, { min: 1 }),
+  batchSize: parseEnvInt("KEY_ROTATION_BATCH_SIZE", 100, { min: 1, max: 1000 }),
+  batchSleepMs: parseEnvInt("KEY_ROTATION_BATCH_SLEEP_MS", 100, { min: 10 }),
+};
+const keyRotationService = new KeyRotationService({
+  db,
+  encryptionService,
+  keyStorage: keyStorageService,
+  config: keyRotationConfig,
+});
+keyRotationService.start();
+
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
   db,
   managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
+  encryptionService,
+});
+
+// Initialize secrets service
+const secretsService = new SecretsService({
+  db,
+  encryptionService,
 });
 
 // Initialize routes service
@@ -138,6 +202,7 @@ const functionRouter = new FunctionRouter({
   apiKeyService,
   consoleLogService,
   executionMetricsService,
+  secretsService,
   codeDirectory: "./code",
 });
 
@@ -178,6 +243,7 @@ app.route("/web", createWebRoutes({
   apiKeyService,
   consoleLogService,
   executionMetricsService,
+  encryptionService,
 }));
 
 // Dynamic function router - catch all /run/* requests
@@ -185,7 +251,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, processIsolator };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
@@ -210,7 +276,11 @@ async function gracefulShutdown(signal: string) {
     await metricsAggregationService.stop();
     console.log("Metrics aggregation service stopped");
 
-    // 5. Close database last
+    // 5. Stop key rotation service (waits for current rotation batch)
+    await keyRotationService.stop();
+    console.log("Key rotation service stopped");
+
+    // 6. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {

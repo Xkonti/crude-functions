@@ -5,17 +5,29 @@ import {
   validateKeyGroup,
   validateKeyValue,
 } from "./api_key_service.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
+
+// Test encryption key (32 bytes base64-encoded)
+// Generated with: openssl rand -base64 32
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_keys (
+  CREATE TABLE api_key_groups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key_group TEXT NOT NULL,
-    value TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(key_group, value);
-  CREATE INDEX idx_api_keys_group ON api_keys(key_group);
+  CREATE TABLE api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    value TEXT NOT NULL,
+    description TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
 `;
 
 async function createTestSetup(managementKeyFromEnv?: string): Promise<{
@@ -28,7 +40,15 @@ async function createTestSetup(managementKeyFromEnv?: string): Promise<{
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
 
-  const service = new ApiKeyService({ db, managementKeyFromEnv });
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+
+  const service = new ApiKeyService({
+    db,
+    managementKeyFromEnv,
+    encryptionService,
+  });
   return { service, db, tempDir };
 }
 
@@ -344,4 +364,247 @@ Deno.test("ApiKeyService returns env key even with no DB keys", async () => {
   } finally {
     await cleanup(db, tempDir);
   }
+});
+
+// =====================
+// Group CRUD tests
+// =====================
+
+Deno.test("ApiKeyService.getGroups returns empty array when no groups", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const groups = await service.getGroups();
+    expect(groups.length).toBe(0);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.createGroup creates a new group", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Email service keys");
+
+    expect(id).toBeGreaterThan(0);
+
+    const groups = await service.getGroups();
+    expect(groups.length).toBe(1);
+    expect(groups[0].name).toBe("email");
+    expect(groups[0].description).toBe("Email service keys");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getGroupByName returns group by name", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.createGroup("email", "Email keys");
+
+    const group = await service.getGroupByName("email");
+    expect(group).not.toBeNull();
+    expect(group!.name).toBe("email");
+    expect(group!.description).toBe("Email keys");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getGroupByName returns null for nonexistent group", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const group = await service.getGroupByName("nonexistent");
+    expect(group).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getGroupById returns group by ID", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Email keys");
+
+    const group = await service.getGroupById(id);
+    expect(group).not.toBeNull();
+    expect(group!.id).toBe(id);
+    expect(group!.name).toBe("email");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.updateGroup updates group description", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Old desc");
+    await service.updateGroup(id, "New desc");
+
+    const group = await service.getGroupById(id);
+    expect(group!.description).toBe("New desc");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.deleteGroup removes group", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id = await service.createGroup("email", "Email keys");
+    await service.deleteGroup(id);
+
+    const group = await service.getGroupById(id);
+    expect(group).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.addKey("email", "key1");
+    await service.addKey("email", "key2");
+
+    const group = await service.getGroupByName("email");
+    await service.deleteGroup(group!.id);
+
+    // Keys should be gone due to cascade
+    expect(await service.hasKey("email", "key1")).toBe(false);
+    expect(await service.hasKey("email", "key2")).toBe(false);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.getOrCreateGroup creates group if not exists", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const id1 = await service.getOrCreateGroup("email");
+    expect(id1).toBeGreaterThan(0);
+
+    // Second call should return same ID
+    const id2 = await service.getOrCreateGroup("email");
+    expect(id2).toBe(id1);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService.addKey creates group if needed", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    // Adding key to nonexistent group should create the group
+    await service.addKey("newgroup", "key1");
+
+    const group = await service.getGroupByName("newgroup");
+    expect(group).not.toBeNull();
+    expect(await service.hasKey("newgroup", "key1")).toBe(true);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+// =====================
+// Encryption tests
+// =====================
+
+Deno.test("ApiKeyService - Encryption at rest", async (t) => {
+  await t.step("stores keys encrypted in database", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("test-group", "my-secret-key", "Test key");
+
+      // Query raw database value
+      const row = await db.queryOne<{ value: string }>(
+        "SELECT value FROM api_keys LIMIT 1"
+      );
+
+      // Should NOT be plaintext
+      expect(row!.value).not.toBe("my-secret-key");
+      // Should be base64 (encrypted format)
+      expect(row!.value).toMatch(/^[A-Za-z0-9+/=]+$/);
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("retrieves keys decrypted", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("test-group", "my-secret-key", "Test key");
+      const keys = await service.getKeys("test-group");
+
+      // Should return plaintext
+      expect(keys).not.toBeNull();
+      expect(keys![0].value).toBe("my-secret-key");
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("validates keys correctly with encryption", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("test-group", "my-secret-key", "Test key");
+
+      // Should validate against plaintext input
+      const valid = await service.hasKey("test-group", "my-secret-key");
+      expect(valid).toBe(true);
+
+      const invalid = await service.hasKey("test-group", "wrong-key");
+      expect(invalid).toBe(false);
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("environment key remains unencrypted", async () => {
+    const { service, db, tempDir } = await createTestSetup("env-provided-key");
+
+    try {
+      // Env key should validate (plaintext comparison)
+      const valid = await service.hasKey("management", "env-provided-key");
+      expect(valid).toBe(true);
+
+      // Should NOT be in database
+      const row = await db.queryOne<{ id: number }>(
+        "SELECT id FROM api_keys WHERE value = ?",
+        ["env-provided-key"]
+      );
+      expect(row).toBeNull();
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
+
+  await t.step("getAll returns decrypted keys", async () => {
+    const { service, db, tempDir } = await createTestSetup();
+
+    try {
+      await service.addKey("group1", "key1", "First key");
+      await service.addKey("group2", "key2", "Second key");
+
+      const allKeys = await service.getAll();
+
+      // Should return decrypted values
+      expect(allKeys.get("group1")![0].value).toBe("key1");
+      expect(allKeys.get("group2")![0].value).toBe("key2");
+    } finally {
+      await cleanup(db, tempDir);
+    }
+  });
 });

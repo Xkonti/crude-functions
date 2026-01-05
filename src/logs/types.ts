@@ -1,6 +1,7 @@
-/** Log levels captured from console methods and execution events */
+/** Log levels captured from console methods, streams, and execution events */
 export type ConsoleLogLevel =
   | "log" | "debug" | "info" | "warn" | "error" | "trace"
+  | "stdout" | "stderr"
   | "exec_start" | "exec_end" | "exec_reject";
 
 /** A captured console log entry */

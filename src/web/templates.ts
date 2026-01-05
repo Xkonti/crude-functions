@@ -11,6 +11,19 @@ export function escapeHtml(str: string): string {
 }
 
 /**
+ * Encodes a string to base64, properly handling UTF-8 characters.
+ * Uses TextEncoder for UTF-8 byte conversion.
+ */
+export function toBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
  * Formats a date for display.
  */
 export function formatDate(date: Date): string {
@@ -79,7 +92,7 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} - Functions Router</title>
+  <title>${escapeHtml(title)} - Crude Functions</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
     .actions { white-space: nowrap; }
@@ -149,12 +162,13 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
 <body>
   <main class="container">
     <nav>
-      <ul><li><strong><a href="/web">Functions Router</a></strong></li></ul>
+      <ul><li><strong><a href="/web">Crude Functions</a></strong></li></ul>
       <ul>
-        <li><a href="/web/code">Code</a></li>
-        <li><a href="/web/functions">Functions</a></li>
-        <li><a href="/web/keys">Keys</a></li>
-        <li><a href="/web/users">Users</a></li>
+        <li><a href="/web/code" title="Code Files">📁</a></li>
+        <li><a href="/web/functions" title="Functions">⚡</a></li>
+        <li><a href="/web/keys" title="API Keys">🔑</a></li>
+        <li><a href="/web/secrets" title="Secrets">🔒</a></li>
+        <li><a href="/web/users" title="Users">👥</a></li>
         ${userDropdown}
       </ul>
     </nav>

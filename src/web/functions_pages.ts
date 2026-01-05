@@ -9,13 +9,18 @@ import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ConsoleLog } from "../logs/types.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import type { ExecutionMetric, MetricType } from "../metrics/types.ts";
+import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
+import type { SecretsService } from "../secrets/secrets_service.ts";
+import type { Secret, SecretPreview } from "../secrets/types.ts";
 import {
   layout,
   escapeHtml,
+  toBase64,
   flashMessages,
   confirmPage,
   buttonLink,
   getLayoutUser,
+  formatDate,
 } from "./templates.ts";
 import { validateId } from "../utils/validation.ts";
 
@@ -45,6 +50,143 @@ function renderMethodBadges(methods: string[]): string {
   return methods
     .map((m) => `<span class="method-badge">${escapeHtml(m)}</span>`)
     .join(" ");
+}
+
+/**
+ * Renders the secrets preview HTML fragment.
+ * Groups individual API key secrets with collapsible expansion.
+ */
+function renderSecretsPreview(previews: SecretPreview[]): string {
+  if (previews.length === 0) {
+    return `
+      <article style="margin-top: 1rem;">
+        <p><em>No secrets available to this function.</em></p>
+        <small>Secrets can be defined at global, function, or API key group scope.</small>
+      </article>
+    `;
+  }
+
+  return `
+    <article style="margin-top: 1rem; background: #f8f9fa; padding: 1rem;">
+      <header><strong>Available Secrets</strong></header>
+      <div style="font-family: monospace; font-size: 0.9em;">
+        ${previews.map((preview, previewIdx) => {
+          // Group key-level sources by group
+          const keySources = preview.sources.filter(s => s.scope === 'key');
+          const keysByGroup = new Map<string, typeof keySources>();
+          for (const keySource of keySources) {
+            const groupKey = keySource.groupName || 'unknown';
+            if (!keysByGroup.has(groupKey)) {
+              keysByGroup.set(groupKey, []);
+            }
+            keysByGroup.get(groupKey)!.push(keySource);
+          }
+
+          return `
+          <div style="margin-bottom: 1rem; padding-bottom: 1rem; border-bottom: 1px solid #dee2e6;">
+            <div style="font-weight: bold; margin-bottom: 0.5rem;">
+              ${escapeHtml(preview.name)}
+            </div>
+            ${preview.sources.filter(s => s.scope !== 'key').map(source => {
+              const scopeLabel = source.scope === 'global'
+                ? 'via global scope'
+                : source.scope === 'function'
+                ? 'via function scope'
+                : `via '${escapeHtml(source.groupName || '')}' API key group`;
+
+              return `
+                <div class="secret-value" style="margin-left: 1rem; margin-bottom: 0.25rem;">
+                  <span style="color: #6c757d;">└─ ${scopeLabel}:</span>
+                  <span class="masked">••••••••</span>
+                  <span class="revealed" style="display:none;">
+                    <code>${escapeHtml(source.value)}</code>
+                  </span>
+                  <button type="button" onclick="toggleSecret(this)"
+                          class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                    👁️
+                  </button>
+                  <button type="button" onclick="copySecret(this, '${escapeHtml(source.value).replace(/'/g, "\\'")}')"
+                          class="secondary" style="padding: 0.25rem 0.5rem;">
+                    📋
+                  </button>
+                </div>
+              `;
+            }).join('')}
+            ${Array.from(keysByGroup.entries()).map(([groupName, keys]) => `
+              <div style="margin-left: 1rem; margin-bottom: 0.25rem;">
+                <span style="color: #6c757d;">└─ via ${keys.length} API key${keys.length !== 1 ? 's' : ''} in '${escapeHtml(groupName)}' group</span>
+                <button type="button" onclick="toggleKeyExpansion('keys-${previewIdx}-${escapeHtml(groupName)}')"
+                        class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                  ▼
+                </button>
+                <div id="keys-${previewIdx}-${escapeHtml(groupName)}" style="display: none; margin-left: 1rem; margin-top: 0.5rem;">
+                  ${keys.map(keySource => `
+                    <div class="secret-value" style="margin-bottom: 0.25rem;">
+                      <span style="color: #6c757d;">• ${escapeHtml(groupName)}/${escapeHtml(keySource.keyValue || '')}:</span>
+                      <span class="masked">••••••••</span>
+                      <span class="revealed" style="display:none;">
+                        <code>${escapeHtml(keySource.value)}</code>
+                      </span>
+                      <button type="button" onclick="toggleSecret(this)"
+                              class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                        👁️
+                      </button>
+                      <button type="button" onclick="copySecret(this, '${escapeHtml(keySource.value).replace(/'/g, "\\'")}')"
+                              class="secondary" style="padding: 0.25rem 0.5rem;">
+                        📋
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+        }).join('')}
+      </div>
+    </article>
+
+    <script>
+    function toggleSecret(btn) {
+      const container = btn.closest('.secret-value');
+      const masked = container.querySelector('.masked');
+      const revealed = container.querySelector('.revealed');
+
+      if (masked.style.display === 'none') {
+        masked.style.display = '';
+        revealed.style.display = 'none';
+        btn.textContent = '👁️';
+      } else {
+        masked.style.display = 'none';
+        revealed.style.display = '';
+        btn.textContent = '🙈';
+      }
+    }
+
+    function copySecret(btn, value) {
+      navigator.clipboard.writeText(value).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = original, 2000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+
+    function toggleKeyExpansion(id) {
+      const container = document.getElementById(id);
+      const btn = event.target;
+      if (container.style.display === 'none') {
+        container.style.display = 'block';
+        btn.textContent = '▲';
+      } else {
+        container.style.display = 'none';
+        btn.textContent = '▼';
+      }
+    }
+    </script>
+  `;
 }
 
 function renderLogLevelBadge(level: string): string {
@@ -400,6 +542,7 @@ function renderLogsPage(
   pagination: LogsPaginationOptions
 ): string {
   const logsTableStyles = `
+    <script src="https://cdn.jsdelivr.net/npm/ansi_up@4.0.4/ansi_up.js"></script>
     <style>
       .logs-table { font-size: 0.85em; }
       .logs-table th, .logs-table td { padding: 0.4em 0.6em; }
@@ -436,6 +579,40 @@ function renderLogsPage(
 
   const logsTableScript = `
     <script>
+      // Initialize ANSI to HTML converter
+      const ansiUp = new AnsiUp();
+      ansiUp.use_classes = false;
+
+      // Decode base64 with proper UTF-8 handling
+      function decodeBase64Utf8(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return new TextDecoder().decode(bytes);
+      }
+
+      // Convert all log messages on page load
+      document.addEventListener('DOMContentLoaded', function() {
+        // Convert table cell messages
+        document.querySelectorAll('.log-message[data-raw]').forEach(function(el) {
+          const raw = el.getAttribute('data-raw');
+          if (raw) {
+            const decoded = decodeBase64Utf8(raw);
+            el.innerHTML = ansiUp.ansi_to_html(decoded);
+          }
+        });
+        // Convert expanded detail messages
+        document.querySelectorAll('.log-detail-content[data-raw]').forEach(function(el) {
+          const raw = el.getAttribute('data-raw');
+          if (raw) {
+            const decoded = decodeBase64Utf8(raw);
+            el.innerHTML = ansiUp.ansi_to_html(decoded);
+          }
+        });
+      });
+
       function toggleLogDetail(rowId) {
         const detail = document.getElementById('detail-' + rowId);
         if (detail) {
@@ -512,15 +689,20 @@ function renderLogsPage(
                   ? `${log.message}\n\nArgs: ${log.args}`
                   : log.message;
                 const requestIdShort = log.requestId.slice(-5);
+                // Truncate for table cell display (before encoding)
+                const truncatedMessage = log.message.substring(0, 120) + (log.message.length > 120 ? "..." : "");
+                // Base64 encode messages for safe transmission (handles ANSI codes and special chars)
+                const truncatedBase64 = toBase64(truncatedMessage);
+                const fullBase64 = toBase64(fullMessage);
                 return `
             <tr class="log-row" onclick="toggleLogDetail(${i})">
               <td><code title="${escapeHtml(formatTimestampFull(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
               <td>${renderLogLevelBadge(log.level)}</td>
               <td><code class="request-id-copy" title="Click to copy: ${escapeHtml(log.requestId)}" onclick="copyRequestId(event, '${escapeHtml(log.requestId)}')">${escapeHtml(requestIdShort)}</code></td>
-              <td class="log-message">${escapeHtml(log.message).substring(0, 120)}${log.message.length > 120 ? "..." : ""}</td>
+              <td class="log-message" data-raw="${truncatedBase64}"></td>
             </tr>
             <tr id="detail-${i}" class="log-detail">
-              <td colspan="4"><pre>${escapeHtml(fullMessage)}</pre></td>
+              <td colspan="4"><pre class="log-detail-content" data-raw="${fullBase64}"></pre></td>
             </tr>
           `;
               }
@@ -808,9 +990,11 @@ function renderMetricsPage(
 function renderFunctionForm(
   action: string,
   route: Partial<FunctionRoute> = {},
+  availableGroups: ApiKeyGroup[] = [],
   error?: string
 ): string {
   const isEdit = route.id !== undefined;
+  const selectedKeys = route.keys ?? [];
 
   return `
     <h1>${isEdit ? "Edit" : "Create"} Function</h1>
@@ -850,17 +1034,79 @@ function renderFunctionForm(
         `
         ).join("")}
       </fieldset>
-      <label>
-        Required API Keys
-        <input type="text" name="keys" value="${escapeHtml((route.keys ?? []).join(", "))}"
-               placeholder="api-key, admin-key">
-        <small>Comma-separated list of key names required to access this function (optional)</small>
-      </label>
+      <fieldset>
+        <legend>Required API Key Groups</legend>
+        <small>Select which API key groups are allowed to access this function (optional)</small>
+        ${
+          availableGroups.length === 0
+            ? '<p><em>No API key groups defined. <a href="/web/keys/create-group">Create a group</a> first.</em></p>'
+            : availableGroups.map(
+                (group) => `
+                <label>
+                  <input type="checkbox" name="keys" value="${escapeHtml(group.name)}"
+                         ${selectedKeys.includes(group.name) ? "checked" : ""}>
+                  <strong>${escapeHtml(group.name)}</strong>${group.description ? `: ${escapeHtml(group.description)}` : ""}
+                </label>
+              `
+              ).join("")
+        }
+      </fieldset>
+      ${isEdit ? `
+      <div style="margin: 1rem 0;">
+        <button type="button" id="secrets-preview-btn"
+                onclick="loadSecretsPreview(${route.id})"
+                class="secondary">
+          Show Secrets Preview
+        </button>
+      </div>
+      <div id="secrets-preview-container"></div>
+      ` : `
+      <div style="margin: 1rem 0;">
+        <p style="color: #6c757d; font-size: 0.9em;">
+          <em>Save this function first to preview available secrets.</em>
+        </p>
+      </div>
+      `}
       <div class="grid">
         <button type="submit">${isEdit ? "Save Changes" : "Create Function"}</button>
         <a href="/web/functions" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+
+    ${isEdit ? `
+    <script>
+    async function loadSecretsPreview(functionId) {
+      const btn = document.getElementById('secrets-preview-btn');
+      const container = document.getElementById('secrets-preview-container');
+
+      // Show loading state
+      btn.disabled = true;
+      btn.textContent = 'Loading...';
+      container.innerHTML = '<p><em>Loading secrets preview...</em></p>';
+
+      try {
+        const response = await fetch('/web/functions/preview-secrets/' + functionId);
+
+        if (!response.ok) {
+          throw new Error('Failed to load secrets preview');
+        }
+
+        const html = await response.text();
+        container.innerHTML = html;
+
+        // Update button to "Refresh"
+        btn.textContent = 'Refresh Preview';
+        btn.setAttribute('data-loaded', 'true');
+      } catch (error) {
+        console.error('Error loading secrets preview:', error);
+        container.innerHTML = '<p style="color: #dc3545;"><em>Error loading secrets preview. Please try again.</em></p>';
+        btn.textContent = 'Show Secrets Preview';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    </script>
+    ` : ''}
   `;
 }
 
@@ -874,10 +1120,12 @@ function parseFormData(formData: FormData): {
   const description = formData.get("description")?.toString().trim() || undefined;
   const handler = formData.get("handler")?.toString().trim() ?? "";
   const routePath = formData.get("route")?.toString().trim() ?? "";
-  const keysStr = formData.get("keys")?.toString().trim() ?? "";
 
   // Handle methods - use getAll for multiple checkbox values
   const methods = formData.getAll("methods").map((m) => m.toString());
+
+  // Handle keys - use getAll for multiple checkbox values
+  const keysArray = formData.getAll("keys").map((k) => k.toString());
 
   // Validation
   if (!validateRouteName(name)) {
@@ -896,10 +1144,8 @@ function parseFormData(formData: FormData): {
     errors.push("At least one valid HTTP method must be selected");
   }
 
-  // Parse keys
-  const keys = keysStr
-    ? keysStr.split(",").map((k) => k.trim()).filter((k) => k.length > 0)
-    : undefined;
+  // Keys are optional - only include if any selected
+  const keys = keysArray.length > 0 ? keysArray : undefined;
 
   const route: NewFunctionRoute = {
     name,
@@ -913,10 +1159,222 @@ function parseFormData(formData: FormData): {
   return { route, errors };
 }
 
+/**
+ * Renders the secrets table with show/hide and copy functionality
+ */
+function renderSecretsTable(secrets: Secret[], functionId: number): string {
+  return `
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Value</th>
+          <th>Comment</th>
+          <th>Created</th>
+          <th>Modified</th>
+          <th class="actions">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${secrets
+          .map(
+            (secret) => `
+          <tr>
+            <td><code>${escapeHtml(secret.name)}</code></td>
+            <td class="secret-value">
+              <span class="masked">••••••••</span>
+              <span class="revealed" style="display:none;">
+                <code>${escapeHtml(secret.value)}</code>
+              </span>
+              <button type="button" onclick="toggleSecret(this)"
+                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                👁️
+              </button>
+              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                      class="secondary" style="padding: 0.25rem 0.5rem;">
+                📋
+              </button>
+            </td>
+            <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
+            <td>${formatDate(new Date(secret.createdAt))}</td>
+            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td class="actions">
+              <a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              <a href="/web/functions/secrets/${functionId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+            </td>
+          </tr>
+        `
+          )
+          .join("")}
+      </tbody>
+    </table>
+
+    <script>
+    function toggleSecret(btn) {
+      const td = btn.closest('td');
+      const masked = td.querySelector('.masked');
+      const revealed = td.querySelector('.revealed');
+
+      if (masked.style.display === 'none') {
+        masked.style.display = '';
+        revealed.style.display = 'none';
+        btn.textContent = '👁️';
+      } else {
+        masked.style.display = 'none';
+        revealed.style.display = '';
+        btn.textContent = '🙈';
+      }
+    }
+
+    function copySecret(btn, value) {
+      navigator.clipboard.writeText(value).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = original, 2000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+    </script>
+  `;
+}
+
+/**
+ * Renders the create secret form
+ */
+function renderFunctionSecretCreateForm(
+  functionId: number,
+  data: { name?: string; value?: string; comment?: string } = {},
+  error?: string
+): string {
+  return `
+    ${error ? flashMessages(undefined, error) : ""}
+    <form method="POST" action="/web/functions/secrets/${functionId}/create">
+      <label>
+        Secret Name *
+        <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
+               required autofocus
+               placeholder="MY_SECRET_KEY" />
+        <small>Letters, numbers, underscores, and dashes only</small>
+      </label>
+      <label>
+        Secret Value *
+        <textarea name="value" required
+                  placeholder="your-secret-value"
+                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
+        <small>Encrypted at rest using AES-256-GCM</small>
+      </label>
+      <label>
+        Comment
+        <input type="text" name="comment" value="${escapeHtml(data.comment ?? "")}"
+               placeholder="Optional description" />
+        <small>Helps identify the purpose of this secret</small>
+      </label>
+      <div class="grid">
+        <button type="submit">Create Secret</button>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  `;
+}
+
+/**
+ * Renders the edit secret form
+ */
+function renderFunctionSecretEditForm(
+  functionId: number,
+  secret: { id: number; name: string; value: string; comment: string | null },
+  error?: string
+): string {
+  return `
+    ${error ? flashMessages(undefined, error) : ""}
+    <form method="POST" action="/web/functions/secrets/${functionId}/edit/${secret.id}">
+      <label>
+        Secret Name
+        <input type="text" value="${escapeHtml(secret.name)}" disabled />
+        <small>Secret names cannot be changed</small>
+      </label>
+      <label>
+        Secret Value *
+        <textarea name="value" required
+                  placeholder="your-secret-value"
+                  rows="4">${escapeHtml(secret.value)}</textarea>
+        <small>Encrypted at rest using AES-256-GCM</small>
+      </label>
+      <label>
+        Comment
+        <input type="text" name="comment" value="${escapeHtml(secret.comment ?? "")}"
+               placeholder="Optional description" />
+        <small>Helps identify the purpose of this secret</small>
+      </label>
+      <div class="grid">
+        <button type="submit">Save Changes</button>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">Cancel</a>
+      </div>
+    </form>
+  `;
+}
+
+/**
+ * Parse and validate secret create form data
+ */
+function parseSecretFormData(formData: FormData): {
+  secretData: { name: string; value: string; comment: string };
+  errors: string[];
+} {
+  const errors: string[] = [];
+
+  const name = formData.get("name")?.toString().trim() ?? "";
+  const value = formData.get("value")?.toString() ?? "";
+  const comment = formData.get("comment")?.toString().trim() ?? "";
+
+  if (!name) {
+    errors.push("Secret name is required");
+  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
+    errors.push(
+      "Secret name can only contain letters, numbers, underscores, and dashes"
+    );
+  }
+
+  if (!value) {
+    errors.push("Secret value is required");
+  }
+
+  return {
+    secretData: { name, value, comment },
+    errors,
+  };
+}
+
+/**
+ * Parse and validate secret edit form data
+ */
+function parseSecretEditFormData(formData: FormData): {
+  editData: { value: string; comment: string };
+  errors: string[];
+} {
+  const errors: string[] = [];
+
+  const value = formData.get("value")?.toString() ?? "";
+  const comment = formData.get("comment")?.toString().trim() ?? "";
+
+  if (!value) {
+    errors.push("Secret value is required");
+  }
+
+  return {
+    editData: { value, comment },
+    errors,
+  };
+}
+
 export function createFunctionsPages(
   routesService: RoutesService,
   consoleLogService: ConsoleLogService,
-  executionMetricsService: ExecutionMetricsService
+  executionMetricsService: ExecutionMetricsService,
+  apiKeyService: ApiKeyService,
+  secretsService: SecretsService
 ): Hono {
   const routes = new Hono();
 
@@ -958,10 +1416,11 @@ export function createFunctionsPages(
                 <td>${fn.keys ? escapeHtml(fn.keys.join(", ")) : "<em>none</em>"}</td>
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
-                  <a href="/web/functions/logs/${fn.id}">Logs</a>
-                  <a href="/web/functions/metrics/${fn.id}">Metrics</a>
-                  <a href="/web/functions/edit/${fn.id}">Edit</a>
-                  <a href="/web/functions/delete/${fn.id}">Delete</a>
+                  <a href="/web/functions/logs/${fn.id}" title="Logs" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📝</a>
+                  <a href="/web/functions/metrics/${fn.id}" title="Metrics" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📊</a>
+                  <a href="/web/functions/secrets/${fn.id}" title="Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a>
+                  <a href="/web/functions/edit/${fn.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+                  <a href="/web/functions/delete/${fn.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                 </td>
               </tr>
             `
@@ -976,9 +1435,10 @@ export function createFunctionsPages(
   });
 
   // Create form
-  routes.get("/create", (c) => {
+  routes.get("/create", async (c) => {
     const error = c.req.query("error");
-    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, error), getLayoutUser(c)));
+    const groups = await apiKeyService.getGroups();
+    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error), getLayoutUser(c)));
   });
 
   // Handle create
@@ -991,10 +1451,11 @@ export function createFunctionsPages(
     }
 
     const { route, errors } = parseFormData(formData);
+    const groups = await apiKeyService.getGroups();
 
     if (errors.length > 0) {
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, errors.join(". ")), getLayoutUser(c)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". ")), getLayoutUser(c)),
         400
       );
     }
@@ -1005,7 +1466,7 @@ export function createFunctionsPages(
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create function";
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, message), getLayoutUser(c)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message), getLayoutUser(c)),
         400
       );
     }
@@ -1025,10 +1486,11 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
+    const groups = await apiKeyService.getGroups();
     return c.html(
       layout(
         `Edit: ${route.name}`,
-        renderFunctionForm(`/web/functions/edit/${id}`, route, error),
+        renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error),
         getLayoutUser(c)
       )
     );
@@ -1058,6 +1520,7 @@ export function createFunctionsPages(
     }
 
     const { route, errors } = parseFormData(formData);
+    const groups = await apiKeyService.getGroups();
 
     if (errors.length > 0) {
       // Need to include id for the form template to detect edit mode
@@ -1065,7 +1528,7 @@ export function createFunctionsPages(
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, errors.join(". ")),
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, errors.join(". ")),
           getLayoutUser(c)
         ),
         400
@@ -1082,12 +1545,34 @@ export function createFunctionsPages(
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, message),
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, message),
           getLayoutUser(c)
         ),
         400
       );
     }
+  });
+
+  // Preview secrets for a function (returns HTML fragment)
+  routes.get("/preview-secrets/:id", async (c) => {
+    const id = validateId(c.req.param("id"));
+
+    if (id === null) {
+      return c.text("Invalid function ID", 400);
+    }
+
+    // Get the function route to determine accepted groups
+    const route = await routesService.getById(id);
+    if (!route) {
+      return c.text("Function not found", 404);
+    }
+
+    // Get secrets preview
+    const acceptedGroups = route.keys || [];
+    const previews = await secretsService.getSecretsPreviewForFunction(id, acceptedGroups);
+
+    // Return HTML fragment (not full page layout)
+    return c.html(renderSecretsPreview(previews));
   });
 
   // Delete confirmation
@@ -1220,6 +1705,407 @@ export function createFunctionsPages(
     );
 
     return c.html(layout(`Metrics: ${route.name}`, content, getLayoutUser(c)));
+  });
+
+  // ============== Function Secrets Management ==============
+
+  // GET /secrets/:id - List secrets for function
+  routes.get("/secrets/:id", async (c) => {
+    const idParam = c.req.param("id");
+    const functionId = parseInt(idParam);
+
+    if (isNaN(functionId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid function ID")
+      );
+    }
+
+    // Verify function exists
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    const success = c.req.query("success");
+    const error = c.req.query("error");
+
+    // Load secrets for this function
+    const secrets = await secretsService.getFunctionSecrets(functionId);
+
+    const content = `
+      <h1>Secrets for ${escapeHtml(route.name)}</h1>
+      <p>
+        <a href="/web/functions" role="button" class="secondary">
+          ← Back to Functions
+        </a>
+      </p>
+      ${flashMessages(success, error)}
+      <p>
+        ${buttonLink(
+          `/web/functions/secrets/${functionId}/create`,
+          "Create New Secret"
+        )}
+      </p>
+      ${
+        secrets.length === 0
+          ? "<p>No secrets configured for this function. Create your first secret to get started.</p>"
+          : renderSecretsTable(secrets, functionId)
+      }
+    `;
+
+    return c.html(
+      layout(`Secrets: ${route.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // GET /secrets/:id/create - Create secret form
+  routes.get("/secrets/:id/create", async (c) => {
+    const idParam = c.req.param("id");
+    const functionId = parseInt(idParam);
+
+    if (isNaN(functionId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid function ID")
+      );
+    }
+
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    const error = c.req.query("error");
+
+    const content = `
+      <h1>Create Secret for ${escapeHtml(route.name)}</h1>
+      <p>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">
+          ← Back to Secrets
+        </a>
+      </p>
+      ${renderFunctionSecretCreateForm(functionId, {}, error)}
+    `;
+
+    return c.html(
+      layout(`Create Secret: ${route.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // POST /secrets/:id/create - Handle secret creation
+  routes.post("/secrets/:id/create", async (c) => {
+    const idParam = c.req.param("id");
+    const functionId = parseInt(idParam);
+
+    if (isNaN(functionId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid function ID")
+      );
+    }
+
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      return c.redirect(
+        `/web/functions/secrets/${functionId}/create?error=` +
+          encodeURIComponent("Invalid form data")
+      );
+    }
+
+    const { secretData, errors } = parseSecretFormData(formData);
+
+    if (errors.length > 0) {
+      const content = `
+        <h1>Create Secret for ${escapeHtml(route.name)}</h1>
+        <p>
+          <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderFunctionSecretCreateForm(functionId, secretData, errors.join(". "))}
+      `;
+      return c.html(
+        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+
+    try {
+      await secretsService.createFunctionSecret(
+        functionId,
+        secretData.name,
+        secretData.value,
+        secretData.comment || undefined
+      );
+
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?success=` +
+          encodeURIComponent(`Secret created: ${secretData.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to create secret";
+      const content = `
+        <h1>Create Secret for ${escapeHtml(route.name)}</h1>
+        <p>
+          <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderFunctionSecretCreateForm(functionId, secretData, message)}
+      `;
+      return c.html(
+        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+  });
+
+  // GET /secrets/:id/edit/:secretId - Edit secret form
+  routes.get("/secrets/:id/edit/:secretId", async (c) => {
+    const idParam = c.req.param("id");
+    const secretIdParam = c.req.param("secretId");
+    const functionId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(functionId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    const secret = await secretsService.getFunctionSecretById(
+      functionId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    const error = c.req.query("error");
+
+    const content = `
+      <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+      <p>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">
+          ← Back to Secrets
+        </a>
+      </p>
+      ${renderFunctionSecretEditForm(functionId, secret, error)}
+    `;
+
+    return c.html(
+      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+    );
+  });
+
+  // POST /secrets/:id/edit/:secretId - Handle secret update
+  routes.post("/secrets/:id/edit/:secretId", async (c) => {
+    const idParam = c.req.param("id");
+    const secretIdParam = c.req.param("secretId");
+    const functionId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(functionId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    const secret = await secretsService.getFunctionSecretById(
+      functionId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      return c.redirect(
+        `/web/functions/secrets/${functionId}/edit/${secretId}?error=` +
+          encodeURIComponent("Invalid form data")
+      );
+    }
+
+    const { editData, errors } = parseSecretEditFormData(formData);
+
+    if (errors.length > 0) {
+      const content = `
+        <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+        <p>
+          <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderFunctionSecretEditForm(
+          functionId,
+          { ...secret, ...editData },
+          errors.join(". ")
+        )}
+      `;
+      return c.html(
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+
+    try {
+      await secretsService.updateFunctionSecret(
+        functionId,
+        secretId,
+        editData.value,
+        editData.comment || undefined
+      );
+
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?success=` +
+          encodeURIComponent(`Secret updated: ${secret.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to update secret";
+      const content = `
+        <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
+        <p>
+          <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">
+            ← Back to Secrets
+          </a>
+        </p>
+        ${renderFunctionSecretEditForm(
+          functionId,
+          { ...secret, ...editData },
+          message
+        )}
+      `;
+      return c.html(
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        400
+      );
+    }
+  });
+
+  // GET /secrets/:id/delete/:secretId - Delete confirmation
+  routes.get("/secrets/:id/delete/:secretId", async (c) => {
+    const idParam = c.req.param("id");
+    const secretIdParam = c.req.param("secretId");
+    const functionId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(functionId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    const secret = await secretsService.getFunctionSecretById(
+      functionId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    return c.html(
+      confirmPage(
+        "Delete Secret",
+        `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>" from function "${escapeHtml(route.name)}"? This action cannot be undone.`,
+        `/web/functions/secrets/${functionId}/delete/${secretId}`,
+        `/web/functions/secrets/${functionId}`,
+        getLayoutUser(c)
+      )
+    );
+  });
+
+  // POST /secrets/:id/delete/:secretId - Handle deletion
+  routes.post("/secrets/:id/delete/:secretId", async (c) => {
+    const idParam = c.req.param("id");
+    const secretIdParam = c.req.param("secretId");
+    const functionId = parseInt(idParam);
+    const secretId = parseInt(secretIdParam);
+
+    if (isNaN(functionId) || isNaN(secretId)) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Invalid ID")
+      );
+    }
+
+    const route = await routesService.getById(functionId);
+    if (!route) {
+      return c.redirect(
+        "/web/functions?error=" + encodeURIComponent("Function not found")
+      );
+    }
+
+    const secret = await secretsService.getFunctionSecretById(
+      functionId,
+      secretId
+    );
+    if (!secret) {
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?error=` +
+          encodeURIComponent("Secret not found")
+      );
+    }
+
+    try {
+      await secretsService.deleteFunctionSecret(functionId, secretId);
+
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?success=` +
+          encodeURIComponent(`Secret deleted: ${secret.name}`)
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Failed to delete secret";
+      return c.redirect(
+        `/web/functions/secrets/${functionId}?error=` +
+          encodeURIComponent(message)
+      );
+    }
   });
 
   return routes;

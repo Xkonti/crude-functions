@@ -9,6 +9,10 @@ export interface ApiKeyValidationResult {
   valid: boolean;
   /** Which key group matched (e.g., "api-key", "admin") */
   keyGroup?: string;
+  /** The API key group ID (database ID) */
+  keyGroupId?: number;
+  /** The API key ID (database ID, -1 for env management key) */
+  keyId?: number;
   /** Where the API key was found (e.g., "X-API-Key header", "Authorization Bearer") */
   source?: string;
   /** Error message if validation failed */
@@ -67,12 +71,14 @@ export class ApiKeyValidator {
 
     // Check each allowed key group
     for (const keyGroup of allowedKeyGroups) {
-      const hasKey = await this.apiKeyService.hasKey(keyGroup, apiKey);
-      if (hasKey) {
+      const keyInfo = await this.apiKeyService.getKeyByValue(keyGroup, apiKey);
+      if (keyInfo) {
         logger.debug(`API key validated successfully (key group: ${keyGroup}, source: ${source})`);
         return {
           valid: true,
           keyGroup,
+          keyGroupId: keyInfo.groupId,
+          keyId: keyInfo.keyId,
           source: source!,
         };
       }
