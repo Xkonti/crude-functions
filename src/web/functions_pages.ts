@@ -15,6 +15,7 @@ import type { Secret, SecretPreview } from "../secrets/types.ts";
 import {
   layout,
   escapeHtml,
+  toBase64,
   flashMessages,
   confirmPage,
   buttonLink,
@@ -541,6 +542,7 @@ function renderLogsPage(
   pagination: LogsPaginationOptions
 ): string {
   const logsTableStyles = `
+    <script src="https://cdn.jsdelivr.net/npm/ansi_up@4.0.4/ansi_up.js"></script>
     <style>
       .logs-table { font-size: 0.85em; }
       .logs-table th, .logs-table td { padding: 0.4em 0.6em; }
@@ -577,6 +579,40 @@ function renderLogsPage(
 
   const logsTableScript = `
     <script>
+      // Initialize ANSI to HTML converter
+      const ansiUp = new AnsiUp();
+      ansiUp.use_classes = false;
+
+      // Decode base64 with proper UTF-8 handling
+      function decodeBase64Utf8(base64) {
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return new TextDecoder().decode(bytes);
+      }
+
+      // Convert all log messages on page load
+      document.addEventListener('DOMContentLoaded', function() {
+        // Convert table cell messages
+        document.querySelectorAll('.log-message[data-raw]').forEach(function(el) {
+          const raw = el.getAttribute('data-raw');
+          if (raw) {
+            const decoded = decodeBase64Utf8(raw);
+            el.innerHTML = ansiUp.ansi_to_html(decoded);
+          }
+        });
+        // Convert expanded detail messages
+        document.querySelectorAll('.log-detail-content[data-raw]').forEach(function(el) {
+          const raw = el.getAttribute('data-raw');
+          if (raw) {
+            const decoded = decodeBase64Utf8(raw);
+            el.innerHTML = ansiUp.ansi_to_html(decoded);
+          }
+        });
+      });
+
       function toggleLogDetail(rowId) {
         const detail = document.getElementById('detail-' + rowId);
         if (detail) {
@@ -653,15 +689,20 @@ function renderLogsPage(
                   ? `${log.message}\n\nArgs: ${log.args}`
                   : log.message;
                 const requestIdShort = log.requestId.slice(-5);
+                // Truncate for table cell display (before encoding)
+                const truncatedMessage = log.message.substring(0, 120) + (log.message.length > 120 ? "..." : "");
+                // Base64 encode messages for safe transmission (handles ANSI codes and special chars)
+                const truncatedBase64 = toBase64(truncatedMessage);
+                const fullBase64 = toBase64(fullMessage);
                 return `
             <tr class="log-row" onclick="toggleLogDetail(${i})">
               <td><code title="${escapeHtml(formatTimestampFull(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
               <td>${renderLogLevelBadge(log.level)}</td>
               <td><code class="request-id-copy" title="Click to copy: ${escapeHtml(log.requestId)}" onclick="copyRequestId(event, '${escapeHtml(log.requestId)}')">${escapeHtml(requestIdShort)}</code></td>
-              <td class="log-message">${escapeHtml(log.message).substring(0, 120)}${log.message.length > 120 ? "..." : ""}</td>
+              <td class="log-message" data-raw="${truncatedBase64}"></td>
             </tr>
             <tr id="detail-${i}" class="log-detail">
-              <td colspan="4"><pre>${escapeHtml(fullMessage)}</pre></td>
+              <td colspan="4"><pre class="log-detail-content" data-raw="${fullBase64}"></pre></td>
             </tr>
           `;
               }

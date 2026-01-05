@@ -11,6 +11,19 @@ export function escapeHtml(str: string): string {
 }
 
 /**
+ * Encodes a string to base64, properly handling UTF-8 characters.
+ * Uses TextEncoder for UTF-8 byte conversion.
+ */
+export function toBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+/**
  * Formats a date for display.
  */
 export function formatDate(date: Date): string {
