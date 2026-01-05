@@ -8,6 +8,12 @@ import { EnvIsolator } from "./src/env/env_isolator.ts";
 const envIsolator = new EnvIsolator();
 envIsolator.install();
 
+// Install process isolation to prevent handlers from exiting/changing working directory.
+// This must happen before any handlers load to ensure they see the intercepted methods.
+import { ProcessIsolator } from "./src/process/process_isolator.ts";
+const processIsolator = new ProcessIsolator();
+processIsolator.install();
+
 import { DatabaseService } from "./src/database/database_service.ts";
 import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
@@ -260,7 +266,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, secretsService };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, secretsService, processIsolator };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
