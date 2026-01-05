@@ -122,11 +122,13 @@ const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 
 const hasUsers = userExists !== null;
 
 // Initialize Better Auth
+// baseUrl is optional - when not set, Better Auth auto-detects from request headers
+// trustedOrigins dynamically resolves from baseUrl or request origin
 // Sign-up is only enabled during first-run setup (when no users exist)
 // Auth secret is stored in the encryption keys file (auto-generated on first run)
 const auth = createAuth({
   databasePath: "./data/database.db",
-  baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || "http://localhost:8000",
+  baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || undefined,
   secret: encryptionKeys.better_auth_secret,
   hasUsers,
 });

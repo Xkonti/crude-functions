@@ -51,7 +51,7 @@ The server starts on port 8000 by default. The database is automatically created
 | `METRICS_RETENTION_DAYS` | Days to retain aggregated daily metrics | `90` |
 | `LOG_TRIMMING_INTERVAL_SECONDS` | How often to trim old logs (seconds) | `300` |
 | `LOG_MAX_PER_ROUTE` | Maximum logs to keep per function/route | `2000` |
-| `BETTER_AUTH_BASE_URL` | Base URL for redirects and callbacks | `http://localhost:8000` |
+| `BETTER_AUTH_BASE_URL` | Base URL for redirects and callbacks (auto-detected if not set) | Auto-detected |
 | `KEY_ROTATION_CHECK_INTERVAL_SECONDS` | How often to check if key rotation needed (seconds) | `10800` |
 | `KEY_ROTATION_INTERVAL_DAYS` | Days between automatic key rotations | `90` |
 | `KEY_ROTATION_BATCH_SIZE` | Records to re-encrypt per batch during rotation | `100` |
@@ -265,9 +265,10 @@ services:
       - LOG_TRIMMING_INTERVAL_SECONDS=300        # Default: 300 (5 minutes)
       - LOG_MAX_PER_ROUTE=2000                   # Default: 2000
 
-      # Better Auth configuration
-      # IMPORTANT: Update this to match your deployment URL
-      - BETTER_AUTH_BASE_URL=http://localhost:8000
+      # Better Auth configuration (optional)
+      # Auto-detects from request headers if not set
+      # Set explicitly when behind reverse proxy: https://your-domain.com
+      # BETTER_AUTH_BASE_URL=http://localhost:8000
 
       # Encryption Key Rotation (optional - defaults shown below)
       # Encryption keys are auto-generated on first startup
@@ -290,7 +291,7 @@ mkdir -p data code
 docker compose up -d
 ```
 
-**Important:** Update `BETTER_AUTH_BASE_URL` to match your deployment URL (e.g., `https://functions.yourdomain.com`).
+**Optional:** Set `BETTER_AUTH_BASE_URL` if deploying behind a reverse proxy with complex routing. Otherwise, it will auto-detect from incoming requests.
 
 On first run:
 - Database is created at `./data/database.db`
@@ -303,10 +304,10 @@ On first run:
 docker run -d \
   -p 8000:8000 \
   -e MANAGEMENT_API_KEY=your-secret-key \
-  -e BETTER_AUTH_BASE_URL=http://localhost:8000 \
   -v ./data:/app/data \
   -v ./code:/app/code \
   xkonti/crude-functions:latest
+  # Optional: -e BETTER_AUTH_BASE_URL=https://your-domain.com
 ```
 
 See the Docker Compose section above for all available environment variables.

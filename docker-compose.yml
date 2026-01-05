@@ -19,9 +19,10 @@ services:
       - LOG_TRIMMING_INTERVAL_SECONDS=300        # Default: 300 (5 minutes)
       - LOG_MAX_PER_ROUTE=2000                   # Default: 2000
 
-      # Better Auth configuration
-      # Base URL for the application (used for redirects and callbacks)
-      - BETTER_AUTH_BASE_URL=http://localhost:8000
+      # Better Auth configuration (optional)
+      # Auto-detects from request headers if not set
+      # Set explicitly when behind reverse proxy: https://your-domain.com
+      # BETTER_AUTH_BASE_URL=http://localhost:8000
 
       # Encryption Key Rotation (optional - defaults shown below)
       # Encryption keys are auto-generated on first startup and stored in ./data/encryption-keys.json
