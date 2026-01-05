@@ -1255,7 +1255,6 @@ function renderFunctionSecretCreateForm(
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
                required autofocus
-               pattern="[a-zA-Z0-9_\-]+"
                placeholder="MY_SECRET_KEY" />
         <small>Letters, numbers, underscores, and dashes only</small>
       </label>
