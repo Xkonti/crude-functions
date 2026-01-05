@@ -533,13 +533,24 @@ Deno.test("MetricsAggregationService processes multiple minutes in one run", asy
     await new Promise((resolve) => setTimeout(resolve, 500));
     await setup.aggregationService.stop();
 
-    // Should have 5 minute metrics
-    const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
-    expect(minuteMetrics.length).toBe(5);
-
     // All executions should be deleted
     const executionMetrics = await setup.metricsService.getByRouteId(1, "execution");
     expect(executionMetrics.length).toBe(0);
+
+    // The 5 executions should be aggregated into minute (and possibly hour) records
+    // If the 5 minutes span an hour boundary, some may be further aggregated into hour records
+    const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
+    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+
+    // Calculate total execution count from all aggregated records
+    const minuteCount = minuteMetrics.reduce((sum, m) => sum + m.executionCount, 0);
+    const hourCount = hourMetrics.reduce((sum, m) => sum + m.executionCount, 0);
+
+    // Total should equal our original 5 executions
+    expect(minuteCount + hourCount).toBe(5);
+
+    // Should have at least some aggregated records
+    expect(minuteMetrics.length + hourMetrics.length).toBeGreaterThan(0);
   } finally {
     await cleanup(setup);
   }
