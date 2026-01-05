@@ -615,3 +615,177 @@ Deno.test("MetricsAggregationService stop waits for processing to complete", asy
     await cleanup(setup);
   }
 });
+
+// =====================
+// Pending Aggregation Tests (no executions scenario)
+// =====================
+
+Deno.test("MetricsAggregationService processes pending minutes into hours when no executions", async () => {
+  const setup = await createTestSetup();
+
+  try {
+    // Get the last complete hour (2 hours ago to ensure it's complete)
+    const prevHourStart = getPastHour(2);
+
+    // Create minute records directly (as if executions were already processed)
+    // This simulates the state where execution→minute happened but minute→hour didn't
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "minute",
+      avgTimeMs: 100,
+      maxTimeMs: 100,
+      executionCount: 1,
+      timestamp: new Date(prevHourStart.getTime() + 55 * 60 * 1000), // :55
+    });
+
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "minute",
+      avgTimeMs: 200,
+      maxTimeMs: 200,
+      executionCount: 1,
+      timestamp: new Date(prevHourStart.getTime() + 56 * 60 * 1000), // :56
+    });
+
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "minute",
+      avgTimeMs: 150,
+      maxTimeMs: 150,
+      executionCount: 1,
+      timestamp: new Date(prevHourStart.getTime() + 57 * 60 * 1000), // :57
+    });
+
+    // Verify no executions exist
+    const execsBefore = await setup.metricsService.getByRouteId(1, "execution");
+    expect(execsBefore.length).toBe(0);
+
+    // Run aggregation
+    setup.aggregationService.start();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await setup.aggregationService.stop();
+
+    // Check hour aggregate was created
+    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+    expect(hourMetrics.length).toBe(1);
+    expect(hourMetrics[0].executionCount).toBe(3);
+    expect(hourMetrics[0].maxTimeMs).toBe(200);
+    expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+
+    // Check that minute metrics were deleted (aggregated into hour)
+    const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
+    expect(minuteMetrics.length).toBe(0);
+  } finally {
+    await cleanup(setup);
+  }
+});
+
+Deno.test("MetricsAggregationService processes pending hours into days when no executions", async () => {
+  const setup = await createTestSetup();
+
+  try {
+    // Get the previous complete day
+    const prevDayStart = getPastDay(1);
+
+    // Create hour records directly (as if minute→hour already happened)
+    // This simulates the state where minute→hour happened but hour→day didn't
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "hour",
+      avgTimeMs: 100,
+      maxTimeMs: 150,
+      executionCount: 50,
+      timestamp: new Date(prevDayStart.getTime() + 10 * 60 * 60 * 1000), // 10:00
+    });
+
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "hour",
+      avgTimeMs: 200,
+      maxTimeMs: 300,
+      executionCount: 100,
+      timestamp: new Date(prevDayStart.getTime() + 15 * 60 * 60 * 1000), // 15:00
+    });
+
+    // Verify no executions or minutes exist
+    const execsBefore = await setup.metricsService.getByRouteId(1, "execution");
+    expect(execsBefore.length).toBe(0);
+    const minutesBefore = await setup.metricsService.getByRouteId(1, "minute");
+    expect(minutesBefore.length).toBe(0);
+
+    // Run aggregation
+    setup.aggregationService.start();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await setup.aggregationService.stop();
+
+    // Check day aggregate was created
+    const dayMetrics = await setup.metricsService.getByRouteId(1, "day");
+    expect(dayMetrics.length).toBe(1);
+    expect(dayMetrics[0].executionCount).toBe(150); // 50 + 100
+    expect(dayMetrics[0].maxTimeMs).toBe(300);
+    expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
+
+    // Check that hour metrics were deleted (aggregated into day)
+    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+    expect(hourMetrics.length).toBe(0);
+  } finally {
+    await cleanup(setup);
+  }
+});
+
+Deno.test("MetricsAggregationService processes both pending minutes and hours in one run", async () => {
+  const setup = await createTestSetup();
+
+  try {
+    // Get dates for yesterday and two hours ago
+    const prevDayStart = getPastDay(1);
+    const prevHourStart = getPastHour(2);
+
+    // Create hour records from yesterday (should become day record)
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "hour",
+      avgTimeMs: 100,
+      maxTimeMs: 100,
+      executionCount: 25,
+      timestamp: new Date(prevDayStart.getTime() + 12 * 60 * 60 * 1000), // Yesterday 12:00
+    });
+
+    // Create minute records from 2 hours ago (should become hour record)
+    await setup.metricsService.store({
+      routeId: 1,
+      type: "minute",
+      avgTimeMs: 200,
+      maxTimeMs: 200,
+      executionCount: 5,
+      timestamp: new Date(prevHourStart.getTime() + 30 * 60 * 1000), // 2 hours ago :30
+    });
+
+    // Verify no executions exist
+    const execsBefore = await setup.metricsService.getByRouteId(1, "execution");
+    expect(execsBefore.length).toBe(0);
+
+    // Run aggregation
+    setup.aggregationService.start();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await setup.aggregationService.stop();
+
+    // Check day aggregate was created from yesterday's hour
+    const dayMetrics = await setup.metricsService.getByRouteId(1, "day");
+    expect(dayMetrics.length).toBe(1);
+    expect(dayMetrics[0].executionCount).toBe(25);
+    expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
+
+    // Check hour aggregate was created from today's minutes
+    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+    expect(hourMetrics.length).toBe(1);
+    expect(hourMetrics[0].executionCount).toBe(5);
+    expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+
+    // All minutes should be processed
+    const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
+    expect(minuteMetrics.length).toBe(0);
+  } finally {
+    await cleanup(setup);
+  }
+});

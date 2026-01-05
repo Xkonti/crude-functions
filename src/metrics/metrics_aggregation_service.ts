@@ -114,6 +114,7 @@ export class MetricsAggregationService {
   /**
    * Main aggregation loop - called by timer.
    * Processes minutes one at a time, cascading to hours and days when complete.
+   * Also processes any pending hour and day aggregations independently.
    */
   private async runAggregation(): Promise<void> {
     if (this.isProcessing) {
@@ -132,6 +133,20 @@ export class MetricsAggregationService {
 
       // Process all complete minutes, cascading to hours and days
       await this.processMinutesCascading(now);
+
+      if (this.stopRequested) return;
+
+      // Process any pending hour aggregations (minute → hour)
+      // This handles cases where execution→minute processing has stopped
+      // but there are still completed hours to aggregate
+      await this.processPendingHours(now);
+
+      if (this.stopRequested) return;
+
+      // Process any pending day aggregations (hour → day)
+      // This handles cases where hour aggregation has stopped
+      // but there are still completed days to aggregate
+      await this.processPendingDays(now);
 
     } finally {
       this.isProcessing = false;
@@ -329,6 +344,90 @@ export class MetricsAggregationService {
       start,
       end
     );
+  }
+
+  /**
+   * Process any pending hour aggregations from minute records.
+   * This runs independently of the execution processing loop to catch
+   * cases where there are no new executions but pending minutes exist.
+   */
+  private async processPendingHours(now: Date): Promise<void> {
+    // Find the oldest minute record
+    const oldestMinute = await this.metricsService.getOldestByType("minute");
+    if (!oldestMinute) {
+      return; // No minute records to process
+    }
+
+    // Get the hour this minute belongs to
+    const oldestHour = this.floorToHour(oldestMinute.timestamp);
+    const currentHour = this.floorToHour(now);
+
+    // Only process if the oldest minute is in a completed hour
+    if (oldestHour >= currentHour) {
+      return; // All minutes are in the current (incomplete) hour
+    }
+
+    // Get all routes that have minute records
+    const routeIds = await this.metricsService.getDistinctRouteIdsByType("minute");
+    if (routeIds.length === 0) {
+      return;
+    }
+
+    // Process each completed hour from oldest to current
+    let hourStart = oldestHour;
+    while (hourStart < currentHour) {
+      if (this.stopRequested) return;
+
+      const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000);
+
+      for (const routeId of routeIds) {
+        await this.aggregateHour(routeId, hourStart, hourEnd);
+      }
+
+      hourStart = hourEnd;
+    }
+  }
+
+  /**
+   * Process any pending day aggregations from hour records.
+   * This runs independently of the hour processing loop to catch
+   * cases where there are no new hours but pending hours exist.
+   */
+  private async processPendingDays(now: Date): Promise<void> {
+    // Find the oldest hour record
+    const oldestHour = await this.metricsService.getOldestByType("hour");
+    if (!oldestHour) {
+      return; // No hour records to process
+    }
+
+    // Get the day this hour belongs to
+    const oldestDay = this.floorToDay(oldestHour.timestamp);
+    const currentDay = this.floorToDay(now);
+
+    // Only process if the oldest hour is in a completed day
+    if (oldestDay >= currentDay) {
+      return; // All hours are in the current (incomplete) day
+    }
+
+    // Get all routes that have hour records
+    const routeIds = await this.metricsService.getDistinctRouteIdsByType("hour");
+    if (routeIds.length === 0) {
+      return;
+    }
+
+    // Process each completed day from oldest to current
+    let dayStart = oldestDay;
+    while (dayStart < currentDay) {
+      if (this.stopRequested) return;
+
+      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+
+      for (const routeId of routeIds) {
+        await this.aggregateDay(routeId, dayStart, dayEnd);
+      }
+
+      dayStart = dayEnd;
+    }
   }
 
   /**
