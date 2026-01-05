@@ -19,7 +19,7 @@ function createMockKeyGenerator() {
   return () => {
     const key = keys[index % keys.length];
     index++;
-    return key;
+    return Promise.resolve(key);
   };
 }
 
