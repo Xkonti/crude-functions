@@ -160,9 +160,7 @@ export class StreamInterceptor {
   }
 
   private createConsoleInterceptor(method: InterceptedConsoleMethod): ConsoleMethod {
-    const self = this;
-
-    return function (...args: unknown[]): void {
+    return (...args: unknown[]): void => {
       const context = getCurrentRequestContext();
 
       if (context) {
@@ -172,7 +170,7 @@ export class StreamInterceptor {
         const message = serializeMessage(firstArg);
         const serializedArgs = restArgs.length > 0 ? serializeArgs(restArgs) : undefined;
 
-        self.logService
+        this.logService
           .store({
             requestId: context.requestId,
             routeId: context.routeId,
@@ -198,11 +196,10 @@ export class StreamInterceptor {
     stream: "stdout" | "stderr",
     originalWrite: WriteFunction
   ): WriteFunction {
-    const self = this;
     const defaultLevel: ConsoleLogLevel = stream === "stdout" ? "stdout" : "stderr";
 
     // deno-lint-ignore no-explicit-any
-    return function (...args: any[]): boolean {
+    return (...args: any[]): boolean => {
       const context = getCurrentRequestContext();
       const chunk = args[0] as string | Uint8Array;
 
@@ -211,8 +208,8 @@ export class StreamInterceptor {
         const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
 
         // Use console level if available, otherwise use stream level
-        const level = self.inConsoleCall && self.currentConsoleLevel
-          ? self.currentConsoleLevel
+        const level = this.inConsoleCall && this.currentConsoleLevel
+          ? this.currentConsoleLevel
           : defaultLevel;
 
         // Strip trailing newline for cleaner logs
@@ -220,7 +217,7 @@ export class StreamInterceptor {
 
         // Only store non-empty messages
         if (message.length > 0) {
-          self.logService
+          this.logService
             .store({
               requestId: context.requestId,
               routeId: context.routeId,
@@ -253,10 +250,9 @@ export class StreamInterceptor {
     stream: "stdout" | "stderr",
     originalWriteSync: DenoWriteSync
   ): DenoWriteSync {
-    const self = this;
     const defaultLevel: ConsoleLogLevel = stream === "stdout" ? "stdout" : "stderr";
 
-    return function (p: Uint8Array): number {
+    return (p: Uint8Array): number => {
       const context = getCurrentRequestContext();
 
       if (context) {
@@ -264,8 +260,8 @@ export class StreamInterceptor {
         const text = new TextDecoder().decode(p);
 
         // Use console level if available, otherwise use stream level
-        const level = self.inConsoleCall && self.currentConsoleLevel
-          ? self.currentConsoleLevel
+        const level = this.inConsoleCall && this.currentConsoleLevel
+          ? this.currentConsoleLevel
           : defaultLevel;
 
         // Strip trailing newline for cleaner logs
@@ -273,7 +269,7 @@ export class StreamInterceptor {
 
         // Only store non-empty messages
         if (message.length > 0) {
-          self.logService
+          this.logService
             .store({
               requestId: context.requestId,
               routeId: context.routeId,
@@ -300,10 +296,9 @@ export class StreamInterceptor {
     stream: "stdout" | "stderr",
     originalWrite: DenoWrite
   ): DenoWrite {
-    const self = this;
     const defaultLevel: ConsoleLogLevel = stream === "stdout" ? "stdout" : "stderr";
 
-    return async function (p: Uint8Array): Promise<number> {
+    return (p: Uint8Array): Promise<number> => {
       const context = getCurrentRequestContext();
 
       if (context) {
@@ -311,8 +306,8 @@ export class StreamInterceptor {
         const text = new TextDecoder().decode(p);
 
         // Use console level if available, otherwise use stream level
-        const level = self.inConsoleCall && self.currentConsoleLevel
-          ? self.currentConsoleLevel
+        const level = this.inConsoleCall && this.currentConsoleLevel
+          ? this.currentConsoleLevel
           : defaultLevel;
 
         // Strip trailing newline for cleaner logs
@@ -320,7 +315,7 @@ export class StreamInterceptor {
 
         // Only store non-empty messages
         if (message.length > 0) {
-          self.logService
+          this.logService
             .store({
               requestId: context.requestId,
               routeId: context.routeId,
@@ -335,7 +330,7 @@ export class StreamInterceptor {
         }
 
         // Don't write to actual stream - return the byte count as if written
-        return p.length;
+        return Promise.resolve(p.length);
       } else {
         // Outside request context - pass through to original
         return originalWrite(p);

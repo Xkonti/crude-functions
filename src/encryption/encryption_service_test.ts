@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { EncryptionService } from "./encryption_service.ts";
-import { EncryptionError, DecryptionError, InvalidKeyError } from "./errors.ts";
+import { DecryptionError, InvalidKeyError } from "./errors.ts";
 import { base64ToBytes } from "./utils.ts";
 
 // Valid test key (32 bytes base64-encoded)

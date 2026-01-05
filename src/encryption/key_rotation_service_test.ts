@@ -16,7 +16,7 @@ const TEST_KEY_D = "ZDJkNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZTI=";
 function createMockKeyGenerator() {
   const keys = [TEST_KEY_B, TEST_KEY_C, TEST_KEY_D, TEST_KEY_A];
   let index = 0;
-  return async () => {
+  return () => {
     const key = keys[index % keys.length];
     index++;
     return key;

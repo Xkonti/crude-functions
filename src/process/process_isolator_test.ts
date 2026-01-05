@@ -2,6 +2,7 @@ import { describe, it, beforeEach, afterEach } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { ProcessIsolator, _getOriginalsForTesting } from "./process_isolator.ts";
 import { runInRequestContext } from "../logs/request_context.ts";
+import process from "node:process";
 
 let isolator: ProcessIsolator;
 
