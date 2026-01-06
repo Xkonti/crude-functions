@@ -147,7 +147,7 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
   [SettingNames.API_ACCESS_GROUPS]: {
     name: SettingNames.API_ACCESS_GROUPS,
     label: "API Access Groups",
-    description: "API key groups allowed to access management endpoints",
+    description: "API key groups allowed to access server management API endpoints",
     inputType: "checkboxGroup",
     category: "Security",
   },
