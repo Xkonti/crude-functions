@@ -1,6 +1,7 @@
 import { Hono } from "@hono/hono";
-import { ApiKeyService, validateKeyGroup, validateKeyName, validateKeyValue } from "./api_key_service.ts";
-import { validateId } from "../utils/validation.ts";
+import { ApiKeyService } from "./api_key_service.ts";
+import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
+import { validateId } from "../validation/common.ts";
 
 export function createApiKeyRoutes(service: ApiKeyService): Hono {
   const routes = new Hono();

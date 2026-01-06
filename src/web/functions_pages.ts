@@ -4,7 +4,7 @@ import {
   validateRouteName,
   validateRoutePath,
   validateMethods,
-} from "../routes/routes_service.ts";
+} from "../validation/routes.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ConsoleLog } from "../logs/types.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
@@ -28,7 +28,7 @@ import {
   parseSecretFormData,
   parseSecretEditFormData,
 } from "./templates.ts";
-import { validateId } from "../utils/validation.ts";
+import { validateId } from "../validation/common.ts";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 

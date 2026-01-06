@@ -1,11 +1,11 @@
 import { expect } from "@std/expect";
 import { DatabaseService } from "../database/database_service.ts";
+import { ApiKeyService } from "./api_key_service.ts";
 import {
-  ApiKeyService,
   validateKeyGroup,
   validateKeyName,
   validateKeyValue,
-} from "./api_key_service.ts";
+} from "../validation/keys.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
 import { HashService } from "../encryption/hash_service.ts";
 

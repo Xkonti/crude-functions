@@ -1,6 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
-import { validateKeyGroup, validateKeyName, validateKeyValue } from "../keys/api_key_service.ts";
+import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
 import {

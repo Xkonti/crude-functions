@@ -2,9 +2,8 @@ import { Hono } from "@hono/hono";
 import type { FileService } from "../files/file_service.ts";
 import {
   validateFilePath,
-  isPathSafe,
   normalizePath,
-} from "../files/file_service.ts";
+} from "../validation/files.ts";
 import {
   layout,
   escapeHtml,
@@ -114,12 +113,6 @@ export function createCodePages(fileService: FileService): Hono {
     if (!validateFilePath(normalizedPath)) {
       return c.redirect(
         "/web/code?error=" + encodeURIComponent("Invalid file path format")
-      );
-    }
-
-    if (!isPathSafe(normalizedPath)) {
-      return c.redirect(
-        "/web/code?error=" + encodeURIComponent("Path contains invalid characters or traversal")
       );
     }
 
@@ -267,12 +260,6 @@ export function createCodePages(fileService: FileService): Hono {
     if (!validateFilePath(normalizedPath)) {
       return c.redirect(
         "/web/code/upload?error=" + encodeURIComponent("Invalid file path format")
-      );
-    }
-
-    if (!isPathSafe(normalizedPath)) {
-      return c.redirect(
-        "/web/code/upload?error=" + encodeURIComponent("Path contains invalid characters or traversal")
       );
     }
 

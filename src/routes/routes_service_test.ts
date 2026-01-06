@@ -1,11 +1,13 @@
 import { expect } from "@std/expect";
 import {
-  validateRouteName,
-  validateRoutePath,
-  validateMethods,
   RoutesService,
   type FunctionRoute,
 } from "./routes_service.ts";
+import {
+  validateRouteName,
+  validateRoutePath,
+  validateMethods,
+} from "../validation/routes.ts";
 import { DatabaseService } from "../database/database_service.ts";
 
 // ============== Validation Function Tests ==============

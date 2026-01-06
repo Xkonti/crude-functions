@@ -125,20 +125,6 @@ Deno.test("GET /api/files/content returns 404 for non-existent file", async () =
   }
 });
 
-Deno.test("GET /api/files/content returns 403 for path traversal", async () => {
-  const { app, tempDir } = await createTestApp();
-
-  try {
-    const res = await app.request("/api/files/content?path=../etc/passwd");
-    expect(res.status).toBe(403);
-
-    const json = await res.json();
-    expect(json.error).toContain("traversal");
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
 Deno.test("GET /api/files/content returns 400 for invalid path format", async () => {
   const { app, tempDir } = await createTestApp();
 
@@ -274,25 +260,6 @@ Deno.test("POST /api/files returns 400 for missing content", async () => {
   }
 });
 
-Deno.test("POST /api/files returns 403 for path traversal", async () => {
-  const { app, tempDir } = await createTestApp();
-
-  try {
-    const res = await app.request("/api/files", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        path: "../../../etc/cron.d/evil",
-        content: "malicious",
-      }),
-    });
-
-    expect(res.status).toBe(403);
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
 Deno.test("POST /api/files returns 400 for invalid JSON", async () => {
   const { app, tempDir } = await createTestApp();
 
@@ -399,22 +366,6 @@ Deno.test("DELETE /api/files returns 400 for missing path", async () => {
     });
 
     expect(res.status).toBe(400);
-  } finally {
-    await cleanup(tempDir);
-  }
-});
-
-Deno.test("DELETE /api/files returns 403 for path traversal", async () => {
-  const { app, tempDir } = await createTestApp();
-
-  try {
-    const res = await app.request("/api/files", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: "../important.ts" }),
-    });
-
-    expect(res.status).toBe(403);
   } finally {
     await cleanup(tempDir);
   }

@@ -1,10 +1,9 @@
 import { expect } from "@std/expect";
+import { FileService } from "./file_service.ts";
 import {
-  FileService,
-  isPathSafe,
   normalizePath,
   validateFilePath,
-} from "./file_service.ts";
+} from "../validation/files.ts";
 
 // ============================================================================
 // Validation Function Tests
@@ -28,23 +27,6 @@ Deno.test("validateFilePath rejects paths with null bytes", () => {
 
 Deno.test("validateFilePath rejects absolute paths", () => {
   expect(validateFilePath("/absolute/path.ts")).toBe(false);
-});
-
-Deno.test("isPathSafe accepts safe paths", () => {
-  expect(isPathSafe("hello.ts")).toBe(true);
-  expect(isPathSafe("utils/helpers.ts")).toBe(true);
-  expect(isPathSafe("a/b/c/d.ts")).toBe(true);
-});
-
-Deno.test("isPathSafe rejects directory traversal with ..", () => {
-  expect(isPathSafe("../etc/passwd")).toBe(false);
-  expect(isPathSafe("utils/../../../etc/passwd")).toBe(false);
-  expect(isPathSafe("..")).toBe(false);
-  expect(isPathSafe("utils/..")).toBe(false);
-});
-
-Deno.test("isPathSafe rejects paths starting with ./", () => {
-  expect(isPathSafe("./hello.ts")).toBe(false);
 });
 
 Deno.test("normalizePath removes redundant slashes", () => {

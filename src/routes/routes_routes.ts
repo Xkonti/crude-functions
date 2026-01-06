@@ -1,13 +1,15 @@
 import { Hono } from "@hono/hono";
 import {
   RoutesService,
-  validateRouteName,
-  validateRoutePath,
-  validateMethods,
   type FunctionRoute,
   type NewFunctionRoute,
 } from "./routes_service.ts";
-import { validateId } from "../utils/validation.ts";
+import {
+  validateRouteName,
+  validateRoutePath,
+  validateMethods,
+} from "../validation/routes.ts";
+import { validateId } from "../validation/common.ts";
 
 export function createRoutesRoutes(service: RoutesService): Hono {
   const routes = new Hono();

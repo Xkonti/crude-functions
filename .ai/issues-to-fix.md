@@ -420,13 +420,6 @@ The key rotation service has several good patterns:
 - Some silently succeed
 - Fix: Document and enforce consistent patterns across services
 
-  Validation Scattered Everywhere
-
-- API key validators in service file
-- Route validators in service file
-- File validators in service file
-- Fix: Consolidate to src/validation/ directory
-
   Query Pattern Duplication
 
 - ExecutionMetricsService.getByRouteId() has 4 identical SQL queries
