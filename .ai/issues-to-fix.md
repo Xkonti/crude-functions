@@ -413,20 +413,6 @@ The key rotation service has several good patterns:
 
 🔴 Critical Issues to Fix Now
 
-  3. Web UI: Massive JavaScript Duplication (High Priority)
-
-- Location: src/web/functions_pages.ts, src/web/keys_pages.ts
-- Problem: Same functions (toggleSecret, copySecret) duplicated 4+ times
-- Impact: Bug fixes require updating multiple locations
-- Fix: Extract to shared template helpers (~500-700 lines saved)
-
-  4. Routing: Uninitialized Variable Bug (Critical)
-
-- Location: src/functions/function_router.ts:176-190
-- Problem: scopeEnum can be undefined in secret scope switch statement
-- Impact: Runtime errors with invalid scope values
-- Fix: Add default case or use scope mapping object
-
   5. Security: Path Traversal Incomplete (Medium-High)
 
 - Location: src/functions/handler_loader.ts:136-142

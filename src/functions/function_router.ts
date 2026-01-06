@@ -187,6 +187,8 @@ export class FunctionRouter {
               case "key":
                 scopeEnum = SecretScope.Key;
                 break;
+              default:
+                throw new Error(`Invalid secret scope: ${scope}. Must be one of: global, function, group, key`);
             }
 
             return await this.secretsService.getSecretByNameAndScope(
