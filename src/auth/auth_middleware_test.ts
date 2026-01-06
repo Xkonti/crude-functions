@@ -43,7 +43,7 @@ const SETTINGS_SCHEMA = `
     user_id TEXT,
     value TEXT,
     is_encrypted INTEGER NOT NULL DEFAULT 0,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(user_id, ''));
   CREATE INDEX idx_settings_name ON settings(name);

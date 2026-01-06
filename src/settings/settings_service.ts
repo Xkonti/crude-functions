@@ -12,7 +12,7 @@ interface SettingRow {
   user_id: string | null;
   value: string | null;
   is_encrypted: number;
-  updatedAt: string;
+  modified_at: string;
   [key: string]: unknown; // Index signature for Row compatibility
 }
 
@@ -106,10 +106,10 @@ export class SettingsService {
         : value;
 
     await this.db.execute(
-      `INSERT INTO settings (name, user_id, value, is_encrypted, updatedAt)
+      `INSERT INTO settings (name, user_id, value, is_encrypted, modified_at)
        VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT (name, COALESCE(user_id, ''))
-       DO UPDATE SET value = ?, is_encrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
+       DO UPDATE SET value = ?, is_encrypted = ?, modified_at = CURRENT_TIMESTAMP`,
       [name, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
     );
   }
@@ -133,10 +133,10 @@ export class SettingsService {
         : value;
 
     await this.db.execute(
-      `INSERT INTO settings (name, user_id, value, is_encrypted, updatedAt)
+      `INSERT INTO settings (name, user_id, value, is_encrypted, modified_at)
        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT (name, COALESCE(user_id, ''))
-       DO UPDATE SET value = ?, is_encrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
+       DO UPDATE SET value = ?, is_encrypted = ?, modified_at = CURRENT_TIMESTAMP`,
       [name, userId, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
     );
   }
@@ -156,7 +156,7 @@ export class SettingsService {
 
       if (!existing) {
         await this.db.execute(
-          `INSERT INTO settings (name, user_id, value, is_encrypted, updatedAt)
+          `INSERT INTO settings (name, user_id, value, is_encrypted, modified_at)
            VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)`,
           [name, defaultValue]
         );
