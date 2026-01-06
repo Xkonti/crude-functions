@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
-import { InvalidKeyError, DecryptionError } from "./errors.ts";
+import { InvalidKeyError, DecryptionError, OversizedPlaintextError } from "./errors.ts";
 
 // Valid test keys (32 bytes base64-encoded)
 const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
@@ -160,6 +160,65 @@ Deno.test("VersionedEncryptionService - Encryption", async (t) => {
 
     const encrypted = await service.encrypt("test");
     expect(encrypted.charAt(0)).toBe("M");
+  });
+});
+
+// =====================
+// Size validation tests
+// =====================
+
+Deno.test("VersionedEncryptionService - Size validation", async (t) => {
+  const service = new VersionedEncryptionService({
+    currentKey: TEST_KEY_A,
+    currentVersion: "A",
+  });
+
+  await t.step("accepts plaintext at exactly 16KB", async () => {
+    const plaintext = "x".repeat(16 * 1024); // Exactly 16KB
+    const encrypted = await service.encrypt(plaintext);
+    expect(encrypted.charAt(0)).toBe("A");
+
+    const decrypted = await service.decrypt(encrypted);
+    expect(decrypted).toBe(plaintext);
+  });
+
+  await t.step("rejects plaintext over 16KB", async () => {
+    const plaintext = "x".repeat(16 * 1024 + 1); // 16KB + 1 byte
+    await expect(service.encrypt(plaintext)).rejects.toThrow(OversizedPlaintextError);
+  });
+
+  await t.step("rejects large plaintext with helpful error message", async () => {
+    const plaintext = "x".repeat(20 * 1024); // 20KB
+    try {
+      await service.encrypt(plaintext);
+      throw new Error("Should have thrown OversizedPlaintextError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(OversizedPlaintextError);
+      expect((error as Error).message).toContain("20480 bytes");
+      expect((error as Error).message).toContain("16384 bytes");
+      expect((error as Error).message).toContain("16KB");
+    }
+  });
+
+  await t.step("validates size correctly with multi-byte UTF-8 characters", async () => {
+    // Each emoji is typically 4 bytes in UTF-8
+    // Create a string that's just under 16KB with emojis
+    const emoji = "😀"; // 4 bytes
+    const count = Math.floor((16 * 1024) / 4);
+    const plaintext = emoji.repeat(count); // Should be under 16KB
+
+    const encrypted = await service.encrypt(plaintext);
+    const decrypted = await service.decrypt(encrypted);
+    expect(decrypted).toBe(plaintext);
+  });
+
+  await t.step("rejects oversized UTF-8 plaintext", async () => {
+    // Create a string that exceeds 16KB when encoded as UTF-8
+    const emoji = "😀"; // 4 bytes
+    const count = Math.floor((16 * 1024) / 4) + 1; // Just over 16KB
+    const plaintext = emoji.repeat(count);
+
+    await expect(service.encrypt(plaintext)).rejects.toThrow(OversizedPlaintextError);
   });
 });
 

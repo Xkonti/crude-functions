@@ -30,3 +30,13 @@ export class InvalidKeyError extends Error {
     this.name = "InvalidKeyError";
   }
 }
+
+/**
+ * Thrown when plaintext exceeds the maximum allowed size
+ */
+export class OversizedPlaintextError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OversizedPlaintextError";
+  }
+}
