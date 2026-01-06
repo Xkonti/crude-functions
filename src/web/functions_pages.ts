@@ -23,6 +23,9 @@ import {
   buttonLink,
   getLayoutUser,
   formatDate,
+  secretScripts,
+  parseSecretFormData,
+  parseSecretEditFormData,
 } from "./templates.ts";
 import { validateId } from "../utils/validation.ts";
 
@@ -1035,36 +1038,8 @@ function renderFunctionForm(
     </form>
 
     ${isEdit ? `
+    ${secretScripts()}
     <script>
-    // Secret visibility toggle function (used by dynamically loaded secrets preview)
-    function toggleSecret(btn) {
-      const container = btn.closest('.secret-value');
-      const masked = container.querySelector('.masked');
-      const revealed = container.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    // Secret copy function (used by dynamically loaded secrets preview)
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-
     // Key group expansion toggle (used by dynamically loaded secrets preview)
     function toggleKeyExpansion(id) {
       const container = document.getElementById(id);
@@ -1212,34 +1187,7 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
       </tbody>
     </table>
 
-    <script>
-    function toggleSecret(btn) {
-      const td = btn.closest('td');
-      const masked = td.querySelector('.masked');
-      const revealed = td.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-    </script>
+    ${secretScripts()}
   `;
 }
 
@@ -1317,59 +1265,6 @@ function renderFunctionSecretEditForm(
       </div>
     </form>
   `;
-}
-
-/**
- * Parse and validate secret create form data
- */
-function parseSecretFormData(formData: FormData): {
-  secretData: { name: string; value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!name) {
-    errors.push("Secret name is required");
-  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-    errors.push(
-      "Secret name can only contain letters, numbers, underscores, and dashes"
-    );
-  }
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    secretData: { name, value, comment },
-    errors,
-  };
-}
-
-/**
- * Parse and validate secret edit form data
- */
-function parseSecretEditFormData(formData: FormData): {
-  editData: { value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    editData: { value, comment },
-    errors,
-  };
 }
 
 export function createFunctionsPages(

@@ -11,6 +11,9 @@ import {
   buttonLink,
   getLayoutUser,
   formatDate,
+  secretScripts,
+  parseSecretFormData,
+  parseSecretEditFormData,
 } from "./templates.ts";
 
 export function createKeysPages(
@@ -123,34 +126,7 @@ export function createKeysPages(
               .join("")
       }
 
-      <script>
-      function toggleSecret(btn) {
-        const td = btn.closest('td');
-        const masked = td.querySelector('.masked');
-        const revealed = td.querySelector('.revealed');
-
-        if (masked.style.display === 'none') {
-          masked.style.display = '';
-          revealed.style.display = 'none';
-          btn.textContent = '👁️';
-        } else {
-          masked.style.display = 'none';
-          revealed.style.display = '';
-          btn.textContent = '🙈';
-        }
-      }
-
-      function copySecret(btn, value) {
-        navigator.clipboard.writeText(value).then(() => {
-          const original = btn.textContent;
-          btn.textContent = '✓';
-          setTimeout(() => btn.textContent = original, 2000);
-        }).catch(err => {
-          console.error('Failed to copy:', err);
-          alert('Failed to copy to clipboard');
-        });
-      }
-      </script>
+      ${secretScripts()}
     `;
     return c.html(layout("API Keys", content, getLayoutUser(c)));
   });
@@ -1372,34 +1348,7 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
       </tbody>
     </table>
 
-    <script>
-    function toggleSecret(btn) {
-      const td = btn.closest('td');
-      const masked = td.querySelector('.masked');
-      const revealed = td.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-    </script>
+    ${secretScripts()}
   `;
 }
 
@@ -1479,59 +1428,6 @@ function renderGroupSecretEditForm(
   `;
 }
 
-/**
- * Parse and validate secret create form data
- */
-function parseSecretFormData(formData: FormData): {
-  secretData: { name: string; value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!name) {
-    errors.push("Secret name is required");
-  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-    errors.push(
-      "Secret name can only contain letters, numbers, underscores, and dashes"
-    );
-  }
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    secretData: { name, value, comment },
-    errors,
-  };
-}
-
-/**
- * Parse and validate secret edit form data
- */
-function parseSecretEditFormData(formData: FormData): {
-  editData: { value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    editData: { value, comment },
-    errors,
-  };
-}
-
 // ============== Helper Functions for Key Secrets ==============
 
 /**
@@ -1584,34 +1480,7 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
       </tbody>
     </table>
 
-    <script>
-    function toggleSecret(btn) {
-      const td = btn.closest('td');
-      const masked = td.querySelector('.masked');
-      const revealed = td.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-    </script>
+    ${secretScripts()}
   `;
 }
 
