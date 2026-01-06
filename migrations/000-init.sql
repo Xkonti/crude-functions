@@ -144,20 +144,20 @@ CREATE INDEX IF NOT EXISTS idx_consoleLogs_route_level ON consoleLogs(routeId, l
 CREATE INDEX IF NOT EXISTS idx_consoleLogs_timestamp ON consoleLogs(timestamp);
 
 -- Execution metrics table - stores execution timing data for analytics
-CREATE TABLE IF NOT EXISTS execution_metrics (
+CREATE TABLE IF NOT EXISTS executionMetrics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  route_id INTEGER NOT NULL,
+  routeId INTEGER NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
-  avg_time_ms REAL NOT NULL,
-  max_time_ms INTEGER NOT NULL,
-  execution_count INTEGER NOT NULL DEFAULT 1,
+  avgTimeMs REAL NOT NULL,
+  maxTimeMs INTEGER NOT NULL,
+  executionCount INTEGER NOT NULL DEFAULT 1,
   timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_executionMetrics_route_id ON execution_metrics(route_id);
+CREATE INDEX IF NOT EXISTS idx_executionMetrics_routeId ON executionMetrics(routeId);
 CREATE INDEX IF NOT EXISTS idx_executionMetrics_type_route_timestamp
-  ON execution_metrics(type, route_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_executionMetrics_timestamp ON execution_metrics(timestamp);
+  ON executionMetrics(type, routeId, timestamp);
+CREATE INDEX IF NOT EXISTS idx_executionMetrics_timestamp ON executionMetrics(timestamp);
 
 --------------------------------------------------------------------------------
 -- Secrets and Settings
