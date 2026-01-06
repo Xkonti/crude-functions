@@ -157,6 +157,33 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
     .user-dropdown:hover .user-dropdown-menu {
       display: flex;
     }
+    /* Tab navigation styles */
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 2px solid var(--pico-muted-border-color);
+      margin-bottom: 1.5rem;
+    }
+    .tabs a {
+      padding: 0.75rem 1.5rem;
+      text-decoration: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+    }
+    .tabs a.active {
+      border-bottom-color: var(--pico-primary);
+      font-weight: bold;
+    }
+    /* Settings category card styles */
+    .settings-category {
+      margin-bottom: 2rem;
+      padding: 1rem;
+      background: var(--pico-card-background-color);
+      border-radius: 0.5rem;
+    }
+    .settings-category h3 {
+      margin-top: 0;
+    }
   </style>
 </head>
 <body>
@@ -169,6 +196,7 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
         <li><a href="/web/keys" title="API Keys">🔑</a></li>
         <li><a href="/web/secrets" title="Secrets">🔒</a></li>
         <li><a href="/web/users" title="Users">👥</a></li>
+        <li><a href="/web/settings" title="Settings">⚙️</a></li>
         ${userDropdown}
       </ul>
     </nav>

@@ -7,6 +7,7 @@ import { createCodePages } from "./code_pages.ts";
 import { createFunctionsPages } from "./functions_pages.ts";
 import { createKeysPages } from "./keys_pages.ts";
 import { createSecretsPages } from "./secrets_pages.ts";
+import { createSettingsPages } from "./settings_pages.ts";
 import { layout, getLayoutUser } from "./templates.ts";
 import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
 import type { Auth } from "../auth/auth.ts";
@@ -93,6 +94,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService));
   routes.route("/keys", createKeysPages(apiKeyService, secretsService));
   routes.route("/secrets", createSecretsPages({ db, encryptionService }));
+  routes.route("/settings", createSettingsPages({ settingsService }));
 
   return routes;
 }
