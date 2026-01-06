@@ -55,6 +55,17 @@ const API_KEYS_SCHEMA = `
   );
 `;
 
+const SETTINGS_SCHEMA = `
+  CREATE TABLE settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+`;
+
 interface TestContext {
   tempDir: string;
   db: DatabaseService;
@@ -91,6 +102,7 @@ async function createTestContext(
   await db.open();
   await db.exec(SECRETS_SCHEMA);
   await db.exec(API_KEYS_SCHEMA);
+  await db.exec(SETTINGS_SCHEMA);
 
   // Create encryption service
   const encryptionService = new VersionedEncryptionService({

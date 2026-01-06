@@ -40,3 +40,14 @@ export class OversizedPlaintextError extends Error {
     this.name = "OversizedPlaintextError";
   }
 }
+
+/**
+ * Thrown when the encryption keys file is corrupted or contains invalid data
+ */
+export class KeyStorageCorruptionError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "KeyStorageCorruptionError";
+    this.cause = cause;
+  }
+}

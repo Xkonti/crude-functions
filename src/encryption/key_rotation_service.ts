@@ -254,7 +254,16 @@ export class KeyRotationService {
       hash_key: keys.hash_key, // Hash key doesn't rotate
     };
 
-    await this.keyStorage.saveKeys(updatedKeys);
+    try {
+      await this.keyStorage.saveKeys(updatedKeys);
+    } catch (error) {
+      logger.error(
+        "[KeyRotation] CRITICAL: Failed to save keys during rotation start. " +
+        "Rotation will not proceed. Error:",
+        error
+      );
+      throw error;
+    }
 
     // Update encryption service with new keys
     await this.encryptionService.updateKeys({
@@ -303,7 +312,16 @@ export class KeyRotationService {
         hash_key: keys.hash_key, // Hash key doesn't rotate
       };
 
-      await this.keyStorage.saveKeys(completedKeys);
+      try {
+        await this.keyStorage.saveKeys(completedKeys);
+      } catch (error) {
+        logger.error(
+          "[KeyRotation] WARNING: Failed to save keys after completing rotation. " +
+          "All data has been re-encrypted successfully, but rotation will be retried on next check. Error:",
+          error
+        );
+        throw error;
+      }
 
       // Update encryption service (remove phased out key)
       await this.encryptionService.updateKeys({
