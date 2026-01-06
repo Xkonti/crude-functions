@@ -105,9 +105,9 @@ CREATE TABLE IF NOT EXISTS apiKeys (
   updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_name ON apiKeys(groupId, name);
-CREATE INDEX IF NOT EXISTS idx_api_keys_group ON apiKeys(groupId);
-CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON apiKeys(groupId, valueHash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_apiKeys_group_name ON apiKeys(groupId, name);
+CREATE INDEX IF NOT EXISTS idx_apiKeys_group ON apiKeys(groupId);
+CREATE INDEX IF NOT EXISTS idx_apiKeys_hash ON apiKeys(groupId, valueHash);
 
 --------------------------------------------------------------------------------
 -- Routes and Function Execution
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS routes (
   route TEXT NOT NULL,
   methods TEXT NOT NULL,  -- JSON array: ["GET", "POST"]
   keys TEXT,              -- JSON array: ["api"] or NULL
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
@@ -138,10 +138,10 @@ CREATE TABLE IF NOT EXISTS console_logs (
   timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_console_logs_request_id ON console_logs(request_id);
-CREATE INDEX IF NOT EXISTS idx_console_logs_route_id ON console_logs(route_id, id);
-CREATE INDEX IF NOT EXISTS idx_console_logs_route_level ON console_logs(route_id, level, id);
-CREATE INDEX IF NOT EXISTS idx_console_logs_timestamp ON console_logs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_request_id ON console_logs(request_id);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_route_id ON console_logs(route_id, id);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_route_level ON console_logs(route_id, level, id);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_timestamp ON console_logs(timestamp);
 
 -- Execution metrics table - stores execution timing data for analytics
 CREATE TABLE IF NOT EXISTS execution_metrics (
@@ -154,10 +154,10 @@ CREATE TABLE IF NOT EXISTS execution_metrics (
   timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_execution_metrics_route_id ON execution_metrics(route_id);
-CREATE INDEX IF NOT EXISTS idx_execution_metrics_type_route_timestamp
+CREATE INDEX IF NOT EXISTS idx_executionMetrics_route_id ON execution_metrics(route_id);
+CREATE INDEX IF NOT EXISTS idx_executionMetrics_type_route_timestamp
   ON execution_metrics(type, route_id, timestamp);
-CREATE INDEX IF NOT EXISTS idx_execution_metrics_timestamp ON execution_metrics(timestamp);
+CREATE INDEX IF NOT EXISTS idx_executionMetrics_timestamp ON execution_metrics(timestamp);
 
 --------------------------------------------------------------------------------
 -- Secrets and Settings
