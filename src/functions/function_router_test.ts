@@ -55,19 +55,22 @@ const CONSOLE_LOGS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS consoleLogs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   requestId TEXT NOT NULL,
-  routeId INTEGER,
+  routeId INTEGER REFERENCES routes(id) ON DELETE CASCADE,
   level TEXT NOT NULL,
   message TEXT NOT NULL,
   args TEXT,
   timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_consoleLogs_requestId ON consoleLogs(requestId);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_routeId ON consoleLogs(routeId, id);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_route_level ON consoleLogs(routeId, level, id);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_timestamp ON consoleLogs(timestamp);
 `;
 
 const EXECUTION_METRICS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS executionMetrics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  routeId INTEGER NOT NULL,
+  routeId INTEGER NOT NULL,  -- No FK: orphaned records retained for global metrics aggregation
   type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
   avgTimeMs REAL NOT NULL,
   maxTimeMs INTEGER NOT NULL,
@@ -174,6 +177,7 @@ async function createTestSetup(
     apiKeyService,
     consoleLogService,
     executionMetricsService,
+    secretsService,
     functionRouter,
   };
 }
@@ -941,6 +945,94 @@ Deno.test("FunctionRouter handles multiple routes", async () => {
     const userUpdateRes = await app.request("/run/users/123", { method: "PUT" });
     expect(userUpdateRes.status).toBe(200);
     expect((await userUpdateRes.json()).route).toBe("user-detail");
+  } finally {
+    await cleanup(tempDir, db);
+  }
+});
+
+// ========================
+// Cascade deletion tests
+// ========================
+
+Deno.test("FunctionRouter - route deletion cascades to logs and secrets but orphans metrics", async () => {
+  const routes = [
+    { name: "test-route", handler: "code/test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const {
+    tempDir,
+    db,
+    routesService,
+    consoleLogService,
+    executionMetricsService,
+    secretsService,
+  } = await createTestSetup(routes);
+
+  try {
+    // Get the route ID
+    const route = await routesService.getByName("test-route");
+    expect(route).not.toBeNull();
+    const routeId = route!.id;
+
+    // Add console logs for this route
+    await consoleLogService.store({
+      requestId: "req-1",
+      routeId,
+      level: "log",
+      message: "Test log 1",
+    });
+    await consoleLogService.store({
+      requestId: "req-2",
+      routeId,
+      level: "info",
+      message: "Test log 2",
+    });
+
+    // Add function-specific secrets for this route
+    await secretsService.createFunctionSecret(routeId, "SECRET_KEY", "secret-value", "Test secret");
+    await secretsService.createFunctionSecret(routeId, "API_TOKEN", "token-value");
+
+    // Add execution metrics for this route
+    await executionMetricsService.store({
+      routeId,
+      type: "execution",
+      avgTimeMs: 100,
+      maxTimeMs: 150,
+      executionCount: 1,
+    });
+    await executionMetricsService.store({
+      routeId,
+      type: "minute",
+      avgTimeMs: 120,
+      maxTimeMs: 180,
+      executionCount: 5,
+    });
+
+    // Verify data exists before deletion
+    const logsBefore = await consoleLogService.getByRouteId(routeId);
+    expect(logsBefore.length).toBe(2);
+
+    const secretsBefore = await secretsService.getFunctionSecrets(routeId);
+    expect(secretsBefore.length).toBe(2);
+
+    const metricsBefore = await executionMetricsService.getByRouteId(routeId);
+    expect(metricsBefore.length).toBe(2);
+
+    // Delete the route
+    await routesService.removeRoute("test-route");
+
+    // Verify console logs are CASCADE deleted
+    const logsAfter = await consoleLogService.getByRouteId(routeId);
+    expect(logsAfter.length).toBe(0);
+
+    // Verify function-specific secrets are CASCADE deleted
+    const secretsAfter = await secretsService.getFunctionSecrets(routeId);
+    expect(secretsAfter.length).toBe(0);
+
+    // Verify execution metrics are ORPHANED (not deleted, kept for global metrics aggregation)
+    const metricsAfter = await executionMetricsService.getByRouteId(routeId);
+    expect(metricsAfter.length).toBe(2);
+    expect(metricsAfter[0].routeId).toBe(routeId);
+    expect(metricsAfter[1].routeId).toBe(routeId);
   } finally {
     await cleanup(tempDir, db);
   }
