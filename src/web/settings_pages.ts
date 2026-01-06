@@ -151,13 +151,113 @@ function renderServerSettingsTab(
     <h1>Settings</h1>
     ${renderTabs("server")}
     ${flashMessages(success, error)}
-    <form method="POST" action="/web/settings/server">
-      ${renderSettingsForm(data, availableGroups)}
-      <div class="grid">
-        <button type="submit">Save Settings</button>
-        <a href="/web" role="button" class="secondary">Cancel</a>
-      </div>
-    </form>
+
+    <div id="rotation-status-message" style="display: none;"></div>
+
+    <article>
+      <h3>Encryption Key Rotation</h3>
+      <p>
+        Manually trigger encryption key rotation. This will generate new encryption keys
+        and re-encrypt all secrets, API keys, and settings. This process may take several
+        minutes depending on the amount of encrypted data.
+      </p>
+      <p id="rotation-info">
+        <em>Loading rotation status...</em>
+      </p>
+      <button type="button" id="rotate-keys-btn" class="secondary" disabled>
+        Rotate Encryption Keys Now
+      </button>
+    </article>
+
+    <article>
+      <h3>Server Settings</h3>
+      <form method="POST" action="/web/settings/server">
+        ${renderSettingsForm(data, availableGroups)}
+        <div class="grid">
+          <button type="submit">Save Settings</button>
+          <a href="/web" role="button" class="secondary">Cancel</a>
+        </div>
+      </form>
+    </article>
+
+    <script>
+    (async function() {
+      const statusEl = document.getElementById('rotation-info');
+      const btnEl = document.getElementById('rotate-keys-btn');
+      const messageEl = document.getElementById('rotation-status-message');
+
+      // Fetch rotation status
+      async function loadStatus() {
+        try {
+          const response = await fetch('/api/rotation/status');
+          const data = await response.json();
+
+          if (data.error) {
+            statusEl.innerHTML = '<em style="color: var(--pico-del-color);">Failed to load rotation status</em>';
+            return;
+          }
+
+          const { daysSinceRotation, isInProgress, lastRotationAt } = data;
+          const lastRotationDate = new Date(lastRotationAt).toLocaleString();
+
+          if (isInProgress) {
+            statusEl.innerHTML = '<strong style="color: var(--pico-primary);">⟳ Key rotation in progress...</strong>';
+            btnEl.disabled = true;
+          } else {
+            statusEl.innerHTML = \`Last rotation: <strong>\${daysSinceRotation} days ago</strong> (\${lastRotationDate})\`;
+            btnEl.disabled = false;
+          }
+        } catch (error) {
+          console.error('Failed to load rotation status:', error);
+          statusEl.innerHTML = '<em style="color: var(--pico-del-color);">Failed to load rotation status</em>';
+        }
+      }
+
+      // Trigger rotation
+      btnEl.addEventListener('click', async () => {
+        if (!confirm('Are you sure you want to rotate encryption keys now? This will re-encrypt all secrets, API keys, and settings.')) {
+          return;
+        }
+
+        btnEl.disabled = true;
+        btnEl.textContent = 'Rotating Keys...';
+        messageEl.style.display = 'none';
+
+        try {
+          const response = await fetch('/api/rotation/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            messageEl.innerHTML = '<article style="background-color: var(--pico-ins-color);"><strong>✓ Success:</strong> ' + data.message + '</article>';
+            messageEl.style.display = 'block';
+            await loadStatus();
+          } else {
+            messageEl.innerHTML = '<article style="background-color: var(--pico-del-color);"><strong>✗ Error:</strong> ' + (data.error || 'Unknown error') + '</article>';
+            messageEl.style.display = 'block';
+            btnEl.disabled = false;
+            btnEl.textContent = 'Rotate Encryption Keys Now';
+          }
+        } catch (error) {
+          messageEl.innerHTML = '<article style="background-color: var(--pico-del-color);"><strong>✗ Error:</strong> Network error: ' + error.message + '</article>';
+          messageEl.style.display = 'block';
+          btnEl.disabled = false;
+          btnEl.textContent = 'Rotate Encryption Keys Now';
+        }
+      });
+
+      // Initial load
+      await loadStatus();
+
+      // Refresh status every 10 seconds if rotation in progress
+      setInterval(async () => {
+        await loadStatus();
+      }, 10000);
+    })();
+    </script>
   `;
 }
 

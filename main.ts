@@ -36,6 +36,7 @@ import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 import { KeyStorageService } from "./src/encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "./src/encryption/versioned_encryption_service.ts";
 import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
+import { createRotationRoutes } from "./src/encryption/rotation_routes.ts";
 import { HashService } from "./src/encryption/hash_service.ts";
 import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
@@ -283,6 +284,14 @@ const fileService = new FileService({
 app.use("/api/files/*", hybridAuth);
 app.use("/api/files", hybridAuth);
 app.route("/api/files", createFileRoutes(fileService));
+
+// Encryption key rotation API
+app.use("/api/rotation/*", hybridAuth);
+app.use("/api/rotation", hybridAuth);
+app.route("/api/rotation", createRotationRoutes({
+  keyRotationService,
+  keyStorageService,
+}));
 
 // Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({

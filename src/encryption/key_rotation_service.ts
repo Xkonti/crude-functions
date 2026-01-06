@@ -145,6 +145,38 @@ export class KeyRotationService {
   }
 
   /**
+   * Manually trigger a key rotation.
+   * This bypasses the normal rotation interval check and forces immediate rotation.
+   *
+   * @returns Promise that resolves when rotation completes or rejects on error
+   * @throws Error if rotation is already in progress
+   */
+  async triggerManualRotation(): Promise<void> {
+    // Check if rotation already in progress
+    if (this.isRotating) {
+      throw new Error("Key rotation is already in progress");
+    }
+
+    logger.info("[KeyRotation] Manual rotation triggered");
+
+    // Load current keys
+    const keys = await this.keyStorage.loadKeys();
+    if (!keys) {
+      throw new Error("No keys file found");
+    }
+
+    // Check if previous rotation incomplete (resume it)
+    if (this.keyStorage.isRotationInProgress(keys)) {
+      logger.info("[KeyRotation] Resuming incomplete rotation");
+      await this.performRotation(keys);
+      return;
+    }
+
+    // Start new rotation (bypass interval check)
+    await this.startNewRotation(keys);
+  }
+
+  /**
    * Main rotation check - called by timer.
    * Determines if rotation is needed and performs it.
    */
