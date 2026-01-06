@@ -147,47 +147,6 @@ function renderSecretsPreview(previews: SecretPreview[]): string {
         }).join('')}
       </div>
     </article>
-
-    <script>
-    function toggleSecret(btn) {
-      const container = btn.closest('.secret-value');
-      const masked = container.querySelector('.masked');
-      const revealed = container.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-
-    function toggleKeyExpansion(id) {
-      const container = document.getElementById(id);
-      const btn = event.target;
-      if (container.style.display === 'none') {
-        container.style.display = 'block';
-        btn.textContent = '▲';
-      } else {
-        container.style.display = 'none';
-        btn.textContent = '▼';
-      }
-    }
-    </script>
   `;
 }
 
@@ -1077,6 +1036,48 @@ function renderFunctionForm(
 
     ${isEdit ? `
     <script>
+    // Secret visibility toggle function (used by dynamically loaded secrets preview)
+    function toggleSecret(btn) {
+      const container = btn.closest('.secret-value');
+      const masked = container.querySelector('.masked');
+      const revealed = container.querySelector('.revealed');
+
+      if (masked.style.display === 'none') {
+        masked.style.display = '';
+        revealed.style.display = 'none';
+        btn.textContent = '👁️';
+      } else {
+        masked.style.display = 'none';
+        revealed.style.display = '';
+        btn.textContent = '🙈';
+      }
+    }
+
+    // Secret copy function (used by dynamically loaded secrets preview)
+    function copySecret(btn, value) {
+      navigator.clipboard.writeText(value).then(() => {
+        const original = btn.textContent;
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = original, 2000);
+      }).catch(err => {
+        console.error('Failed to copy:', err);
+        alert('Failed to copy to clipboard');
+      });
+    }
+
+    // Key group expansion toggle (used by dynamically loaded secrets preview)
+    function toggleKeyExpansion(id) {
+      const container = document.getElementById(id);
+      const btn = event.target;
+      if (container.style.display === 'none') {
+        container.style.display = 'block';
+        btn.textContent = '▲';
+      } else {
+        container.style.display = 'none';
+        btn.textContent = '▼';
+      }
+    }
+
     async function loadSecretsPreview(functionId) {
       const btn = document.getElementById('secrets-preview-btn');
       const container = document.getElementById('secrets-preview-container');
