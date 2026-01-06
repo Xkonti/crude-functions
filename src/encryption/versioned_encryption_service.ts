@@ -258,6 +258,14 @@ export class VersionedEncryptionService {
       const iv = combined.slice(0, 12);
       const ciphertext = combined.slice(12);
 
+      // Defensive check: verify IV is exactly 12 bytes
+      // (Should be guaranteed by MIN_ENCRYPTED_LENGTH check, but verify explicitly)
+      if (iv.length !== 12) {
+        throw new DecryptionError(
+          `Corrupted encrypted data: IV must be exactly 12 bytes, got ${iv.length}`
+        );
+      }
+
       // Decrypt with AES-GCM (verifies auth tag automatically)
       const decrypted = await crypto.subtle.decrypt(
         { name: "AES-GCM", iv },

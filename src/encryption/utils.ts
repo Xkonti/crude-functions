@@ -15,9 +15,7 @@ export function base64ToBytes(base64: string): Uint8Array {
     }
     return bytes;
   } catch (error) {
-    throw new Error(
-      `Invalid base64 string: ${error instanceof Error ? error.message : String(error)}`
-    );
+    throw new Error("Invalid base64 string", { cause: error });
   }
 }
 
