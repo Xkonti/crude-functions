@@ -85,6 +85,39 @@ Deno.test("VersionedEncryptionService - Constructor validation", async (t) => {
     expect(service.version).toBe("B");
     expect(service.phasedOutVersionChar).toBe("A");
   });
+
+  await t.step("rejects partial config: phasedOutKey without phasedOutVersion", () => {
+    expect(() => {
+      new VersionedEncryptionService({
+        currentKey: TEST_KEY_A,
+        currentVersion: "A",
+        phasedOutKey: TEST_KEY_B,
+        // phasedOutVersion intentionally omitted
+      });
+    }).toThrow(InvalidKeyError);
+  });
+
+  await t.step("rejects partial config: phasedOutVersion without phasedOutKey", () => {
+    expect(() => {
+      new VersionedEncryptionService({
+        currentKey: TEST_KEY_A,
+        currentVersion: "A",
+        // phasedOutKey intentionally omitted
+        phasedOutVersion: "B",
+      });
+    }).toThrow(InvalidKeyError);
+  });
+
+  await t.step("rejects same version for current and phased out", () => {
+    expect(() => {
+      new VersionedEncryptionService({
+        currentKey: TEST_KEY_A,
+        currentVersion: "A",
+        phasedOutKey: TEST_KEY_B,
+        phasedOutVersion: "A", // Same as currentVersion
+      });
+    }).toThrow(InvalidKeyError);
+  });
 });
 
 // =====================

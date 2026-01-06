@@ -75,6 +75,15 @@ export class VersionedEncryptionService {
     }
     this.currentVersion = options.currentVersion;
 
+    // Reject partial phased out configuration
+    const hasPhasedOutKey = options.phasedOutKey !== undefined;
+    const hasPhasedOutVersion = options.phasedOutVersion !== undefined;
+    if (hasPhasedOutKey !== hasPhasedOutVersion) {
+      throw new InvalidKeyError(
+        "Partial phased out configuration: both phasedOutKey and phasedOutVersion must be provided together, or neither"
+      );
+    }
+
     // Validate phased out key if present
     if (options.phasedOutKey && options.phasedOutVersion) {
       try {
@@ -102,6 +111,14 @@ export class VersionedEncryptionService {
           `Invalid phased out version: must be A-Z, got "${options.phasedOutVersion}"`
         );
       }
+
+      // Reject duplicate versions
+      if (options.phasedOutVersion === options.currentVersion) {
+        throw new InvalidKeyError(
+          `Current and phased out versions cannot be the same: "${options.currentVersion}"`
+        );
+      }
+
       this.phasedOutVersion = options.phasedOutVersion;
     } else {
       this.rawPhasedOutKey = null;

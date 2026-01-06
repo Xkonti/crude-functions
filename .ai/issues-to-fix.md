@@ -2,22 +2,6 @@
 
 ### Critical Issues
 
-#### 1. Partial Phased-Out Key Configuration Allowed
-
-**Location:** `src/encryption/versioned_encryption_service.ts:79-109`
-
-The constructor validation uses `&&` logic which allows asymmetric partial configuration where `phasedOutKey` is provided without `phasedOutVersion` or vice versa. If only one field is provided, validation is skipped and both are silently set to null. This could mask configuration errors and lead to inability to decrypt data encrypted with the phased-out key.
-
-**Impact:** Can cause data to become permanently undecryptable.
-
-#### 2. No Validation for Identical Current and Phased-Out Versions
-
-**Location:** `src/encryption/versioned_encryption_service.ts:79-109`
-
-The validation never checks if `currentVersion` equals `phasedOutVersion`. If both versions are set to the same value (e.g., "A"), the encryption service would create encrypted data that is ambiguous and potentially decrypt with the wrong key.
-
-**Impact:** Causes ambiguous key selection and potential decryption with wrong key.
-
 #### 3. Race Condition in updateKeys() with Concurrent Encrypt/Decrypt
 
 **Location:** `src/encryption/versioned_encryption_service.ts:236-242`
