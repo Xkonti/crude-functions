@@ -63,7 +63,7 @@ export class ApiKeyService {
       id: number;
       name: string;
       description: string | null;
-    }>("SELECT id, name, description FROM api_key_groups ORDER BY name");
+    }>("SELECT id, name, description FROM apiKeyGroups ORDER BY name");
 
     return rows.map((row) => ({
       id: row.id,
@@ -81,7 +81,7 @@ export class ApiKeyService {
       id: number;
       name: string;
       description: string | null;
-    }>("SELECT id, name, description FROM api_key_groups WHERE name = ?", [
+    }>("SELECT id, name, description FROM apiKeyGroups WHERE name = ?", [
       normalizedName,
     ]);
 
@@ -102,7 +102,7 @@ export class ApiKeyService {
       id: number;
       name: string;
       description: string | null;
-    }>("SELECT id, name, description FROM api_key_groups WHERE id = ?", [id]);
+    }>("SELECT id, name, description FROM apiKeyGroups WHERE id = ?", [id]);
 
     if (!row) return null;
 
@@ -120,7 +120,7 @@ export class ApiKeyService {
   async createGroup(name: string, description?: string): Promise<number> {
     const normalizedName = name.toLowerCase();
     const result = await this.db.execute(
-      "INSERT INTO api_key_groups (name, description) VALUES (?, ?)",
+      "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
       [normalizedName, description ?? null]
     );
     return Number(result.lastInsertRowId);
@@ -131,7 +131,7 @@ export class ApiKeyService {
    */
   async updateGroup(id: number, description: string): Promise<void> {
     await this.db.execute(
-      "UPDATE api_key_groups SET description = ? WHERE id = ?",
+      "UPDATE apiKeyGroups SET description = ? WHERE id = ?",
       [description, id]
     );
   }
@@ -140,7 +140,7 @@ export class ApiKeyService {
    * Delete a group by ID. Cascades to all keys in the group.
    */
   async deleteGroup(id: number): Promise<void> {
-    await this.db.execute("DELETE FROM api_key_groups WHERE id = ?", [id]);
+    await this.db.execute("DELETE FROM apiKeyGroups WHERE id = ?", [id]);
   }
 
   /**
@@ -170,8 +170,8 @@ export class ApiKeyService {
       description: string | null;
     }>(`
       SELECT ak.id, g.name as group_name, ak.name, ak.value, ak.description
-      FROM api_keys ak
-      JOIN api_key_groups g ON g.id = ak.group_id
+      FROM apiKeys ak
+      JOIN apiKeyGroups g ON g.id = ak.groupId
       ORDER BY g.name, ak.name
     `);
 
@@ -217,7 +217,7 @@ export class ApiKeyService {
       name: string;
       value: string;
       description: string | null;
-    }>("SELECT id, name, value, description FROM api_keys WHERE group_id = ? ORDER BY name", [
+    }>("SELECT id, name, value, description FROM apiKeys WHERE groupId = ? ORDER BY name", [
       groupRow.id,
     ]);
 
@@ -258,8 +258,8 @@ export class ApiKeyService {
          g.id as group_id,
          g.name as group_name,
          g.description as group_description
-       FROM api_keys k
-       JOIN api_key_groups g ON k.group_id = g.id
+       FROM apiKeys k
+       JOIN apiKeyGroups g ON k.groupId = g.id
        WHERE k.id = ?`,
       [keyId]
     );
@@ -301,7 +301,7 @@ export class ApiKeyService {
     // O(1) hash-based lookup eliminates timing attack
     const valueHash = await this.hashService.computeHash(keyValue);
     const row = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM api_keys WHERE group_id = ? AND value_hash = ?",
+      "SELECT id FROM apiKeys WHERE groupId = ? AND valueHash = ?",
       [groupRow.id, valueHash]
     );
 
@@ -330,7 +330,7 @@ export class ApiKeyService {
     // O(1) hash-based lookup eliminates timing attack
     const valueHash = await this.hashService.computeHash(keyValue);
     const row = await this.db.queryOne<{ id: number; name: string }>(
-      "SELECT id, name FROM api_keys WHERE group_id = ? AND value_hash = ?",
+      "SELECT id, name FROM apiKeys WHERE groupId = ? AND valueHash = ?",
       [groupRow.id, valueHash]
     );
 
@@ -382,7 +382,7 @@ export class ApiKeyService {
 
     // Check if name already exists in this group
     const existingKeyWithName = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM api_keys WHERE group_id = ? AND name = ?",
+      "SELECT id FROM apiKeys WHERE groupId = ? AND name = ?",
       [groupId, normalizedName]
     );
 
@@ -400,7 +400,7 @@ export class ApiKeyService {
 
     // Insert the encrypted key with hash
     await this.db.execute(
-      "INSERT INTO api_keys (group_id, name, value, value_hash, description, created_at, modified_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+      "INSERT INTO apiKeys (groupId, name, value, valueHash, description, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
       [groupId, normalizedName, encryptedValue, valueHash, description ?? null]
     );
   }
@@ -422,7 +422,7 @@ export class ApiKeyService {
     // O(1) hash-based lookup and delete
     const valueHash = await this.hashService.computeHash(keyValue);
     await this.db.execute(
-      "DELETE FROM api_keys WHERE group_id = ? AND value_hash = ?",
+      "DELETE FROM apiKeys WHERE groupId = ? AND valueHash = ?",
       [groupRow.id, valueHash]
     );
   }
@@ -433,7 +433,7 @@ export class ApiKeyService {
    * @param id - The unique key ID
    */
   async removeKeyById(id: number): Promise<void> {
-    await this.db.execute("DELETE FROM api_keys WHERE id = ?", [id]);
+    await this.db.execute("DELETE FROM apiKeys WHERE id = ?", [id]);
   }
 
   /**
@@ -448,7 +448,7 @@ export class ApiKeyService {
       return;
     }
 
-    await this.db.execute("DELETE FROM api_keys WHERE group_id = ?", [
+    await this.db.execute("DELETE FROM apiKeys WHERE groupId = ?", [
       groupRow.id,
     ]);
   }
@@ -465,7 +465,7 @@ export class ApiKeyService {
     }
 
     // CASCADE will delete keys automatically
-    await this.db.execute("DELETE FROM api_key_groups WHERE id = ?", [
+    await this.db.execute("DELETE FROM apiKeyGroups WHERE id = ?", [
       groupRow.id,
     ]);
   }

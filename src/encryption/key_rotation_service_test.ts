@@ -34,24 +34,24 @@ const SECRETS_SCHEMA = `
     api_group_id INTEGER,
     api_key_id INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `;
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_key_groups (
+  CREATE TABLE apiKeyGroups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TABLE api_keys (
+  CREATE TABLE apiKeys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
     value TEXT NOT NULL,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `;
 
@@ -138,7 +138,7 @@ async function insertApiKey(
 ): Promise<number> {
   const encrypted = await ctx.encryptionService.encrypt(plaintext);
   const result = await ctx.db.execute(
-    "INSERT INTO api_keys (group_id, value, description) VALUES (?, ?, 'test')",
+    "INSERT INTO apiKeys (groupId, value, description) VALUES (?, ?, 'test')",
     [groupId, encrypted]
   );
   return result.lastInsertRowId;
@@ -381,7 +381,7 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
 // API keys rotation tests
 // =====================
 
-Deno.test("KeyRotationService - rotates api_keys table", async () => {
+Deno.test("KeyRotationService - rotates apiKeys table", async () => {
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 100);
 
@@ -392,7 +392,7 @@ Deno.test("KeyRotationService - rotates api_keys table", async () => {
   try {
     // Create a group and add API keys
     await ctx.db.execute(
-      "INSERT INTO api_key_groups (name, description) VALUES (?, ?)",
+      "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
       ["test-group", "Test"]
     );
     await insertApiKey(ctx, 1, "api-key-value-1");
@@ -411,7 +411,7 @@ Deno.test("KeyRotationService - rotates api_keys table", async () => {
 
     // All API keys should be version B
     const rows = await ctx.db.queryAll<{ value: string }>(
-      "SELECT value FROM api_keys"
+      "SELECT value FROM apiKeys"
     );
 
     expect(rows.length).toBe(2);

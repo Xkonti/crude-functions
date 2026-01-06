@@ -15,25 +15,25 @@ const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_key_groups (
+  CREATE TABLE apiKeyGroups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TABLE api_keys (
+  CREATE TABLE apiKeys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     value TEXT NOT NULL,
-    value_hash TEXT,
+    valueHash TEXT,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
-  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
-  CREATE INDEX idx_api_keys_hash ON api_keys(group_id, value_hash);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON apiKeys(groupId, name);
+  CREATE INDEX idx_api_keys_group ON apiKeys(groupId);
+  CREATE INDEX idx_api_keys_hash ON apiKeys(groupId, valueHash);
 `;
 
 const SETTINGS_SCHEMA = `
@@ -43,7 +43,7 @@ const SETTINGS_SCHEMA = `
     user_id TEXT,
     value TEXT,
     is_encrypted INTEGER NOT NULL DEFAULT 0,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(user_id, ''));
   CREATE INDEX idx_settings_name ON settings(name);

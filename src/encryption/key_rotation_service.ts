@@ -23,7 +23,7 @@ import { logger } from "../utils/logger.ts";
 /**
  * Tables containing encrypted data that need key rotation.
  */
-const ENCRYPTED_TABLES: EncryptedTable[] = ["secrets", "api_keys"];
+const ENCRYPTED_TABLES: EncryptedTable[] = ["secrets", "apiKeys"];
 
 /**
  * Maximum consecutive failures before auto-stopping.
@@ -338,7 +338,7 @@ export class KeyRotationService {
     phasedOutVersion: string
   ): Promise<EncryptedRecord[]> {
     const query = `
-      SELECT id, value, modified_at FROM ${table}
+      SELECT id, value, updatedAt FROM ${table}
       WHERE value LIKE ?
       LIMIT ?
     `;
@@ -375,9 +375,9 @@ export class KeyRotationService {
         // Update with optimistic concurrency
         const result = await this.db.execute(
           `UPDATE ${table}
-           SET value = ?, modified_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND modified_at = ?`,
-          [newValue, record.id, record.modified_at]
+           SET value = ?, updatedAt = CURRENT_TIMESTAMP
+           WHERE id = ? AND updatedAt = ?`,
+          [newValue, record.id, record.updatedAt]
         );
 
         if (result.changes === 0) {

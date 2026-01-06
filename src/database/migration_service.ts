@@ -51,7 +51,7 @@ const MIGRATION_FILENAME_REGEX = /^(\d{3})-.+\.sql$/;
  * - 001-add-users.sql
  * - 005-add-indexes.sql (gaps are allowed)
  *
- * The first migration (000) should create the schema_version table.
+ * The first migration (000) should create the schemaVersion table.
  *
  * @example
  * ```typescript
@@ -77,12 +77,12 @@ export class MigrationService {
    * Gets the current schema version from the database.
    *
    * @returns Current version number, or null if no migrations have been applied
-   *          (schema_version table doesn't exist or is empty)
+   *          (schemaVersion table doesn't exist or is empty)
    */
   async getCurrentVersion(): Promise<number | null> {
     try {
       const row = await this.db.queryOne<{ version: number }>(
-        "SELECT version FROM schema_version LIMIT 1"
+        "SELECT version FROM schemaVersion LIMIT 1"
       );
       return row?.version ?? null;
     } catch {
@@ -211,17 +211,17 @@ export class MigrationService {
   private async updateVersion(version: number): Promise<void> {
     // Check if a version row exists
     const existing = await this.db.queryOne<{ version: number }>(
-      "SELECT version FROM schema_version LIMIT 1"
+      "SELECT version FROM schemaVersion LIMIT 1"
     );
 
     if (existing === null) {
       // Insert initial version
-      await this.db.execute("INSERT INTO schema_version (version) VALUES (?)", [
+      await this.db.execute("INSERT INTO schemaVersion (version) VALUES (?)", [
         version,
       ]);
     } else {
       // Update existing version
-      await this.db.execute("UPDATE schema_version SET version = ?", [version]);
+      await this.db.execute("UPDATE schemaVersion SET version = ?", [version]);
     }
   }
 
@@ -238,17 +238,17 @@ export class MigrationService {
   ): Promise<void> {
     // Check if a version row exists
     const existing = await tx.queryOne<{ version: number }>(
-      "SELECT version FROM schema_version LIMIT 1"
+      "SELECT version FROM schemaVersion LIMIT 1"
     );
 
     if (existing === null) {
       // Insert initial version
-      await tx.execute("INSERT INTO schema_version (version) VALUES (?)", [
+      await tx.execute("INSERT INTO schemaVersion (version) VALUES (?)", [
         version,
       ]);
     } else {
       // Update existing version
-      await tx.execute("UPDATE schema_version SET version = ?", [version]);
+      await tx.execute("UPDATE schemaVersion SET version = ?", [version]);
     }
   }
 }

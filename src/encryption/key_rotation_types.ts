@@ -37,7 +37,7 @@ export interface KeyRotationServiceOptions {
 /**
  * Tables that contain encrypted data and need key rotation.
  */
-export type EncryptedTable = "secrets" | "api_keys";
+export type EncryptedTable = "secrets" | "apiKeys";
 
 /**
  * A record from an encrypted table that needs re-encryption.
@@ -47,7 +47,7 @@ export interface EncryptedRecord {
   [key: string]: unknown;
   id: number;
   value: string;
-  modified_at: string;
+  updatedAt: string;
 }
 
 /**

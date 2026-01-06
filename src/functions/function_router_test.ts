@@ -16,25 +16,25 @@ const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
-CREATE TABLE IF NOT EXISTS api_key_groups (
+CREATE TABLE IF NOT EXISTS apiKeyGroups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   description TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS api_keys (
+CREATE TABLE IF NOT EXISTS apiKeys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
   name TEXT NOT NULL,
   value TEXT NOT NULL,
-  value_hash TEXT,
+  valueHash TEXT,
   description TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_name ON api_keys(group_id, name);
-CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_id);
-CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(group_id, value_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_apiKeys_group_name ON apiKeys(groupId, name);
+CREATE INDEX IF NOT EXISTS idx_apiKeys_group ON apiKeys(groupId);
+CREATE INDEX IF NOT EXISTS idx_apiKeys_hash ON apiKeys(groupId, valueHash);
 `;
 
 const ROUTES_SCHEMA = `
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS routes (
   route TEXT NOT NULL,
   methods TEXT NOT NULL,
   keys TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
 `;
@@ -87,10 +87,10 @@ CREATE TABLE secrets (
   comment TEXT,
   scope INTEGER NOT NULL,
   function_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
-  api_group_id INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
-  api_key_id INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  api_group_id INTEGER REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
+  api_key_id INTEGER REFERENCES apiKeys(id) ON DELETE CASCADE,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 `;
 

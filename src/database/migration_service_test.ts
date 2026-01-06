@@ -49,7 +49,7 @@ async function writeMigration(
 // getCurrentVersion tests
 // =====================
 
-Deno.test("getCurrentVersion returns null when schema_version table does not exist", async () => {
+Deno.test("getCurrentVersion returns null when schemaVersion table does not exist", async () => {
   const { db, migrationService, tempDir } = await createTestContext();
 
   try {
@@ -61,13 +61,13 @@ Deno.test("getCurrentVersion returns null when schema_version table does not exi
   }
 });
 
-Deno.test("getCurrentVersion returns version when schema_version exists", async () => {
+Deno.test("getCurrentVersion returns version when schemaVersion exists", async () => {
   const { db, migrationService, tempDir } = await createTestContext();
 
   try {
-    // Manually create schema_version table and insert a version
-    await db.exec("CREATE TABLE schema_version (version INTEGER NOT NULL)");
-    await db.execute("INSERT INTO schema_version (version) VALUES (?)", [5]);
+    // Manually create schemaVersion table and insert a version
+    await db.exec("CREATE TABLE schemaVersion (version INTEGER NOT NULL)");
+    await db.execute("INSERT INTO schemaVersion (version) VALUES (?)", [5]);
 
     const version = await migrationService.getCurrentVersion();
     expect(version).toBe(5);
@@ -176,7 +176,7 @@ Deno.test("migrate applies all migrations on fresh database", async () => {
       migrationsDir,
       "000-init.sql",
       `
-      CREATE TABLE schema_version (version INTEGER NOT NULL);
+      CREATE TABLE schemaVersion (version INTEGER NOT NULL);
       CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
     `
     );
@@ -192,7 +192,7 @@ Deno.test("migrate applies all migrations on fresh database", async () => {
     expect(result.fromVersion).toBeNull();
     expect(result.toVersion).toBe(1);
 
-    // Verify schema_version was updated
+    // Verify schemaVersion was updated
     const version = await migrationService.getCurrentVersion();
     expect(version).toBe(1);
 
@@ -201,7 +201,7 @@ Deno.test("migrate applies all migrations on fresh database", async () => {
       "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
     );
     const tableNames = tables.map((t) => t.name);
-    expect(tableNames).toContain("schema_version");
+    expect(tableNames).toContain("schemaVersion");
     expect(tableNames).toContain("users");
 
     await db.close();
@@ -216,15 +216,15 @@ Deno.test("migrate only applies new migrations on partially migrated database", 
 
   try {
     // Simulate already having run migration 000
-    await db.exec("CREATE TABLE schema_version (version INTEGER NOT NULL)");
-    await db.execute("INSERT INTO schema_version (version) VALUES (?)", [0]);
+    await db.exec("CREATE TABLE schemaVersion (version INTEGER NOT NULL)");
+    await db.execute("INSERT INTO schemaVersion (version) VALUES (?)", [0]);
     await db.exec("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)");
 
     // Write all migrations (including already-applied 000)
     await writeMigration(
       migrationsDir,
       "000-init.sql",
-      "CREATE TABLE schema_version (version INTEGER NOT NULL); CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+      "CREATE TABLE schemaVersion (version INTEGER NOT NULL); CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
     );
     await writeMigration(
       migrationsDir,
@@ -243,7 +243,7 @@ Deno.test("migrate only applies new migrations on partially migrated database", 
     expect(result.fromVersion).toBe(0);
     expect(result.toVersion).toBe(2);
 
-    // Verify schema_version was updated
+    // Verify schemaVersion was updated
     const version = await migrationService.getCurrentVersion();
     expect(version).toBe(2);
 
@@ -259,8 +259,8 @@ Deno.test("migrate returns zero applied when no pending migrations", async () =>
 
   try {
     // Simulate already having run all migrations
-    await db.exec("CREATE TABLE schema_version (version INTEGER NOT NULL)");
-    await db.execute("INSERT INTO schema_version (version) VALUES (?)", [1]);
+    await db.exec("CREATE TABLE schemaVersion (version INTEGER NOT NULL)");
+    await db.execute("INSERT INTO schemaVersion (version) VALUES (?)", [1]);
 
     await writeMigration(migrationsDir, "000-init.sql", "SELECT 1");
     await writeMigration(migrationsDir, "001-add-users.sql", "SELECT 2");
@@ -285,7 +285,7 @@ Deno.test("migrate handles version gaps correctly", async () => {
     await writeMigration(
       migrationsDir,
       "000-init.sql",
-      "CREATE TABLE schema_version (version INTEGER NOT NULL)"
+      "CREATE TABLE schemaVersion (version INTEGER NOT NULL)"
     );
     await writeMigration(
       migrationsDir,
@@ -321,7 +321,7 @@ Deno.test("migrate throws MigrationExecutionError on SQL failure", async () => {
     await writeMigration(
       migrationsDir,
       "000-init.sql",
-      "CREATE TABLE schema_version (version INTEGER NOT NULL)"
+      "CREATE TABLE schemaVersion (version INTEGER NOT NULL)"
     );
     await writeMigration(
       migrationsDir,
@@ -378,7 +378,7 @@ Deno.test("migrate throws MigrationFileError when Deno.readTextFile fails", asyn
 
   // Pre-read the first migration content before stubbing
   const firstMigrationContent =
-    "CREATE TABLE schema_version (version INTEGER NOT NULL)";
+    "CREATE TABLE schemaVersion (version INTEGER NOT NULL)";
   await writeMigration(migrationsDir, "000-init.sql", firstMigrationContent);
   await writeMigration(migrationsDir, "001-second.sql", "SELECT 1");
 
@@ -453,8 +453,8 @@ Deno.test("MigrationService - failed migration rolls back atomically", async () 
     // Create initial migration
     await Deno.writeTextFile(
       `${migrationsDir}/000-init.sql`,
-      `CREATE TABLE schema_version (version INTEGER);
-       INSERT INTO schema_version (version) VALUES (0);`
+      `CREATE TABLE schemaVersion (version INTEGER);
+       INSERT INTO schemaVersion (version) VALUES (0);`
     );
 
     const db = new DatabaseService({ databasePath: dbPath });

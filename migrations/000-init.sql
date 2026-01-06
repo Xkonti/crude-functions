@@ -2,7 +2,7 @@
 -- Consolidated from migrations 000-007
 
 -- Schema version tracking table
-CREATE TABLE IF NOT EXISTS schema_version (
+CREATE TABLE IF NOT EXISTS schemaVersion (
   version INTEGER NOT NULL
 );
 
@@ -82,32 +82,32 @@ CREATE INDEX IF NOT EXISTS idx_verification_identifier ON verification(identifie
 --------------------------------------------------------------------------------
 
 -- API Key Groups table - manages key groupings
-CREATE TABLE IF NOT EXISTS api_key_groups (
+CREATE TABLE IF NOT EXISTS apiKeyGroups (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   description TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Ensure management group always exists
-INSERT OR IGNORE INTO api_key_groups (name, description)
+INSERT OR IGNORE INTO apiKeyGroups (name, description)
 VALUES ('management', 'Management API keys');
 
 -- API Keys table - stores API keys with group relationships
-CREATE TABLE IF NOT EXISTS api_keys (
+CREATE TABLE IF NOT EXISTS apiKeys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
   name TEXT NOT NULL DEFAULT '',
   value TEXT NOT NULL,
-  value_hash TEXT,
+  valueHash TEXT,
   description TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_name ON api_keys(group_id, name);
-CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_id);
-CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(group_id, value_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_name ON apiKeys(groupId, name);
+CREATE INDEX IF NOT EXISTS idx_api_keys_group ON apiKeys(groupId);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON apiKeys(groupId, valueHash);
 
 --------------------------------------------------------------------------------
 -- Routes and Function Execution

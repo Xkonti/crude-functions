@@ -18,25 +18,25 @@ const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_key_groups (
+  CREATE TABLE apiKeyGroups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TABLE api_keys (
+  CREATE TABLE apiKeys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     value TEXT NOT NULL,
-    value_hash TEXT,
+    valueHash TEXT,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
-  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
-  CREATE INDEX idx_api_keys_hash ON api_keys(group_id, value_hash);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON apiKeys(groupId, name);
+  CREATE INDEX idx_api_keys_group ON apiKeys(groupId);
+  CREATE INDEX idx_api_keys_hash ON apiKeys(groupId, valueHash);
 `;
 
 async function createTestSetup(): Promise<{
@@ -448,7 +448,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
 
       // Query raw database value
       const row = await db.queryOne<{ value: string }>(
-        "SELECT value FROM api_keys LIMIT 1"
+        "SELECT value FROM apiKeys LIMIT 1"
       );
 
       // Should NOT be plaintext
@@ -520,13 +520,13 @@ Deno.test("ApiKeyService - Hash stored on addKey", async () => {
   try {
     await service.addKey("test", "key1", "mykey123");
 
-    const row = await db.queryOne<{ value_hash: string }>(
-      "SELECT value_hash FROM api_keys WHERE name = 'key1'"
+    const row = await db.queryOne<{ valueHash: string }>(
+      "SELECT valueHash FROM apiKeys WHERE name = 'key1'"
     );
 
     expect(row).not.toBeNull();
-    expect(row!.value_hash).not.toBeNull();
-    expect(row!.value_hash.length).toBeGreaterThan(20); // Base64 hash
+    expect(row!.valueHash).not.toBeNull();
+    expect(row!.valueHash.length).toBeGreaterThan(20); // Base64 hash
   } finally {
     await cleanup(db, tempDir);
   }
@@ -539,14 +539,14 @@ Deno.test("ApiKeyService - Different keys produce different hashes", async () =>
     await service.addKey("test", "key1", "value1");
     await service.addKey("test", "key2", "value2");
 
-    const row1 = await db.queryOne<{ value_hash: string }>(
-      "SELECT value_hash FROM api_keys WHERE name = 'key1'"
+    const row1 = await db.queryOne<{ valueHash: string }>(
+      "SELECT valueHash FROM apiKeys WHERE name = 'key1'"
     );
-    const row2 = await db.queryOne<{ value_hash: string }>(
-      "SELECT value_hash FROM api_keys WHERE name = 'key2'"
+    const row2 = await db.queryOne<{ valueHash: string }>(
+      "SELECT valueHash FROM apiKeys WHERE name = 'key2'"
     );
 
-    expect(row1!.value_hash).not.toBe(row2!.value_hash);
+    expect(row1!.valueHash).not.toBe(row2!.valueHash);
   } finally {
     await cleanup(db, tempDir);
   }

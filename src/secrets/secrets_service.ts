@@ -870,7 +870,7 @@ export class SecretsService {
       // Get group IDs for accepted group names
       const placeholders = acceptedGroupNames.map(() => '?').join(',');
       const groupsQuery = `
-        SELECT id, name FROM api_key_groups
+        SELECT id, name FROM apiKeyGroups
         WHERE name IN (${placeholders})
       `;
       const groups = await this.db.queryAll<{ id: number; name: string }>(
@@ -897,8 +897,8 @@ export class SecretsService {
         const keySecretsQuery = `
           SELECT s.id, s.name, s.value, s.api_key_id, k.name as key_name
           FROM secrets s
-          JOIN api_keys k ON s.api_key_id = k.id
-          WHERE s.scope = ? AND k.group_id = ?
+          JOIN apiKeys k ON s.api_key_id = k.id
+          WHERE s.scope = ? AND k.groupId = ?
           ORDER BY s.name ASC, k.name ASC
         `;
         const keySecretRows = await this.db.queryAll<{
@@ -1117,7 +1117,7 @@ export class SecretsService {
       }>(
         `SELECT s.value, s.api_group_id as group_id, g.name as group_name
          FROM secrets s
-         JOIN api_key_groups g ON s.api_group_id = g.id
+         JOIN apiKeyGroups g ON s.api_group_id = g.id
          WHERE s.name = ? AND s.scope = ? AND s.api_group_id = ?`,
         [name, SecretScope.Group, apiGroupId]
       );
@@ -1147,8 +1147,8 @@ export class SecretsService {
         `SELECT s.value, s.api_key_id as key_id, g.id as group_id,
                 g.name as group_name, k.name as key_name
          FROM secrets s
-         JOIN api_keys k ON s.api_key_id = k.id
-         JOIN api_key_groups g ON k.group_id = g.id
+         JOIN apiKeys k ON s.api_key_id = k.id
+         JOIN apiKeyGroups g ON k.groupId = g.id
          WHERE s.name = ? AND s.scope = ? AND s.api_key_id = ?`,
         [name, SecretScope.Key, apiKeyId]
       );
