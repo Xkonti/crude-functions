@@ -895,18 +895,18 @@ export class SecretsService {
 
         // Get key-level secrets for this group
         const keySecretsQuery = `
-          SELECT s.id, s.name, s.value, s.api_key_id, k.value as key_value
+          SELECT s.id, s.name, s.value, s.api_key_id, k.name as key_name
           FROM secrets s
           JOIN api_keys k ON s.api_key_id = k.id
           WHERE s.scope = ? AND k.group_id = ?
-          ORDER BY s.name ASC, k.value ASC
+          ORDER BY s.name ASC, k.name ASC
         `;
         const keySecretRows = await this.db.queryAll<{
           id: number;
           name: string;
           value: string;
           api_key_id: number;
-          key_value: string;
+          key_name: string;
         }>(keySecretsQuery, [SecretScope.Key, group.id]);
 
         for (const row of keySecretRows) {
@@ -920,7 +920,7 @@ export class SecretsService {
             groupId: group.id,
             groupName: group.name,
             keyId: row.api_key_id,
-            keyValue: row.key_value,
+            keyName: row.key_name,
           });
         }
       }
@@ -1068,7 +1068,7 @@ export class SecretsService {
           groupId: number;
           groupName: string;
           keyId: number;
-          keyValue: string;
+          keyName: string;
         };
       }
     | undefined
@@ -1083,7 +1083,7 @@ export class SecretsService {
         groupId: number;
         groupName: string;
         keyId: number;
-        keyValue: string;
+        keyName: string;
       };
     } = {};
 
@@ -1142,10 +1142,10 @@ export class SecretsService {
         key_id: number;
         group_id: number;
         group_name: string;
-        key_value: string;
+        key_name: string;
       }>(
         `SELECT s.value, s.api_key_id as key_id, g.id as group_id,
-                g.name as group_name, k.value as key_value
+                g.name as group_name, k.name as key_name
          FROM secrets s
          JOIN api_keys k ON s.api_key_id = k.id
          JOIN api_key_groups g ON k.group_id = g.id
@@ -1157,15 +1157,12 @@ export class SecretsService {
         const decryptedSecretValue = await this.encryptionService.decrypt(
           keyRow.value
         );
-        const decryptedKeyValue = await this.encryptionService.decrypt(
-          keyRow.key_value
-        );
         result.key = {
           value: decryptedSecretValue,
           groupId: keyRow.group_id,
           groupName: keyRow.group_name,
           keyId: keyRow.key_id,
-          keyValue: decryptedKeyValue,
+          keyName: keyRow.key_name,
         };
         hasAnySecret = true;
       }

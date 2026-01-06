@@ -161,7 +161,7 @@ async function createTestApp(
   const apiKeyService = new ApiKeyService({ db, encryptionService });
 
   // Add default management key via service (which handles group creation)
-  await apiKeyService.addKey("management", "testkey123", "admin");
+  await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
   const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
   const consoleLogService = new ConsoleLogService({ db });
@@ -524,7 +524,7 @@ Deno.test("GET /web/keys lists keys grouped by group", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
     // Add additional key
-    await apiKeyService.addKey("api", "key1", "user");
+    await apiKeyService.addKey("api", "key-1", "key1", "user");
 
     const res = await app.request("/web/keys");
     expect(res.status).toBe(200);
@@ -591,8 +591,8 @@ Deno.test("POST /web/keys/create creates key", async () => {
 Deno.test("POST /web/keys/delete removes key by ID", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    await apiKeyService.addKey("mykey", "val1");
-    await apiKeyService.addKey("mykey", "val2");
+    await apiKeyService.addKey("mykey", "key-1", "val1");
+    await apiKeyService.addKey("mykey", "key-2", "val2");
 
     const keys = await apiKeyService.getKeys("mykey");
     const val1Key = keys!.find((k) => k.value === "val1")!;
@@ -615,8 +615,8 @@ Deno.test("POST /web/keys/delete removes key by ID", async () => {
 Deno.test("POST /web/keys/delete-group removes all keys for group", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    await apiKeyService.addKey("toremove", "val1");
-    await apiKeyService.addKey("toremove", "val2");
+    await apiKeyService.addKey("toremove", "key-1", "val1");
+    await apiKeyService.addKey("toremove", "key-2", "val2");
 
     const res = await app.request("/web/keys/delete-group?group=toremove", {
       method: "POST",

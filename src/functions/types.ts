@@ -63,7 +63,7 @@ export interface FunctionContext {
           groupId: number;
           groupName: string;
           keyId: number;
-          keyValue: string;
+          keyName: string;
         };
       }
     | undefined

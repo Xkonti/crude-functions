@@ -124,7 +124,7 @@ function renderSecretsPreview(previews: SecretPreview[]): string {
                 <div id="keys-${previewIdx}-${escapeHtml(groupName)}" style="display: none; margin-left: 1rem; margin-top: 0.5rem;">
                   ${keys.map(keySource => `
                     <div class="secret-value" style="margin-bottom: 0.25rem;">
-                      <span style="color: #6c757d;">• ${escapeHtml(groupName)}/${escapeHtml(keySource.keyValue || '')}:</span>
+                      <span style="color: #6c757d;">• ${escapeHtml(groupName)}/${escapeHtml(keySource.keyName || '')}:</span>
                       <span class="masked">••••••••</span>
                       <span class="revealed" style="display:none;">
                         <code>${escapeHtml(keySource.value)}</code>

@@ -77,8 +77,8 @@ Deno.test("GET /api/keys returns all key groups", async () => {
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1");
-    await service.addKey("service", "key2");
+    await service.addKey("email", "key-1", "key1");
+    await service.addKey("service", "key-2", "key2");
 
     const res = await app.request("/api/keys");
     expect(res.status).toBe(200);
@@ -96,8 +96,8 @@ Deno.test("GET /api/keys/:group returns keys for existing group", async () => {
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1", "first");
-    await service.addKey("email", "key2");
+    await service.addKey("email", "key-1", "key1", "first");
+    await service.addKey("email", "key-2", "key2");
 
     const res = await app.request("/api/keys/email");
     expect(res.status).toBe(200);
@@ -115,7 +115,7 @@ Deno.test("GET /api/keys/:group returns 404 for non-existent group", async () =>
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1");
+    await service.addKey("email", "key-1", "key1");
 
     const res = await app.request("/api/keys/nonexistent");
     expect(res.status).toBe(404);
@@ -131,7 +131,7 @@ Deno.test("GET /api/keys/:group normalizes group to lowercase", async () => {
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1");
+    await service.addKey("email", "key-1", "key1");
 
     const res = await app.request("/api/keys/EMAIL");
     expect(res.status).toBe(200);
@@ -228,8 +228,8 @@ Deno.test("DELETE /api/keys/by-id/:id removes key by ID", async () => {
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1");
-    await service.addKey("email", "key2");
+    await service.addKey("email", "key-1", "key1");
+    await service.addKey("email", "key-2", "key2");
 
     const keys = await service.getKeys("email");
     const key1Id = keys!.find((k) => k.value === "key1")!.id;
@@ -273,9 +273,9 @@ Deno.test("DELETE /api/keys/:group removes all keys for group", async () => {
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1");
-    await service.addKey("email", "key2");
-    await service.addKey("other", "key3");
+    await service.addKey("email", "key-1", "key1");
+    await service.addKey("email", "key-2", "key2");
+    await service.addKey("other", "key-3", "key3");
 
     const res = await app.request("/api/keys/email", {
       method: "DELETE",
@@ -299,7 +299,7 @@ Deno.test("DELETE /api/keys/:group returns 404 for non-existent group", async ()
   const { app, service, db, tempDir } = await createTestApp();
 
   try {
-    await service.addKey("email", "key1");
+    await service.addKey("email", "key-1", "key1");
 
     const res = await app.request("/api/keys/nonexistent", {
       method: "DELETE",
@@ -469,7 +469,7 @@ Deno.test("DELETE /api/keys/groups/:id deletes group", async () => {
 
   try {
     const id = await service.createGroup("email", "Email keys");
-    await service.addKey("email", "key1");
+    await service.addKey("email", "key-1", "key1");
 
     const res = await app.request(`/api/keys/groups/${id}`, {
       method: "DELETE",

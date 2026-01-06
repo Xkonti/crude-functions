@@ -3,6 +3,7 @@ import { DatabaseService } from "../database/database_service.ts";
 import {
   ApiKeyService,
   validateKeyGroup,
+  validateKeyName,
   validateKeyValue,
 } from "./api_key_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
@@ -21,12 +22,13 @@ const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     value TEXT NOT NULL,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     modified_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
   CREATE INDEX idx_api_keys_group ON api_keys(group_id);
 `;
 
@@ -76,6 +78,22 @@ Deno.test("validateKeyGroup rejects invalid groups", () => {
   expect(validateKeyGroup("has@special")).toBe(false);
 });
 
+Deno.test("validateKeyName accepts valid names", () => {
+  expect(validateKeyName("my-key")).toBe(true);
+  expect(validateKeyName("admin-key")).toBe(true);
+  expect(validateKeyName("test_key")).toBe(true);
+  expect(validateKeyName("key123")).toBe(true);
+  expect(validateKeyName("a")).toBe(true);
+});
+
+Deno.test("validateKeyName rejects invalid names", () => {
+  expect(validateKeyName("")).toBe(false);
+  expect(validateKeyName("UPPERCASE")).toBe(false);
+  expect(validateKeyName("has space")).toBe(false);
+  expect(validateKeyName("has.dot")).toBe(false);
+  expect(validateKeyName("has@special")).toBe(false);
+});
+
 Deno.test("validateKeyValue accepts valid values", () => {
   expect(validateKeyValue("abc123")).toBe(true);
   expect(validateKeyValue("ABC123")).toBe(true);
@@ -110,7 +128,7 @@ Deno.test("ApiKeyService.addKey adds key to database", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("email", "newkey", "test description");
+    await service.addKey("email", "email-key", "newkey", "test description");
 
     // Verify it was added
     expect(await service.hasKey("email", "newkey")).toBe(true);
@@ -119,6 +137,7 @@ Deno.test("ApiKeyService.addKey adds key to database", async () => {
     const keys = await service.getKeys("email");
     expect(keys).not.toBeNull();
     expect(keys!.length).toBe(1);
+    expect(keys![0].name).toBe("email-key");
     expect(keys![0].value).toBe("newkey");
     expect(keys![0].description).toBe("test description");
     expect(keys![0].id).toBeGreaterThan(0);
@@ -131,8 +150,8 @@ Deno.test("ApiKeyService.addKey silently ignores duplicates", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("email", "key1", "first");
-    await service.addKey("email", "key1", "second"); // Duplicate
+    await service.addKey("email", "test-key", "key1", "first");
+    await service.addKey("email", "test-key", "key1", "second"); // Duplicate value
 
     const keys = await service.getKeys("email");
     expect(keys!.length).toBe(1);
@@ -146,9 +165,9 @@ Deno.test("ApiKeyService.getAll returns grouped keys", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("management", "key1", "admin key");
-    await service.addKey("management", "key2");
-    await service.addKey("email", "key3");
+    await service.addKey("management", "admin-key", "key1", "admin key");
+    await service.addKey("management", "backup-key", "key2");
+    await service.addKey("email", "smtp-key", "key3");
 
     const all = await service.getAll();
 
@@ -164,7 +183,7 @@ Deno.test("ApiKeyService.getKeys normalizes group to lowercase", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("EMAIL", "key1");
+    await service.addKey("EMAIL", "test-key", "key1");
 
     // Query with different case
     const keys = await service.getKeys("email");
@@ -193,11 +212,11 @@ Deno.test("ApiKeyService.hasKey returns true for existing key", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("management", "key1");
+    await service.addKey("management", "key-1", "value1");
 
-    expect(await service.hasKey("management", "key1")).toBe(true);
+    expect(await service.hasKey("management", "value1")).toBe(true);
     expect(await service.hasKey("management", "wrongkey")).toBe(false);
-    expect(await service.hasKey("nonexistent", "key1")).toBe(false);
+    expect(await service.hasKey("nonexistent", "value1")).toBe(false);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -207,13 +226,13 @@ Deno.test("ApiKeyService.removeKey removes specific key", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("management", "key1");
-    await service.addKey("management", "key2");
+    await service.addKey("management", "key-1", "value1");
+    await service.addKey("management", "key-2", "value2");
 
-    await service.removeKey("management", "key1");
+    await service.removeKey("management", "value1");
 
-    expect(await service.hasKey("management", "key1")).toBe(false);
-    expect(await service.hasKey("management", "key2")).toBe(true);
+    expect(await service.hasKey("management", "value1")).toBe(false);
+    expect(await service.hasKey("management", "value2")).toBe(true);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -223,16 +242,16 @@ Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("management", "key1");
-    await service.addKey("management", "key2");
+    await service.addKey("management", "key-1", "value1");
+    await service.addKey("management", "key-2", "value2");
 
     const keys = await service.getKeys("management");
-    const key1Id = keys!.find((k) => k.value === "key1")!.id;
+    const key1Id = keys!.find((k) => k.value === "value1")!.id;
 
     await service.removeKeyById(key1Id);
 
-    expect(await service.hasKey("management", "key1")).toBe(false);
-    expect(await service.hasKey("management", "key2")).toBe(true);
+    expect(await service.hasKey("management", "value1")).toBe(false);
+    expect(await service.hasKey("management", "value2")).toBe(true);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -242,8 +261,8 @@ Deno.test("ApiKeyService.removeGroup removes all keys in group", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("management", "key1");
-    await service.addKey("email", "key2");
+    await service.addKey("management", "key-1", "value1");
+    await service.addKey("email", "key-2", "value2");
 
     await service.removeGroup("email");
 
@@ -360,15 +379,15 @@ Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.addKey("email", "key1");
-    await service.addKey("email", "key2");
+    await service.addKey("email", "key-1", "value1");
+    await service.addKey("email", "key-2", "value2");
 
     const group = await service.getGroupByName("email");
     await service.deleteGroup(group!.id);
 
     // Keys should be gone due to cascade
-    expect(await service.hasKey("email", "key1")).toBe(false);
-    expect(await service.hasKey("email", "key2")).toBe(false);
+    expect(await service.hasKey("email", "value1")).toBe(false);
+    expect(await service.hasKey("email", "value2")).toBe(false);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -394,11 +413,11 @@ Deno.test("ApiKeyService.addKey creates group if needed", async () => {
 
   try {
     // Adding key to nonexistent group should create the group
-    await service.addKey("newgroup", "key1");
+    await service.addKey("newgroup", "key-1", "value1");
 
     const group = await service.getGroupByName("newgroup");
     expect(group).not.toBeNull();
-    expect(await service.hasKey("newgroup", "key1")).toBe(true);
+    expect(await service.hasKey("newgroup", "value1")).toBe(true);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -413,7 +432,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
     const { service, db, tempDir } = await createTestSetup();
 
     try {
-      await service.addKey("test-group", "my-secret-key", "Test key");
+      await service.addKey("test-group", "test-key", "my-secret-key", "Test key");
 
       // Query raw database value
       const row = await db.queryOne<{ value: string }>(
@@ -433,7 +452,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
     const { service, db, tempDir } = await createTestSetup();
 
     try {
-      await service.addKey("test-group", "my-secret-key", "Test key");
+      await service.addKey("test-group", "test-key", "my-secret-key", "Test key");
       const keys = await service.getKeys("test-group");
 
       // Should return plaintext
@@ -448,7 +467,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
     const { service, db, tempDir } = await createTestSetup();
 
     try {
-      await service.addKey("test-group", "my-secret-key", "Test key");
+      await service.addKey("test-group", "test-key", "my-secret-key", "Test key");
 
       // Should validate against plaintext input
       const valid = await service.hasKey("test-group", "my-secret-key");
@@ -465,14 +484,14 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
     const { service, db, tempDir } = await createTestSetup();
 
     try {
-      await service.addKey("group1", "key1", "First key");
-      await service.addKey("group2", "key2", "Second key");
+      await service.addKey("group1", "key-1", "value1", "First key");
+      await service.addKey("group2", "key-2", "value2", "Second key");
 
       const allKeys = await service.getAll();
 
       // Should return decrypted values
-      expect(allKeys.get("group1")![0].value).toBe("key1");
-      expect(allKeys.get("group2")![0].value).toBe("key2");
+      expect(allKeys.get("group1")![0].value).toBe("value1");
+      expect(allKeys.get("group2")![0].value).toBe("value2");
     } finally {
       await cleanup(db, tempDir);
     }

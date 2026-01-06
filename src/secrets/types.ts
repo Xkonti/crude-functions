@@ -51,7 +51,7 @@ export interface SecretPreviewSource {
   groupId?: number;
   groupName?: string;
   keyId?: number;
-  keyValue?: string;
+  keyName?: string;
 }
 
 /**

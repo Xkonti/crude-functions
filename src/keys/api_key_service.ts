@@ -19,6 +19,8 @@ export interface ApiKeyGroup {
 export interface ApiKey {
   /** Unique identifier for the key (used for deletion) */
   id: number;
+  /** User-friendly name for the key (unique within group) */
+  name: string;
   /** The actual key value */
   value: string;
   /** Optional description of the key's purpose */
@@ -28,6 +30,9 @@ export interface ApiKey {
 // Key groups: lowercase a-z, 0-9, underscore, dash
 const KEY_GROUP_REGEX = /^[a-z0-9_-]+$/;
 
+// Key names: lowercase a-z, 0-9, underscore, dash (same as groups)
+const KEY_NAME_REGEX = /^[a-z0-9_-]+$/;
+
 // Key values: a-z, A-Z, 0-9, underscore, dash
 const KEY_VALUE_REGEX = /^[a-zA-Z0-9_-]+$/;
 
@@ -36,6 +41,13 @@ const KEY_VALUE_REGEX = /^[a-zA-Z0-9_-]+$/;
  */
 export function validateKeyGroup(group: string): boolean {
   return KEY_GROUP_REGEX.test(group);
+}
+
+/**
+ * Validates that a key name contains only allowed characters
+ */
+export function validateKeyName(name: string): boolean {
+  return KEY_NAME_REGEX.test(name);
 }
 
 /**
@@ -177,13 +189,14 @@ export class ApiKeyService {
     const rows = await this.db.queryAll<{
       id: number;
       group_name: string;
+      name: string;
       value: string;
       description: string | null;
     }>(`
-      SELECT ak.id, g.name as group_name, ak.value, ak.description
+      SELECT ak.id, g.name as group_name, ak.name, ak.value, ak.description
       FROM api_keys ak
       JOIN api_key_groups g ON g.id = ak.group_id
-      ORDER BY g.name, ak.value
+      ORDER BY g.name, ak.name
     `);
 
     // Decrypt all keys in parallel
@@ -200,6 +213,7 @@ export class ApiKeyService {
       const existing = result.get(row.group_name) || [];
       existing.push({
         id: row.id,
+        name: row.name,
         value: row.value,
         description: row.description ?? undefined,
       });
@@ -224,9 +238,10 @@ export class ApiKeyService {
 
     const rows = await this.db.queryAll<{
       id: number;
+      name: string;
       value: string;
       description: string | null;
-    }>("SELECT id, value, description FROM api_keys WHERE group_id = ?", [
+    }>("SELECT id, name, value, description FROM api_keys WHERE group_id = ? ORDER BY name", [
       groupRow.id,
     ]);
 
@@ -234,6 +249,7 @@ export class ApiKeyService {
     const decryptedKeys = await Promise.all(
       rows.map(async (r) => ({
         id: r.id,
+        name: r.name,
         value: await this.decryptKey(r.value),
         description: r.description ?? undefined,
       }))
@@ -251,6 +267,7 @@ export class ApiKeyService {
   ): Promise<{ key: ApiKey; group: ApiKeyGroup } | null> {
     const row = await this.db.queryOne<{
       key_id: number;
+      key_name: string;
       key_value: string;
       key_description: string | null;
       group_id: number;
@@ -259,6 +276,7 @@ export class ApiKeyService {
     }>(
       `SELECT
          k.id as key_id,
+         k.name as key_name,
          k.value as key_value,
          k.description as key_description,
          g.id as group_id,
@@ -278,6 +296,7 @@ export class ApiKeyService {
     return {
       key: {
         id: row.key_id,
+        name: row.key_name,
         value: decryptedValue,
         description: row.key_description ?? undefined,
       },
@@ -325,12 +344,12 @@ export class ApiKeyService {
    * Used by ApiKeyValidator to obtain IDs for secret resolution.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to look up
-   * @returns Object with keyId and groupId, or null if not found
+   * @returns Object with keyId, groupId, and keyName, or null if not found
    */
   async getKeyByValue(
     group: string,
     keyValue: string
-  ): Promise<{ keyId: number; groupId: number } | null> {
+  ): Promise<{ keyId: number; groupId: number; keyName: string } | null> {
     const normalizedGroup = group.toLowerCase();
 
     const groupRow = await this.getGroupByName(normalizedGroup);
@@ -339,8 +358,8 @@ export class ApiKeyService {
     }
 
     // Fetch all encrypted keys for this group
-    const rows = await this.db.queryAll<{ id: number; value: string }>(
-      "SELECT id, value FROM api_keys WHERE group_id = ?",
+    const rows = await this.db.queryAll<{ id: number; name: string; value: string }>(
+      "SELECT id, name, value FROM api_keys WHERE group_id = ?",
       [groupRow.id]
     );
 
@@ -351,6 +370,7 @@ export class ApiKeyService {
         return {
           keyId: row.id,
           groupId: groupRow.id,
+          keyName: row.name,
         };
       }
     }
@@ -363,15 +383,25 @@ export class ApiKeyService {
    * Creates the group if it doesn't exist.
    * Silently ignores if the exact (group, value) pair already exists.
    * @param group - The group name (will be normalized to lowercase)
+   * @param name - The key name (will be normalized to lowercase, must be unique within group)
    * @param value - The key value
    * @param description - Optional description
    */
   async addKey(
     group: string,
+    name: string,
     value: string,
     description?: string
   ): Promise<void> {
     const normalizedGroup = group.toLowerCase();
+    const normalizedName = name.toLowerCase();
+
+    // Validate key name format
+    if (!validateKeyName(normalizedName)) {
+      throw new Error(
+        "Invalid key name. Must contain only lowercase letters, numbers, dashes, and underscores."
+      );
+    }
 
     // Check if key already exists (silently ignore duplicates)
     // With encryption, we can't rely on DB unique constraint since each
@@ -383,13 +413,25 @@ export class ApiKeyService {
     // Get or create the group
     const groupId = await this.getOrCreateGroup(normalizedGroup);
 
+    // Check if name already exists in this group
+    const existingKeyWithName = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM api_keys WHERE group_id = ? AND name = ?",
+      [groupId, normalizedName]
+    );
+
+    if (existingKeyWithName) {
+      throw new Error(
+        `A key with name '${normalizedName}' already exists in group '${normalizedGroup}'`
+      );
+    }
+
     // Encrypt the key value before storage
     const encryptedValue = await this.encryptKey(value);
 
     // Insert the encrypted key
     await this.db.execute(
-      "INSERT INTO api_keys (group_id, value, description, created_at, modified_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-      [groupId, encryptedValue, description ?? null]
+      "INSERT INTO api_keys (group_id, name, value, description, created_at, modified_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+      [groupId, normalizedName, encryptedValue, description ?? null]
     );
   }
 

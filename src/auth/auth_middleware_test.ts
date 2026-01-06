@@ -156,7 +156,7 @@ Deno.test("HybridAuth: rejects API key when no access groups configured", async 
 
   try {
     // Create a key but don't configure access groups
-    await apiKeyService.addKey("test-group", "test-key-123");
+    await apiKeyService.addKey("test-group", "test-key", "test-key-123");
 
     const res = await app.request("/api/test", {
       headers: {
@@ -181,8 +181,8 @@ Deno.test("HybridAuth: rejects API key from non-allowed group", async () => {
     await apiKeyService.createGroup("forbidden-group", "Forbidden");
 
     // Add keys to both groups
-    await apiKeyService.addKey("allowed-group", "allowed-key");
-    await apiKeyService.addKey("forbidden-group", "forbidden-key");
+    await apiKeyService.addKey("allowed-group", "allowed-key", "allowed-key-value");
+    await apiKeyService.addKey("forbidden-group", "forbidden-key", "forbidden-key-value");
 
     // Configure only the allowed group
     await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(allowedGroupId));
@@ -208,7 +208,7 @@ Deno.test("HybridAuth: accepts API key from single allowed group", async () => {
   try {
     // Create management group and key
     const mgmtGroupId = await apiKeyService.createGroup("management", "Management keys");
-    await apiKeyService.addKey("management", "mgmt-key-123");
+    await apiKeyService.addKey("management", "mgmt-key", "mgmt-key-123");
 
     // Configure access groups
     await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
@@ -238,8 +238,8 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (first group
     const serviceGroupId = await apiKeyService.createGroup("service", "Service keys");
 
     // Add keys to both groups
-    await apiKeyService.addKey("admin", "admin-key");
-    await apiKeyService.addKey("service", "service-key");
+    await apiKeyService.addKey("admin", "admin-key", "admin-key-value");
+    await apiKeyService.addKey("service", "service-key", "service-key-value");
 
     // Configure both groups (comma-separated IDs)
     await settingsService.setGlobalSetting(
@@ -273,8 +273,8 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (second grou
     const serviceGroupId = await apiKeyService.createGroup("service", "Service keys");
 
     // Add keys to both groups
-    await apiKeyService.addKey("admin", "admin-key");
-    await apiKeyService.addKey("service", "service-key");
+    await apiKeyService.addKey("admin", "admin-key", "admin-key-value");
+    await apiKeyService.addKey("service", "service-key", "service-key-value");
 
     // Configure both groups (comma-separated IDs)
     await settingsService.setGlobalSetting(

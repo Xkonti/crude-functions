@@ -1,6 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
-import { validateKeyGroup, validateKeyValue } from "../keys/api_key_service.ts";
+import { validateKeyGroup, validateKeyName, validateKeyValue } from "../keys/api_key_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
 import {
@@ -79,6 +79,7 @@ export function createKeysPages(
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Name</th>
                       <th>Value</th>
                       <th>Description</th>
                       <th class="actions">Actions</th>
@@ -90,6 +91,7 @@ export function createKeysPages(
                         (key) => `
                       <tr>
                         <td><code>${key.id}</code></td>
+                        <td><strong>${escapeHtml(key.name)}</strong></td>
                         <td class="secret-value">
                           <span class="masked">••••••••</span>
                           <span class="revealed" style="display:none;">
@@ -320,6 +322,11 @@ export function createKeysPages(
           </label>
         </div>
         <label>
+          Key Name *
+          <input type="text" name="name" required placeholder="my-api-key">
+          <small>Lowercase letters, numbers, dashes, and underscores only. Must be unique within the group.</small>
+        </label>
+        <label>
           Key Value
           <input type="text" name="value" required placeholder="your-secret-key-value">
           <small>Letters, numbers, dashes, and underscores only</small>
@@ -355,7 +362,7 @@ export function createKeysPages(
 
   // Handle create
   routes.post("/create", async (c) => {
-    let body: { group?: string; newGroupName?: string; value?: string; description?: string };
+    let body: { group?: string; newGroupName?: string; name?: string; value?: string; description?: string };
     try {
       body = (await c.req.parseBody()) as typeof body;
     } catch {
@@ -364,6 +371,7 @@ export function createKeysPages(
 
     let group = (body.group as string | undefined)?.trim().toLowerCase() ?? "";
     const newGroupName = (body.newGroupName as string | undefined)?.trim().toLowerCase() ?? "";
+    const name = (body.name as string | undefined)?.trim().toLowerCase() ?? "";
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
 
@@ -392,6 +400,20 @@ export function createKeysPages(
       );
     }
 
+    if (!name) {
+      return c.redirect(
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+          encodeURIComponent("Key name is required")
+      );
+    }
+
+    if (!validateKeyName(name)) {
+      return c.redirect(
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+          encodeURIComponent("Invalid key name format (use lowercase a-z, 0-9, -, _)")
+      );
+    }
+
     if (!value) {
       return c.redirect(
         `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
@@ -407,8 +429,8 @@ export function createKeysPages(
     }
 
     try {
-      await apiKeyService.addKey(group, value, description);
-      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key created for group: ${group}`));
+      await apiKeyService.addKey(group, name, value, description);
+      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key '${name}' created for group: ${group}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create key";
       return c.redirect(
@@ -950,7 +972,7 @@ export function createKeysPages(
     // Load secrets for this key
     const secrets = await secretsService.getKeySecrets(keyId);
 
-    const keyDisplay = key.description || key.value;
+    const keyDisplay = key.name;
 
     const content = `
       <h1>Secrets for Key: ${escapeHtml(keyDisplay)}</h1>
@@ -998,7 +1020,7 @@ export function createKeysPages(
     }
 
     const { key } = result;
-    const keyDisplay = key.description || key.value;
+    const keyDisplay = key.name;
 
     const content = `
       <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
@@ -1035,7 +1057,7 @@ export function createKeysPages(
     }
 
     const { key } = result;
-    const keyDisplay = key.description || key.value;
+    const keyDisplay = key.name;
 
     const formData = await c.req.formData();
     const { secretData, errors } = parseSecretFormData(formData);
