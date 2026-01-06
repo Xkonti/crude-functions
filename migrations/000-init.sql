@@ -1,33 +1,119 @@
--- Schema version tracking table
--- Stores the current schema version number (single row)
+-- Crude Functions - Initial Schema
+-- Consolidated from migrations 000-007
 
+-- Schema version tracking table
 CREATE TABLE IF NOT EXISTS schema_version (
   version INTEGER NOT NULL
 );
 
--- API Keys table
--- Stores API keys grouped by key_group (e.g., "management", "api", "readonly")
+--------------------------------------------------------------------------------
+-- Better Auth Tables
+--------------------------------------------------------------------------------
 
-CREATE TABLE IF NOT EXISTS api_keys (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  key_group TEXT NOT NULL,
+-- Users table - stores user accounts with authentication metadata
+CREATE TABLE IF NOT EXISTS user (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE,
+  emailVerified INTEGER NOT NULL DEFAULT 0,
+  name TEXT,
+  image TEXT,
+  role TEXT,
+  banned INTEGER DEFAULT 0,
+  banReason TEXT,
+  banExpires TEXT,
+  createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_email ON user(email);
+
+-- Sessions table - stores active user sessions with metadata
+CREATE TABLE IF NOT EXISTS session (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  ipAddress TEXT,
+  userAgent TEXT,
+  impersonatedBy TEXT,
+  createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_session_token ON session(token);
+CREATE INDEX IF NOT EXISTS idx_session_userId ON session(userId);
+
+-- Accounts table - stores credentials and OAuth provider links
+CREATE TABLE IF NOT EXISTS account (
+  id TEXT PRIMARY KEY,
+  userId TEXT NOT NULL,
+  accountId TEXT NOT NULL,
+  providerId TEXT NOT NULL,
+  accessToken TEXT,
+  refreshToken TEXT,
+  idToken TEXT,
+  accessTokenExpiresAt TEXT,
+  refreshTokenExpiresAt TEXT,
+  scope TEXT,
+  password TEXT,
+  createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (userId) REFERENCES user(id) ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_account_provider ON account(providerId, accountId);
+CREATE INDEX IF NOT EXISTS idx_account_userId ON account(userId);
+
+-- Verification table - stores email verification and password reset tokens
+CREATE TABLE IF NOT EXISTS verification (
+  id TEXT PRIMARY KEY,
+  identifier TEXT NOT NULL,
   value TEXT NOT NULL,
+  expiresAt TEXT NOT NULL,
+  createdAt TEXT,
+  updatedAt TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_verification_identifier ON verification(identifier);
+
+--------------------------------------------------------------------------------
+-- API Key Management
+--------------------------------------------------------------------------------
+
+-- API Key Groups table - manages key groupings
+CREATE TABLE IF NOT EXISTS api_key_groups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
   description TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
--- Unique constraint on (group, value) pairs
--- Prevents duplicate keys within the same group
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value
-ON api_keys(key_group, value);
+-- Ensure management group always exists
+INSERT OR IGNORE INTO api_key_groups (name, description)
+VALUES ('management', 'Management API keys');
 
--- Index for fast lookups by group
-CREATE INDEX IF NOT EXISTS idx_api_keys_group
-ON api_keys(key_group);
+-- API Keys table - stores API keys with group relationships
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  name TEXT NOT NULL DEFAULT '',
+  value TEXT NOT NULL,
+  value_hash TEXT,
+  description TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
--- Routes table
--- Stores function routes with their configuration
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_name ON api_keys(group_id, name);
+CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(group_id, value_hash);
 
+--------------------------------------------------------------------------------
+-- Routes and Function Execution
+--------------------------------------------------------------------------------
+
+-- Routes table - stores function routes with their configuration
 CREATE TABLE IF NOT EXISTS routes (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
@@ -39,5 +125,69 @@ CREATE TABLE IF NOT EXISTS routes (
   created_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
--- Index for fast lookups by route path
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
+
+-- Console logs table - stores captured console output from function handlers
+CREATE TABLE IF NOT EXISTS console_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  request_id TEXT NOT NULL,
+  route_id INTEGER,                       -- References routes.id (not FK, allows route deletion)
+  level TEXT NOT NULL,
+  message TEXT NOT NULL,
+  args TEXT,
+  timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_console_logs_request_id ON console_logs(request_id);
+CREATE INDEX IF NOT EXISTS idx_console_logs_route_id ON console_logs(route_id, id);
+CREATE INDEX IF NOT EXISTS idx_console_logs_route_level ON console_logs(route_id, level, id);
+CREATE INDEX IF NOT EXISTS idx_console_logs_timestamp ON console_logs(timestamp);
+
+-- Execution metrics table - stores execution timing data for analytics
+CREATE TABLE IF NOT EXISTS execution_metrics (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  route_id INTEGER NOT NULL,
+  type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
+  avg_time_ms REAL NOT NULL,
+  max_time_ms INTEGER NOT NULL,
+  execution_count INTEGER NOT NULL DEFAULT 1,
+  timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_route_id ON execution_metrics(route_id);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_type_route_timestamp
+  ON execution_metrics(type, route_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_execution_metrics_timestamp ON execution_metrics(timestamp);
+
+--------------------------------------------------------------------------------
+-- Secrets and Settings
+--------------------------------------------------------------------------------
+
+-- Secrets table - multi-scope secret storage
+CREATE TABLE IF NOT EXISTS secrets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  value TEXT NOT NULL,
+  comment TEXT,
+  scope INTEGER NOT NULL,
+  function_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+  api_group_id INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  api_key_id INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Settings table - stores application settings (global and per-user)
+CREATE TABLE IF NOT EXISTS settings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  user_id TEXT REFERENCES user(id) ON DELETE CASCADE,
+  value TEXT,
+  is_encrypted INTEGER NOT NULL DEFAULT 0,
+  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_name_user
+ON settings(name, COALESCE(user_id, ''));
+CREATE INDEX IF NOT EXISTS idx_settings_name ON settings(name);
+CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id) WHERE user_id IS NOT NULL;
