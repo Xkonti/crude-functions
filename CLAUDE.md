@@ -11,12 +11,6 @@ deno lint           # Lint codebase
 deno check main.ts  # Type check entry point
 ```
 
-Run a single test file:
-
-```bash
-deno test --env-file=.env --allow-net --allow-env --allow-read --allow-write --allow-ffi src/database/database_service_test.ts
-```
-
 ## Architecture Overview
 
 This is a Deno-based serverless function router called Crude Functions. It a barebones equivalent of Val Town intended to be deployed as a single Docker container. Functions are TypeScript files in `code/` that get dynamically loaded and executed as HTTP endpoints. SQLite for database, Better Auth for web UI auth, custom API keys for function protection. SSR web UI using Pico CSS.
@@ -50,17 +44,40 @@ Function router handles API key verification (if route requires keys) and handle
 - **Function execution**: Optional per-route API key requirements
 - Sign-up disabled after first user is created - existing users can add new ones on dedicated user management page
 
-Claude, be a good team member and report encounter discrepancies to the user IMMEDIATELY.
-
 ### Key Patterns
 
-- **Service architecture**: Constructor dependency injection, services assume db always open
-- **Concurrency**: `@core/asyncutil/mutex` for write serialization. This service is expected to fully own the DB and have only a single instance running. Stateful web service, not ephemeral.
-- **Philosophy**: Intended as internal tooling. "Crude" in name means that it's a simple service to get things done without deploying or configure many things. Not intended to be a public service. No sandboxing, no extra security to lock secrets... User can shoot themselves in a foot and that's a feature.
+#### Service Ownership (Critical Pattern)
+
+**Services own database access.** Never query the database directly from routes or other code - always go through the appropriate service.
+
+**Why:**
+- **Single source of truth**: All queries for a domain live in one place
+- **Easier refactoring**: Change query logic once, affects all callers
+- **Caching layer**: Services can add caching without changing consumers
+- **Type safety**: Services provide typed interfaces over raw SQL
+- **Business logic**: Validation and domain rules stay in services, not scattered
+
+**Examples:**
+- Routes need API keys? → Use `ApiKeyService`, not direct DB queries
+- Need to create a function route? → Use `RoutesService.addRoute()`, not `db.execute()`
+- File management? → Use `FileService`, which handles both DB and filesystem
+
+**Service architecture**:
+- Constructor dependency injection pattern throughout
+- Services assume database is already open (validated at startup)
+- All services take `{ db: DatabaseService, ... }` options object
+
+**Concurrency**:
+- `@core/asyncutil/mutex` for write serialization
+- Single-instance design (stateful web service, not ephemeral)
+- WAL mode allows concurrent reads during writes
+
+**Philosophy**:
+Intended as internal tooling. "Crude" means simple and pragmatic - get things done without complex deployment. Not intended as a public service. No sandboxing, no excessive security theater. User can shoot themselves in the foot and that's a feature.
 
 ### Database
 
-SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`
+SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`. Access exclusively through services - never query directly.
 
 ### Endpoints Structure
 
@@ -74,21 +91,24 @@ SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`
 
 ## Function Handlers
 
-Handlers in `code/` export a default async function receiving Hono context (`c`) and function context (`ctx`):
+User-deployed handlers in `code/` directory are TypeScript files that export a default async function:
 
 ```typescript
 export default async function (c, ctx) {
-  // ctx.params, ctx.query, ctx.requestId, ctx.route, ctx.authenticatedKeyGroup
+  // c = Hono context (request, response helpers)
+  // ctx = Function context (params, query, requestId, route, authenticatedKeyGroup, getSecret)
   return c.json({ message: "Hello" });
 }
 ```
 
-External packages require full specifiers: `npm:lodash-es`, `jsr:@zod/zod`, or full URLs.
+**Important**: Handlers use Deno imports. External packages need full specifiers:
+- NPM: `npm:lodash-es`
+- JSR: `jsr:@std/path`
+- URLs: `https://esm.sh/zod`
 
-## Environment Variables
+## Configuration
 
-See `.env.example` for all options. Key variables:
-
-- `BETTER_AUTH_BASE_URL` - Optional: Application URL for redirects (auto-detected if not set)
-
-Note: API access is controlled by the `api.access-groups` database setting (default: "management" group). Create API keys via the web UI after initial admin setup.
+- Environment variables in `.env` (see `.env.example`)
+- Application settings stored in database via `SettingsService`
+- API access controlled by `api.access-groups` database setting
+- Create API keys via web UI after initial admin setup
