@@ -1,6 +1,4 @@
 import {
-  validateFilePath,
-  normalizePath,
   resolveAndValidatePath,
 } from "../validation/files.ts";
 

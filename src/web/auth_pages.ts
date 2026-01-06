@@ -20,7 +20,7 @@ export interface AuthPagesOptions {
  * These routes are public (no auth middleware).
  */
 export function createAuthPages(options: AuthPagesOptions): Hono {
-  const { auth, userService } = options;
+  const { userService } = options;
   const routes = new Hono();
 
   // GET /login - Login form

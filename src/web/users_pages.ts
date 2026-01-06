@@ -253,7 +253,6 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       // Delete user via UserService (handles permanent role check)
       await userService.deleteUser(userId, c.req.raw.headers);
 
-      const user = await userService.getById(userId);
       return c.redirect("/web/users?success=" + encodeURIComponent(`User deleted`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete user";
