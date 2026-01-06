@@ -246,12 +246,16 @@ export class VersionedEncryptionService {
 
   /**
    * Update keys (called when rotation starts or completes).
-   * Thread-safe via mutex.
+   * Thread-safe via mutex. Also acquires rotation lock to ensure no
+   * encrypt/decrypt operations are in-flight during key updates.
    *
    * @param options - New key configuration
    */
   async updateKeys(options: VersionedEncryptionServiceOptions): Promise<void> {
-    using _lock = await this.keyMutex.acquire();
+    // Acquire rotation lock first to block new encrypt/decrypt operations
+    using _rotationLock = await this.rotationLock.acquire();
+    // Then acquire key mutex to serialize key updates
+    using _keyLock = await this.keyMutex.acquire();
     this.validateAndSetKeys(options);
     logger.info(
       `[VersionedEncryption] Keys updated (current: ${this.currentVersion}, phased_out: ${this.phasedOutVersion ?? "none"})`

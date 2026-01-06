@@ -328,6 +328,56 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
     expect(service.isRotating).toBe(false);
     expect(service.phasedOutVersionChar).toBe(null);
   });
+
+  await t.step("blocks during encrypt operations (prevents race condition)", async () => {
+    const service = new VersionedEncryptionService({
+      currentKey: TEST_KEY_A,
+      currentVersion: "A",
+    });
+
+    const results: string[] = [];
+
+    // Start encryption (will acquire rotationLock)
+    const encryptPromise = service.encrypt("test data").then((encrypted) => {
+      results.push("encrypt completed");
+      return encrypted;
+    });
+
+    // Give encrypt a chance to acquire the lock
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    // Try to update keys (should block until encrypt completes)
+    const updatePromise = service.updateKeys({
+      currentKey: TEST_KEY_B,
+      currentVersion: "B",
+    }).then(() => {
+      results.push("updateKeys completed");
+    });
+
+    // Wait for both to complete
+    const encrypted = await encryptPromise;
+    await updatePromise;
+
+    // Encrypt should complete before updateKeys
+    expect(results).toEqual(["encrypt completed", "updateKeys completed"]);
+
+    // The encrypted data should have version A (the version when encrypt started)
+    expect(encrypted.charAt(0)).toBe("A");
+
+    // Now the service should be on version B
+    expect(service.version).toBe("B");
+
+    // Verify data is decryptable (key and version are consistent)
+    // Need to add phased out key to decrypt old data
+    await service.updateKeys({
+      currentKey: TEST_KEY_B,
+      currentVersion: "B",
+      phasedOutKey: TEST_KEY_A,
+      phasedOutVersion: "A",
+    });
+    const decrypted = await service.decrypt(encrypted);
+    expect(decrypted).toBe("test data");
+  });
 });
 
 // =====================
