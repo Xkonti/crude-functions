@@ -31,7 +31,7 @@ export class SecretsService {
    */
   async getGlobalSecrets(): Promise<SecretRow[]> {
     const rows = await this.db.queryAll<SecretRow>(
-      `SELECT id, name, comment, created_at, modified_at
+      `SELECT id, name, comment, createdAt, updatedAt
        FROM secrets
        WHERE scope = ?
        ORDER BY name ASC`,
@@ -52,15 +52,15 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
        WHERE scope = ?
        ORDER BY name ASC`,
@@ -77,11 +77,11 @@ export class SecretsService {
         value: decryptedValue,
         comment: row.comment,
         scope: row.scope,
-        functionId: row.function_id,
-        apiGroupId: row.api_group_id,
-        apiKeyId: row.api_key_id,
-        createdAt: row.created_at,
-        modifiedAt: row.modified_at,
+        functionId: row.functionId,
+        apiGroupId: row.apiGroupId,
+        apiKeyId: row.apiKeyId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
       });
     }
 
@@ -98,15 +98,15 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
        WHERE id = ? AND scope = ?`,
       [id, SecretScope.Global]
@@ -122,11 +122,11 @@ export class SecretsService {
       value: decryptedValue,
       comment: row.comment,
       scope: row.scope,
-      functionId: row.function_id,
-      apiGroupId: row.api_group_id,
-      apiKeyId: row.api_key_id,
-      createdAt: row.created_at,
-      modifiedAt: row.modified_at,
+      functionId: row.functionId,
+      apiGroupId: row.apiGroupId,
+      apiKeyId: row.apiKeyId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 
@@ -153,7 +153,7 @@ export class SecretsService {
 
     // Insert into database
     await this.db.execute(
-      `INSERT INTO secrets (name, value, comment, scope, created_at, modified_at)
+      `INSERT INTO secrets (name, value, comment, scope, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [name, encryptedValue, comment ?? null, SecretScope.Global]
     );
@@ -180,7 +180,7 @@ export class SecretsService {
     // Update in database
     await this.db.execute(
       `UPDATE secrets
-       SET value = ?, comment = ?, modified_at = CURRENT_TIMESTAMP
+       SET value = ?, comment = ?, updatedAt = CURRENT_TIMESTAMP
        WHERE id = ? AND scope = ?`,
       [encryptedValue, comment ?? null, id, SecretScope.Global]
     );
@@ -213,17 +213,17 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
-       WHERE scope = ? AND function_id = ?
+       WHERE scope = ? AND functionId = ?
        ORDER BY name ASC`,
       [SecretScope.Function, functionId]
     );
@@ -238,11 +238,11 @@ export class SecretsService {
         value: decryptedValue,
         comment: row.comment,
         scope: row.scope,
-        functionId: row.function_id,
-        apiGroupId: row.api_group_id,
-        apiKeyId: row.api_key_id,
-        createdAt: row.created_at,
-        modifiedAt: row.modified_at,
+        functionId: row.functionId,
+        apiGroupId: row.apiGroupId,
+        apiKeyId: row.apiKeyId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
       });
     }
 
@@ -262,17 +262,17 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
-       WHERE id = ? AND scope = ? AND function_id = ?`,
+       WHERE id = ? AND scope = ? AND functionId = ?`,
       [secretId, SecretScope.Function, functionId]
     );
 
@@ -286,11 +286,11 @@ export class SecretsService {
       value: decryptedValue,
       comment: row.comment,
       scope: row.scope,
-      functionId: row.function_id,
-      apiGroupId: row.api_group_id,
-      apiKeyId: row.api_key_id,
-      createdAt: row.created_at,
-      modifiedAt: row.modified_at,
+      functionId: row.functionId,
+      apiGroupId: row.apiGroupId,
+      apiKeyId: row.apiKeyId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 
@@ -320,7 +320,7 @@ export class SecretsService {
 
     // Insert into database
     await this.db.execute(
-      `INSERT INTO secrets (name, value, comment, scope, function_id, created_at, modified_at)
+      `INSERT INTO secrets (name, value, comment, scope, functionId, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [name, encryptedValue, comment ?? null, SecretScope.Function, functionId]
     );
@@ -350,8 +350,8 @@ export class SecretsService {
     // Update in database
     await this.db.execute(
       `UPDATE secrets
-       SET value = ?, comment = ?, modified_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND scope = ? AND function_id = ?`,
+       SET value = ?, comment = ?, updatedAt = CURRENT_TIMESTAMP
+       WHERE id = ? AND scope = ? AND functionId = ?`,
       [
         encryptedValue,
         comment ?? null,
@@ -372,7 +372,7 @@ export class SecretsService {
   ): Promise<void> {
     const result = await this.db.execute(
       `DELETE FROM secrets
-       WHERE id = ? AND scope = ? AND function_id = ?`,
+       WHERE id = ? AND scope = ? AND functionId = ?`,
       [secretId, SecretScope.Function, functionId]
     );
 
@@ -395,17 +395,17 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
-       WHERE scope = ? AND api_group_id = ?
+       WHERE scope = ? AND apiGroupId = ?
        ORDER BY name ASC`,
       [SecretScope.Group, groupId]
     );
@@ -420,11 +420,11 @@ export class SecretsService {
         value: decryptedValue,
         comment: row.comment,
         scope: row.scope,
-        functionId: row.function_id,
-        apiGroupId: row.api_group_id,
-        apiKeyId: row.api_key_id,
-        createdAt: row.created_at,
-        modifiedAt: row.modified_at,
+        functionId: row.functionId,
+        apiGroupId: row.apiGroupId,
+        apiKeyId: row.apiKeyId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
       });
     }
 
@@ -444,17 +444,17 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
-       WHERE id = ? AND scope = ? AND api_group_id = ?`,
+       WHERE id = ? AND scope = ? AND apiGroupId = ?`,
       [secretId, SecretScope.Group, groupId]
     );
 
@@ -468,11 +468,11 @@ export class SecretsService {
       value: decryptedValue,
       comment: row.comment,
       scope: row.scope,
-      functionId: row.function_id,
-      apiGroupId: row.api_group_id,
-      apiKeyId: row.api_key_id,
-      createdAt: row.created_at,
-      modifiedAt: row.modified_at,
+      functionId: row.functionId,
+      apiGroupId: row.apiGroupId,
+      apiKeyId: row.apiKeyId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 
@@ -502,7 +502,7 @@ export class SecretsService {
 
     // Insert into database
     await this.db.execute(
-      `INSERT INTO secrets (name, value, comment, scope, api_group_id, created_at, modified_at)
+      `INSERT INTO secrets (name, value, comment, scope, apiGroupId, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [name, encryptedValue, comment ?? null, SecretScope.Group, groupId]
     );
@@ -532,8 +532,8 @@ export class SecretsService {
     // Update in database
     await this.db.execute(
       `UPDATE secrets
-       SET value = ?, comment = ?, modified_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND scope = ? AND api_group_id = ?`,
+       SET value = ?, comment = ?, updatedAt = CURRENT_TIMESTAMP
+       WHERE id = ? AND scope = ? AND apiGroupId = ?`,
       [
         encryptedValue,
         comment ?? null,
@@ -554,7 +554,7 @@ export class SecretsService {
   ): Promise<void> {
     const result = await this.db.execute(
       `DELETE FROM secrets
-       WHERE id = ? AND scope = ? AND api_group_id = ?`,
+       WHERE id = ? AND scope = ? AND apiGroupId = ?`,
       [secretId, SecretScope.Group, groupId]
     );
 
@@ -577,17 +577,17 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
-       WHERE scope = ? AND api_key_id = ?
+       WHERE scope = ? AND apiKeyId = ?
        ORDER BY name ASC`,
       [SecretScope.Key, keyId]
     );
@@ -602,11 +602,11 @@ export class SecretsService {
         value: decryptedValue,
         comment: row.comment,
         scope: row.scope,
-        functionId: row.function_id,
-        apiGroupId: row.api_group_id,
-        apiKeyId: row.api_key_id,
-        createdAt: row.created_at,
-        modifiedAt: row.modified_at,
+        functionId: row.functionId,
+        apiGroupId: row.apiGroupId,
+        apiKeyId: row.apiKeyId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
       });
     }
 
@@ -626,17 +626,17 @@ export class SecretsService {
       value: string;
       comment: string | null;
       scope: number;
-      function_id: number | null;
-      api_group_id: number | null;
-      api_key_id: number | null;
-      created_at: string;
-      modified_at: string;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
     }>(
       `SELECT id, name, value, comment, scope,
-              function_id, api_group_id, api_key_id,
-              created_at, modified_at
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
        FROM secrets
-       WHERE id = ? AND scope = ? AND api_key_id = ?`,
+       WHERE id = ? AND scope = ? AND apiKeyId = ?`,
       [secretId, SecretScope.Key, keyId]
     );
 
@@ -650,11 +650,11 @@ export class SecretsService {
       value: decryptedValue,
       comment: row.comment,
       scope: row.scope,
-      functionId: row.function_id,
-      apiGroupId: row.api_group_id,
-      apiKeyId: row.api_key_id,
-      createdAt: row.created_at,
-      modifiedAt: row.modified_at,
+      functionId: row.functionId,
+      apiGroupId: row.apiGroupId,
+      apiKeyId: row.apiKeyId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
   }
 
@@ -684,7 +684,7 @@ export class SecretsService {
 
     // Insert into database
     await this.db.execute(
-      `INSERT INTO secrets (name, value, comment, scope, api_key_id, created_at, modified_at)
+      `INSERT INTO secrets (name, value, comment, scope, apiKeyId, createdAt, updatedAt)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       [name, encryptedValue, comment ?? null, SecretScope.Key, keyId]
     );
@@ -714,8 +714,8 @@ export class SecretsService {
     // Update in database
     await this.db.execute(
       `UPDATE secrets
-       SET value = ?, comment = ?, modified_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND scope = ? AND api_key_id = ?`,
+       SET value = ?, comment = ?, updatedAt = CURRENT_TIMESTAMP
+       WHERE id = ? AND scope = ? AND apiKeyId = ?`,
       [
         encryptedValue,
         comment ?? null,
@@ -736,7 +736,7 @@ export class SecretsService {
   ): Promise<void> {
     const result = await this.db.execute(
       `DELETE FROM secrets
-       WHERE id = ? AND scope = ? AND api_key_id = ?`,
+       WHERE id = ? AND scope = ? AND apiKeyId = ?`,
       [secretId, SecretScope.Key, keyId]
     );
 
@@ -787,7 +787,7 @@ export class SecretsService {
     const row = await this.db.queryOne<{ count: number }>(
       `SELECT COUNT(*) as count
        FROM secrets
-       WHERE name = ? AND scope = ? AND function_id = ?`,
+       WHERE name = ? AND scope = ? AND functionId = ?`,
       [name, SecretScope.Function, functionId]
     );
 
@@ -804,7 +804,7 @@ export class SecretsService {
     const row = await this.db.queryOne<{ count: number }>(
       `SELECT COUNT(*) as count
        FROM secrets
-       WHERE name = ? AND scope = ? AND api_group_id = ?`,
+       WHERE name = ? AND scope = ? AND apiGroupId = ?`,
       [name, SecretScope.Group, groupId]
     );
 
@@ -821,7 +821,7 @@ export class SecretsService {
     const row = await this.db.queryOne<{ count: number }>(
       `SELECT COUNT(*) as count
        FROM secrets
-       WHERE name = ? AND scope = ? AND api_key_id = ?`,
+       WHERE name = ? AND scope = ? AND apiKeyId = ?`,
       [name, SecretScope.Key, keyId]
     );
 
@@ -895,9 +895,9 @@ export class SecretsService {
 
         // Get key-level secrets for this group
         const keySecretsQuery = `
-          SELECT s.id, s.name, s.value, s.api_key_id, k.name as key_name
+          SELECT s.id, s.name, s.value, s.apiKeyId, k.name as key_name
           FROM secrets s
-          JOIN apiKeys k ON s.api_key_id = k.id
+          JOIN apiKeys k ON s.apiKeyId = k.id
           WHERE s.scope = ? AND k.groupId = ?
           ORDER BY s.name ASC, k.name ASC
         `;
@@ -905,7 +905,7 @@ export class SecretsService {
           id: number;
           name: string;
           value: string;
-          api_key_id: number;
+          apiKeyId: number;
           key_name: string;
         }>(keySecretsQuery, [SecretScope.Key, group.id]);
 
@@ -919,7 +919,7 @@ export class SecretsService {
             value: decryptedValue,
             groupId: group.id,
             groupName: group.name,
-            keyId: row.api_key_id,
+            keyId: row.apiKeyId,
             keyName: row.key_name,
           });
         }
@@ -962,19 +962,19 @@ export class SecretsService {
 
       case SecretScope.Function:
         if (functionId === undefined) return undefined;
-        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND function_id = ?`;
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND functionId = ?`;
         params = [name, SecretScope.Function, functionId];
         break;
 
       case SecretScope.Group:
         if (apiGroupId === undefined) return undefined;
-        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND api_group_id = ?`;
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND apiGroupId = ?`;
         params = [name, SecretScope.Group, apiGroupId];
         break;
 
       case SecretScope.Key:
         if (apiKeyId === undefined) return undefined;
-        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND api_key_id = ?`;
+        query = `SELECT value FROM secrets WHERE name = ? AND scope = ? AND apiKeyId = ?`;
         params = [name, SecretScope.Key, apiKeyId];
         break;
     }
@@ -1115,10 +1115,10 @@ export class SecretsService {
         group_id: number;
         group_name: string;
       }>(
-        `SELECT s.value, s.api_group_id as group_id, g.name as group_name
+        `SELECT s.value, s.apiGroupId as group_id, g.name as group_name
          FROM secrets s
-         JOIN apiKeyGroups g ON s.api_group_id = g.id
-         WHERE s.name = ? AND s.scope = ? AND s.api_group_id = ?`,
+         JOIN apiKeyGroups g ON s.apiGroupId = g.id
+         WHERE s.name = ? AND s.scope = ? AND s.apiGroupId = ?`,
         [name, SecretScope.Group, apiGroupId]
       );
 
@@ -1144,12 +1144,12 @@ export class SecretsService {
         group_name: string;
         key_name: string;
       }>(
-        `SELECT s.value, s.api_key_id as key_id, g.id as group_id,
+        `SELECT s.value, s.apiKeyId as key_id, g.id as group_id,
                 g.name as group_name, k.name as key_name
          FROM secrets s
-         JOIN apiKeys k ON s.api_key_id = k.id
+         JOIN apiKeys k ON s.apiKeyId = k.id
          JOIN apiKeyGroups g ON k.groupId = g.id
-         WHERE s.name = ? AND s.scope = ? AND s.api_key_id = ?`,
+         WHERE s.name = ? AND s.scope = ? AND s.apiKeyId = ?`,
         [name, SecretScope.Key, apiKeyId]
       );
 

@@ -16,7 +16,7 @@ export interface Secret {
   apiGroupId: number | null;
   apiKeyId: number | null;
   createdAt: string;
-  modifiedAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -27,8 +27,8 @@ export interface SecretRow {
   id: number;
   name: string;
   comment: string | null;
-  created_at: string;
-  modified_at: string;
+  createdAt: string;
+  updatedAt: string;
   [key: string]: unknown; // Index signature for Row compatibility
 }
 

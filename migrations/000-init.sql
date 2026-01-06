@@ -170,11 +170,11 @@ CREATE TABLE IF NOT EXISTS secrets (
   value TEXT NOT NULL,
   comment TEXT,
   scope INTEGER NOT NULL,
-  function_id INTEGER REFERENCES routes(id) ON DELETE CASCADE,
-  api_group_id INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
-  api_key_id INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  functionId INTEGER REFERENCES routes(id) ON DELETE CASCADE,
+  apiGroupId INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  apiKeyId INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Settings table - stores application settings (global and per-user)

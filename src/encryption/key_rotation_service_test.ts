@@ -30,10 +30,10 @@ const SECRETS_SCHEMA = `
     value TEXT NOT NULL,
     comment TEXT,
     scope INTEGER NOT NULL DEFAULT 0,
-    function_id INTEGER,
-    api_group_id INTEGER,
-    api_key_id INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    functionId INTEGER,
+    apiGroupId INTEGER,
+    apiKeyId INTEGER,
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
     updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `;

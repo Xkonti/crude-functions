@@ -1336,7 +1336,7 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
-            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
               <a href="/web/keys/secrets/${groupId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
               <a href="/web/keys/secrets/${groupId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
@@ -1468,7 +1468,7 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
-            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
               <a href="/web/keys/${keyId}/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
               <a href="/web/keys/${keyId}/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>

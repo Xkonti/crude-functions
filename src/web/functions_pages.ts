@@ -1172,7 +1172,7 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
-            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
               <a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
               <a href="/web/functions/secrets/${functionId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
