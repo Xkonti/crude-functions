@@ -12,6 +12,8 @@ import type { ExecutionMetric, MetricType } from "../metrics/types.ts";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret, SecretPreview } from "../secrets/types.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
+import { SettingNames } from "../settings/types.ts";
 import {
   layout,
   escapeHtml,
@@ -1374,7 +1376,8 @@ export function createFunctionsPages(
   consoleLogService: ConsoleLogService,
   executionMetricsService: ExecutionMetricsService,
   apiKeyService: ApiKeyService,
-  secretsService: SecretsService
+  secretsService: SecretsService,
+  settingsService: SettingsService
 ): Hono {
   const routes = new Hono();
 
@@ -1681,8 +1684,9 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
 
-    // Get retention days from environment (matching main.ts)
-    const retentionDays = parseInt(Deno.env.get("METRICS_RETENTION_DAYS") || "90");
+    // Get retention days from settings
+    const retentionDaysStr = await settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS);
+    const retentionDays = retentionDaysStr ? parseInt(retentionDaysStr, 10) : 90;
 
     // Fetch metrics data
     const dataPoints = await fetchMetricsData(

@@ -29,14 +29,13 @@ A minimal, single-container serverless-style function router built on Deno. Func
 git clone <repo-url>
 cd crude-functions
 
-# Set up a management key
-echo "MANAGEMENT_API_KEY=your-secret-key" > .env
-
 # Run the server
 deno task dev
 ```
 
-The server starts on port 8000 by default. The database is automatically created at `./data/database.db` on first run. Access the web UI at `http://localhost:8000/web`.
+The server starts on port 8000 by default. The database is automatically created at `./data/database.db` on first run.
+
+**First-time setup:** Navigate to `http://localhost:8000/web/setup` to create your first admin user. After setup, you can create API keys via the API Keys page in the web UI.
 
 ## Configuration
 
@@ -45,19 +44,9 @@ The server starts on port 8000 by default. The database is automatically created
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
-| `MANAGEMENT_API_KEY` | Management key for admin access (API and Web UI) | Required |
-| `LOG_LEVEL` | Logging verbosity: `debug`, `info`, `warn`, `error`, `none` | `info` |
-| `METRICS_AGGREGATION_INTERVAL_SECONDS` | How often to aggregate metrics (seconds) | `60` |
-| `METRICS_RETENTION_DAYS` | Days to retain aggregated daily metrics | `90` |
-| `LOG_TRIMMING_INTERVAL_SECONDS` | How often to trim old logs (seconds) | `300` |
-| `LOG_MAX_PER_ROUTE` | Maximum logs to keep per function/route | `2000` |
-| `BETTER_AUTH_BASE_URL` | Base URL for redirects and callbacks | `http://localhost:8000` |
-| `KEY_ROTATION_CHECK_INTERVAL_SECONDS` | How often to check if key rotation needed (seconds) | `10800` |
-| `KEY_ROTATION_INTERVAL_DAYS` | Days between automatic key rotations | `90` |
-| `KEY_ROTATION_BATCH_SIZE` | Records to re-encrypt per batch during rotation | `100` |
-| `KEY_ROTATION_BATCH_SLEEP_MS` | Sleep between re-encryption batches (ms) | `100` |
+| `BETTER_AUTH_BASE_URL` | Base URL for redirects and callbacks (optional, auto-detected if not set) | Auto-detected |
 
-**Note:** Encryption keys are auto-generated on first startup and stored in `./data/encryption-keys.json`. The key rotation variables are optional - the system will use the defaults shown above if not specified.
+**Note:** Most settings (log level, metrics, encryption, API access groups) are configured via the web UI Settings page and stored in the database. Encryption keys are auto-generated on first startup and stored in `./data/encryption-keys.json`.
 
 ### Directory Structure
 
@@ -80,7 +69,7 @@ API keys are stored in the SQLite database and managed via the API or Web UI.
 - **Key values:** `a-z`, `A-Z`, `0-9`, `_`, `-`
 - **Descriptions:** Optional metadata for each key
 
-The `management` key group is reserved for admin access (API and Web UI). You can provide a management key via the `MANAGEMENT_API_KEY` environment variable, or add keys using the API/Web UI after initial setup.
+The `management` key group is created automatically on first startup and grants access to management endpoints (API). Add keys to this group via the Web UI after creating your first admin user. You can configure which groups have API access via the Settings page.
 
 ### Function Routes
 
@@ -163,7 +152,7 @@ For detailed documentation on writing handlers, see [function_handler_design.md]
 
 ## API Endpoints
 
-All management endpoints require the `X-API-Key` header with a valid management key.
+All management endpoints require authentication via session (Web UI) or the `X-API-Key` header with a key from an authorized access group (configurable in Settings).
 
 ### Functions
 
@@ -250,31 +239,17 @@ services:
     image: xkonti/crude-functions:latest
     ports:
       - 8000:8000
-    environment:
-      # Management API key for admin access (Web UI and API)
-      - MANAGEMENT_API_KEY=your-secret-key-here
-
-      # Log level: debug, info, warn, error, none (default: info)
-      - LOG_LEVEL=info
-
-      # Metrics configuration
-      - METRICS_AGGREGATION_INTERVAL_SECONDS=60  # Default: 60
-      - METRICS_RETENTION_DAYS=90                # Default: 90
-
-      # Log trimming configuration
-      - LOG_TRIMMING_INTERVAL_SECONDS=300        # Default: 300 (5 minutes)
-      - LOG_MAX_PER_ROUTE=2000                   # Default: 2000
-
-      # Better Auth configuration
-      # IMPORTANT: Update this to match your deployment URL
-      - BETTER_AUTH_BASE_URL=http://localhost:8000
-
-      # Encryption Key Rotation (optional - defaults shown below)
-      # Encryption keys are auto-generated on first startup
-      # - KEY_ROTATION_CHECK_INTERVAL_SECONDS=10800  # Default: 10800 (3 hours)
-      # - KEY_ROTATION_INTERVAL_DAYS=90              # Default: 90
-      # - KEY_ROTATION_BATCH_SIZE=100                # Default: 100
-      # - KEY_ROTATION_BATCH_SLEEP_MS=100            # Default: 100
+    # Environment variables (optional)
+    # environment:
+    #   # Better Auth configuration
+    #   # Auto-detects from request headers if not set
+    #   # Set explicitly when behind reverse proxy: https://your-domain.com
+    #   - BETTER_AUTH_BASE_URL=http://localhost:8000
+    #
+    # Note: All settings (log level, metrics, encryption, API access groups)
+    # are configured via the web UI Settings page and stored in the database.
+    # On first run, create an admin user via the web UI setup page,
+    # then manage API keys through the API Keys page.
     volumes:
       # Mount the data directory for SQLite database and encryption keys
       - ./data:/app/data
@@ -290,7 +265,7 @@ mkdir -p data code
 docker compose up -d
 ```
 
-**Important:** Update `BETTER_AUTH_BASE_URL` to match your deployment URL (e.g., `https://functions.yourdomain.com`).
+**Optional:** Set `BETTER_AUTH_BASE_URL` if deploying behind a reverse proxy with complex routing. Otherwise, it will auto-detect from incoming requests.
 
 On first run:
 - Database is created at `./data/database.db`
@@ -302,14 +277,13 @@ On first run:
 ```bash
 docker run -d \
   -p 8000:8000 \
-  -e MANAGEMENT_API_KEY=your-secret-key \
-  -e BETTER_AUTH_BASE_URL=http://localhost:8000 \
   -v ./data:/app/data \
   -v ./code:/app/code \
   xkonti/crude-functions:latest
+# Optional: -e BETTER_AUTH_BASE_URL=https://your-domain.com
 ```
 
-See the Docker Compose section above for all available environment variables.
+On first run, navigate to `http://localhost:8000/web/setup` to create your admin user.
 
 ### Building from Source
 

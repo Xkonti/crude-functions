@@ -150,27 +150,13 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // DELETE /api/keys/by-id/:id - Delete a key by ID (for web UI)
   routes.delete("/by-id/:id", async (c) => {
-    // Special case: -1 is the synthetic ID for env-provided management key
-    const idParam = c.req.param("id");
-    const parsedId = parseInt(idParam, 10);
-
-    // Allow -1 (env key) but validate all other IDs
-    if (parsedId !== -1) {
-      const id = validateId(idParam);
-      if (id === null) {
-        return c.json({ error: "Invalid key ID" }, 400);
-      }
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
+      return c.json({ error: "Invalid key ID" }, 400);
     }
 
-    try {
-      await service.removeKeyById(parsedId);
-      return c.json({ success: true });
-    } catch (error) {
-      if (error instanceof Error && error.message.includes("environment")) {
-        return c.json({ error: "Cannot delete environment-provided management key" }, 403);
-      }
-      throw error;
-    }
+    await service.removeKeyById(id);
+    return c.json({ success: true });
   });
 
   // DELETE /api/keys/:group - Delete all keys for a group

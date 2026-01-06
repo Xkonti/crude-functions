@@ -38,10 +38,13 @@ import { VersionedEncryptionService } from "./src/encryption/versioned_encryptio
 import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
 import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
+import { SettingsService } from "./src/settings/settings_service.ts";
+import { SettingNames } from "./src/settings/types.ts";
+import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
 
 /**
  * Parse an environment variable as a positive integer.
- * Returns the parsed value or the default if parsing fails or value is invalid.
+ * Used only for PORT which remains an env var.
  */
 function parseEnvInt(
   name: string,
@@ -117,16 +120,41 @@ if (migrationResult.appliedCount > 0) {
   );
 }
 
+// ============================================================================
+// Settings Service Initialization
+// ============================================================================
+
+// Initialize settings service and bootstrap defaults
+const settingsService = new SettingsService({ db, encryptionService });
+await settingsService.bootstrapGlobalSettings();
+console.log("✓ Settings initialized");
+
+// Initialize logger with settings service (enables periodic log level refresh)
+initializeLogger(settingsService);
+
+/**
+ * Helper to read an integer setting from the database.
+ * Returns defaultValue if setting is missing or invalid.
+ */
+async function getIntSetting(name: typeof SettingNames[keyof typeof SettingNames], defaultValue: number): Promise<number> {
+  const value = await settingsService.getGlobalSetting(name);
+  if (!value) return defaultValue;
+  const parsed = parseInt(value, 10);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
 // Check if any users exist (determines whether sign-up is enabled)
 const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
 const hasUsers = userExists !== null;
 
 // Initialize Better Auth
+// baseUrl is optional - when not set, Better Auth auto-detects from request headers
+// trustedOrigins dynamically resolves from baseUrl or request origin
 // Sign-up is only enabled during first-run setup (when no users exist)
 // Auth secret is stored in the encryption keys file (auto-generated on first run)
 const auth = createAuth({
   databasePath: "./data/database.db",
-  baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || "http://localhost:8000",
+  baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || undefined,
   secret: encryptionKeys.better_auth_secret,
   hasUsers,
 });
@@ -143,8 +171,8 @@ const executionMetricsService = new ExecutionMetricsService({ db });
 
 // Initialize and start metrics aggregation service
 const metricsAggregationConfig: MetricsAggregationConfig = {
-  aggregationIntervalSeconds: parseEnvInt("METRICS_AGGREGATION_INTERVAL_SECONDS", 60, { min: 1 }),
-  retentionDays: parseEnvInt("METRICS_RETENTION_DAYS", 90, { min: 1 }),
+  aggregationIntervalSeconds: await getIntSetting(SettingNames.METRICS_AGGREGATION_INTERVAL_SECONDS, 60),
+  retentionDays: await getIntSetting(SettingNames.METRICS_RETENTION_DAYS, 90),
 };
 const metricsAggregationService = new MetricsAggregationService({
   metricsService: executionMetricsService,
@@ -154,8 +182,8 @@ metricsAggregationService.start();
 
 // Initialize and start log trimming service
 const logTrimmingConfig: LogTrimmingConfig = {
-  trimmingIntervalSeconds: parseEnvInt("LOG_TRIMMING_INTERVAL_SECONDS", 300, { min: 1 }),
-  maxLogsPerRoute: parseEnvInt("LOG_MAX_PER_ROUTE", 2000, { min: 1 }),
+  trimmingIntervalSeconds: await getIntSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, 300),
+  maxLogsPerRoute: await getIntSetting(SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION, 2000),
 };
 const logTrimmingService = new LogTrimmingService({
   logService: consoleLogService,
@@ -165,10 +193,10 @@ logTrimmingService.start();
 
 // Initialize and start key rotation service
 const keyRotationConfig: KeyRotationConfig = {
-  checkIntervalSeconds: parseEnvInt("KEY_ROTATION_CHECK_INTERVAL_SECONDS", 10800, { min: 60 }),
-  rotationIntervalDays: parseEnvInt("KEY_ROTATION_INTERVAL_DAYS", 90, { min: 1 }),
-  batchSize: parseEnvInt("KEY_ROTATION_BATCH_SIZE", 100, { min: 1, max: 1000 }),
-  batchSleepMs: parseEnvInt("KEY_ROTATION_BATCH_SLEEP_MS", 100, { min: 10 }),
+  checkIntervalSeconds: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS, 10800),
+  rotationIntervalDays: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS, 90),
+  batchSize: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE, 100),
+  batchSleepMs: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS, 100),
 };
 const keyRotationService = new KeyRotationService({
   db,
@@ -181,9 +209,16 @@ keyRotationService.start();
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
   db,
-  managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
   encryptionService,
 });
+
+// Ensure management group exists and set default access groups
+const mgmtGroupId = await apiKeyService.getOrCreateGroup("management", "Management API keys");
+const currentAccessGroups = await settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
+if (!currentAccessGroups) {
+  await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+  console.log("✓ Default API access group set to management");
+}
 
 // Initialize secrets service
 const secretsService = new SecretsService({
@@ -213,7 +248,7 @@ app.get("/ping", (c) => c.json({ pong: true }));
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
 // Hybrid auth middleware (accepts session OR API key)
-const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService });
+const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService, settingsService });
 
 // Protected API management routes
 app.use("/api/keys/*", hybridAuth);
@@ -244,6 +279,7 @@ app.route("/web", createWebRoutes({
   consoleLogService,
   executionMetricsService,
   encryptionService,
+  settingsService,
 }));
 
 // Dynamic function router - catch all /run/* requests
@@ -251,7 +287,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, processIsolator };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, processIsolator };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
@@ -268,19 +304,23 @@ async function gracefulShutdown(signal: string) {
     console.log(`Waiting ${drainTimeoutMs}ms for requests to drain...`);
     await new Promise((resolve) => setTimeout(resolve, drainTimeoutMs));
 
-    // 3. Stop log trimming service (waits for current processing)
+    // 3. Stop logger refresh interval
+    stopLoggerRefresh();
+    console.log("Logger refresh stopped");
+
+    // 4. Stop log trimming service (waits for current processing)
     await logTrimmingService.stop();
     console.log("Log trimming service stopped");
 
-    // 4. Stop aggregation service (waits for current processing)
+    // 5. Stop aggregation service (waits for current processing)
     await metricsAggregationService.stop();
     console.log("Metrics aggregation service stopped");
 
-    // 5. Stop key rotation service (waits for current rotation batch)
+    // 6. Stop key rotation service (waits for current rotation batch)
     await keyRotationService.stop();
     console.log("Key rotation service stopped");
 
-    // 6. Close database last
+    // 7. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {

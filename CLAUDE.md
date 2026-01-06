@@ -46,7 +46,7 @@ Function router handles API key verification (if route requires keys) and handle
 ### Authentication
 
 - **Web UI**: Better Auth with session cookies only - no API keys accepted for the UI endpoints.
-- **API**: The JWT token from Better Auth or special `management` API key via `X-API-Key` header
+- **API**: Better Auth session OR API key via `X-API-Key` header (groups configured in `api.access-groups` setting)
 - **Function execution**: Optional per-route API key requirements
 - Sign-up disabled after first user is created - existing users can add new ones on dedicated user management page
 
@@ -89,6 +89,6 @@ External packages require full specifiers: `npm:lodash-es`, `jsr:@zod/zod`, or f
 
 See `.env.example` for all options. Key variables:
 
-- `MANAGEMENT_API_KEY` - Required for admin access
-- `BETTER_AUTH_SECRET` - Session signing (generate random for production)
-- `BETTER_AUTH_BASE_URL` - Application URL for redirects
+- `BETTER_AUTH_BASE_URL` - Optional: Application URL for redirects (auto-detected if not set)
+
+Note: API access is controlled by the `api.access-groups` database setting (default: "management" group). Create API keys via the web UI after initial admin setup.
