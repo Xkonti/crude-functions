@@ -36,6 +36,7 @@ import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 import { KeyStorageService } from "./src/encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "./src/encryption/versioned_encryption_service.ts";
 import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
+import { HashService } from "./src/encryption/hash_service.ts";
 import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
 import { SettingsService } from "./src/settings/settings_service.ts";
@@ -97,6 +98,12 @@ const encryptionService = new VersionedEncryptionService({
   phasedOutKey: encryptionKeys.phased_out_key ?? undefined,
   phasedOutVersion: encryptionKeys.phased_out_version ?? undefined,
 });
+
+// Initialize hash service for API key lookups (O(1) constant-time)
+const hashService = new HashService({
+  hashKey: encryptionKeys.hash_key,
+});
+console.log("✓ Hash service initialized");
 
 const app = new Hono();
 
@@ -217,6 +224,7 @@ keyRotationService.start();
 const apiKeyService = new ApiKeyService({
   db,
   encryptionService,
+  hashService,
 });
 
 // Ensure management group exists and set default access groups

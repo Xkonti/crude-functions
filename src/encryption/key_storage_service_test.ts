@@ -43,6 +43,7 @@ Deno.test("KeyStorageService.loadKeys returns parsed JSON when file exists", asy
     phased_out_version: null,
     last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
     better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
   try {
@@ -72,6 +73,7 @@ Deno.test("KeyStorageService.saveKeys writes JSON to file", async () => {
     phased_out_version: "A",
     last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
     better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
   try {
@@ -199,6 +201,7 @@ Deno.test("KeyStorageService.ensureInitialized returns existing keys if file exi
     phased_out_version: null,
     last_rotation_finished_at: "2024-06-15T12:00:00.000Z",
     better_auth_secret: "ZXhpc3Rpbmdfc2VjcmV0X2V4aXN0aW5nX3NlY3JldF9l",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
   try {
@@ -227,6 +230,7 @@ Deno.test("KeyStorageService.isRotationInProgress returns false when no phased_o
     phased_out_version: null,
     last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
     better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
   expect(service.isRotationInProgress(keys)).toBe(false);
@@ -241,6 +245,7 @@ Deno.test("KeyStorageService.isRotationInProgress returns true when both phased_
     phased_out_version: "A",
     last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
     better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
   expect(service.isRotationInProgress(keys)).toBe(true);

@@ -1,5 +1,6 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
+import type { HashService } from "../encryption/hash_service.ts";
 
 /**
  * Represents an API key group
@@ -62,6 +63,8 @@ export interface ApiKeyServiceOptions {
   db: DatabaseService;
   /** Encryption service for encrypting API keys at rest */
   encryptionService: IEncryptionService;
+  /** Hash service for O(1) API key lookups */
+  hashService: HashService;
 }
 
 /**
@@ -71,10 +74,12 @@ export interface ApiKeyServiceOptions {
 export class ApiKeyService {
   private readonly db: DatabaseService;
   private readonly encryptionService: IEncryptionService;
+  private readonly hashService: HashService;
 
   constructor(options: ApiKeyServiceOptions) {
     this.db = options.db;
     this.encryptionService = options.encryptionService;
+    this.hashService = options.hashService;
   }
 
   // ============== Group Operations ==============
@@ -310,6 +315,7 @@ export class ApiKeyService {
 
   /**
    * Check if a specific key value exists in a group.
+   * Uses hash-based O(1) lookup instead of O(n) decryption.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to check
    */
@@ -321,26 +327,19 @@ export class ApiKeyService {
       return false;
     }
 
-    // Fetch all encrypted keys for this group
-    const rows = await this.db.queryAll<{ value: string }>(
-      "SELECT value FROM api_keys WHERE group_id = ?",
-      [groupRow.id]
+    // O(1) hash-based lookup eliminates timing attack
+    const valueHash = await this.hashService.computeHash(keyValue);
+    const row = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM api_keys WHERE group_id = ? AND value_hash = ?",
+      [groupRow.id, valueHash]
     );
 
-    // Decrypt each key and compare
-    for (const row of rows) {
-      const decryptedValue = await this.decryptKey(row.value);
-      if (decryptedValue === keyValue) {
-        return true;
-      }
-    }
-
-    return false;
+    return row !== null;
   }
 
   /**
    * Get key and group IDs for a specific key value in a group.
-   * Similar to hasKey but returns IDs instead of boolean.
+   * Uses hash-based O(1) lookup instead of O(n) decryption.
    * Used by ApiKeyValidator to obtain IDs for secret resolution.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to look up
@@ -357,25 +356,22 @@ export class ApiKeyService {
       return null;
     }
 
-    // Fetch all encrypted keys for this group
-    const rows = await this.db.queryAll<{ id: number; name: string; value: string }>(
-      "SELECT id, name, value FROM api_keys WHERE group_id = ?",
-      [groupRow.id]
+    // O(1) hash-based lookup eliminates timing attack
+    const valueHash = await this.hashService.computeHash(keyValue);
+    const row = await this.db.queryOne<{ id: number; name: string }>(
+      "SELECT id, name FROM api_keys WHERE group_id = ? AND value_hash = ?",
+      [groupRow.id, valueHash]
     );
 
-    // Decrypt each key and compare
-    for (const row of rows) {
-      const decryptedValue = await this.decryptKey(row.value);
-      if (decryptedValue === keyValue) {
-        return {
-          keyId: row.id,
-          groupId: groupRow.id,
-          keyName: row.name,
-        };
-      }
+    if (!row) {
+      return null;
     }
 
-    return null;
+    return {
+      keyId: row.id,
+      groupId: groupRow.id,
+      keyName: row.name,
+    };
   }
 
   /**
@@ -428,15 +424,19 @@ export class ApiKeyService {
     // Encrypt the key value before storage
     const encryptedValue = await this.encryptKey(value);
 
-    // Insert the encrypted key
+    // Compute hash for O(1) constant-time lookup
+    const valueHash = await this.hashService.computeHash(value);
+
+    // Insert the encrypted key with hash
     await this.db.execute(
-      "INSERT INTO api_keys (group_id, name, value, description, created_at, modified_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-      [groupId, normalizedName, encryptedValue, description ?? null]
+      "INSERT INTO api_keys (group_id, name, value, value_hash, description, created_at, modified_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+      [groupId, normalizedName, encryptedValue, valueHash, description ?? null]
     );
   }
 
   /**
    * Remove a specific key by group and value.
+   * Uses hash-based O(1) lookup instead of O(n) decryption.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to remove
    */
@@ -448,21 +448,12 @@ export class ApiKeyService {
       return; // Group doesn't exist, nothing to remove
     }
 
-    // Fetch all encrypted keys for this group and find the matching one
-    // (can't use SQL WHERE with encrypted values)
-    const rows = await this.db.queryAll<{ id: number; value: string }>(
-      "SELECT id, value FROM api_keys WHERE group_id = ?",
-      [groupRow.id]
+    // O(1) hash-based lookup and delete
+    const valueHash = await this.hashService.computeHash(keyValue);
+    await this.db.execute(
+      "DELETE FROM api_keys WHERE group_id = ? AND value_hash = ?",
+      [groupRow.id, valueHash]
     );
-
-    // Find and delete the key that matches when decrypted
-    for (const row of rows) {
-      const decryptedValue = await this.decryptKey(row.value);
-      if (decryptedValue === keyValue) {
-        await this.db.execute("DELETE FROM api_keys WHERE id = ?", [row.id]);
-        return;
-      }
-    }
   }
 
   /**

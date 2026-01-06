@@ -4,9 +4,12 @@ import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "./api_key_service.ts";
 import { createApiKeyRoutes } from "./api_key_routes.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { HashService } from "../encryption/hash_service.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+// Test hash key (32 bytes base64-encoded)
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_key_groups (
@@ -18,13 +21,16 @@ const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     value TEXT NOT NULL,
+    value_hash TEXT,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     modified_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
   CREATE INDEX idx_api_keys_group ON api_keys(group_id);
+  CREATE INDEX idx_api_keys_hash ON api_keys(group_id, value_hash);
 `;
 
 async function createTestApp(): Promise<{
@@ -42,9 +48,14 @@ async function createTestApp(): Promise<{
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
 
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+
   const service = new ApiKeyService({
     db,
     encryptionService,
+    hashService,
   });
 
   const app = new Hono();
@@ -151,7 +162,7 @@ Deno.test("POST /api/keys/:group adds new key", async () => {
     const res = await app.request("/api/keys/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: "newkey", description: "test" }),
+      body: JSON.stringify({ name: "newkey-name", value: "newkey", description: "test" }),
     });
 
     expect(res.status).toBe(201);
@@ -192,7 +203,7 @@ Deno.test("POST /api/keys/:group rejects invalid key value", async () => {
     const res = await app.request("/api/keys/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ value: "invalid.value" }),
+      body: JSON.stringify({ name: "invalid-key", value: "invalid.value" }),
     });
 
     expect(res.status).toBe(400);

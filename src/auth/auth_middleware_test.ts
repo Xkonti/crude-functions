@@ -4,12 +4,15 @@ import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { HashService } from "../encryption/hash_service.ts";
 import { createHybridAuthMiddleware } from "./auth_middleware.ts";
 import { SettingNames } from "../settings/types.ts";
 import type { Auth } from "./auth.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+// Test hash key (32 bytes base64-encoded)
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_key_groups (
@@ -21,13 +24,16 @@ const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     value TEXT NOT NULL,
+    value_hash TEXT,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     modified_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
   CREATE INDEX idx_api_keys_group ON api_keys(group_id);
+  CREATE INDEX idx_api_keys_hash ON api_keys(group_id, value_hash);
 `;
 
 const SETTINGS_SCHEMA = `
@@ -81,9 +87,14 @@ async function createTestApp(options: { authenticated?: boolean } = {}): Promise
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
 
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+
   const apiKeyService = new ApiKeyService({
     db,
     encryptionService,
+    hashService,
   });
 
   const settingsService = new SettingsService({
@@ -250,7 +261,7 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (first group
     // Test key from first group
     const res = await app.request("/api/test", {
       headers: {
-        "X-API-Key": "admin-key",
+        "X-API-Key": "admin-key-value",
       },
     });
 
@@ -285,7 +296,7 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (second grou
     // Test key from second group
     const res = await app.request("/api/test", {
       headers: {
-        "X-API-Key": "service-key",
+        "X-API-Key": "service-key-value",
       },
     });
 
@@ -304,7 +315,7 @@ Deno.test("HybridAuth: rejects invalid API key even when access groups configure
 
   try {
     const mgmtGroupId = await apiKeyService.createGroup("management", "Management");
-    await apiKeyService.addKey("management", "valid-key");
+    await apiKeyService.addKey("management", "valid-key", "valid-key-value");
     await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
 
     const res = await app.request("/api/test", {
@@ -325,7 +336,7 @@ Deno.test("HybridAuth: handles malformed access groups setting gracefully", asyn
   const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
 
   try {
-    await apiKeyService.addKey("test", "test-key");
+    await apiKeyService.addKey("test", "test-key", "test-key-value");
 
     // Set malformed setting (non-numeric values)
     await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, "abc,xyz,123invalid");
@@ -347,7 +358,7 @@ Deno.test("HybridAuth: handles empty access groups setting", async () => {
   const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
 
   try {
-    await apiKeyService.addKey("test", "test-key");
+    await apiKeyService.addKey("test", "test-key", "test-key-value");
     await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, "");
 
     const res = await app.request("/api/test", {
@@ -368,7 +379,7 @@ Deno.test("HybridAuth: prioritizes session over API key when both present", asyn
 
   try {
     const mgmtGroupId = await apiKeyService.createGroup("management", "Management");
-    await apiKeyService.addKey("management", "test-key");
+    await apiKeyService.addKey("management", "test-key", "test-key-value");
     await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
 
     const res = await app.request("/api/test", {

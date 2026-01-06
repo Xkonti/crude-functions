@@ -36,7 +36,17 @@ export class KeyStorageService {
   async loadKeys(): Promise<EncryptionKeyFile | null> {
     try {
       const content = await Deno.readTextFile(this.keyFilePath);
-      return JSON.parse(content) as EncryptionKeyFile;
+      const keys = JSON.parse(content) as EncryptionKeyFile;
+
+      // Generate hash key if missing (for upgrades from older versions)
+      if (!keys.hash_key) {
+        logger.info("[KeyStorage] hash_key missing, generating...");
+        keys.hash_key = await this.generateKey();
+        await this.saveKeys(keys);
+        logger.info("[KeyStorage] hash_key generated and saved");
+      }
+
+      return keys;
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
         return null;
@@ -131,8 +141,9 @@ export class KeyStorageService {
 
     logger.info("[KeyStorage] No keys file found, generating initial keys...");
 
-    // Generate both encryption key and auth secret
-    const [encryptionKey, authSecret] = await Promise.all([
+    // Generate encryption key, auth secret, and hash key
+    const [encryptionKey, authSecret, hashKey] = await Promise.all([
+      this.generateKey(),
       this.generateKey(),
       this.generateKey(),
     ]);
@@ -144,6 +155,7 @@ export class KeyStorageService {
       phased_out_version: null,
       last_rotation_finished_at: new Date().toISOString(),
       better_auth_secret: authSecret,
+      hash_key: hashKey,
     };
 
     await this.saveKeys(keys);

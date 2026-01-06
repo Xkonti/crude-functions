@@ -413,13 +413,6 @@ The key rotation service has several good patterns:
 
 🔴 Critical Issues to Fix Now
 
-  2. Security: API Key Timing Attack (High Priority)
-
-- Location: src/keys/api_key_service.ts:297-320
-- Problem: Sequential key decryption creates timing side-channel and performance DoS
-- Impact: Slow authentication under load, potential information leakage
-- Fix: Store hashed keys for lookup, only decrypt matched key
-
   3. Web UI: Massive JavaScript Duplication (High Priority)
 
 - Location: src/web/functions_pages.ts, src/web/keys_pages.ts

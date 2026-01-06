@@ -81,6 +81,7 @@ async function createTestContext(
     phased_out_version: null,
     last_rotation_finished_at: new Date().toISOString(),
     better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
     ...keysOverride,
   };
   await keyStorage.saveKeys(keys);

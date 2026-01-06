@@ -8,9 +8,12 @@ import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts
 import { SecretsService } from "../secrets/secrets_service.ts";
 import { FunctionRouter } from "./function_router.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { HashService } from "../encryption/hash_service.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+// Test hash key (32 bytes base64-encoded)
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS api_key_groups (
@@ -22,13 +25,16 @@ CREATE TABLE IF NOT EXISTS api_key_groups (
 CREATE TABLE IF NOT EXISTS api_keys (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
   value TEXT NOT NULL,
+  value_hash TEXT,
   description TEXT,
   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
   modified_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_value ON api_keys(group_id, value);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_group_name ON api_keys(group_id, name);
 CREATE INDEX IF NOT EXISTS idx_api_keys_group ON api_keys(group_id);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(group_id, value_hash);
 `;
 
 const ROUTES_SCHEMA = `
@@ -125,7 +131,10 @@ async function createTestSetup(
   const encryptionService = new EncryptionService({
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
-  const apiKeyService = new ApiKeyService({ db, encryptionService });
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+  const apiKeyService = new ApiKeyService({ db, encryptionService, hashService });
   const consoleLogService = new ConsoleLogService({ db });
   const executionMetricsService = new ExecutionMetricsService({ db });
   const secretsService = new SecretsService({ db, encryptionService });
@@ -137,7 +146,9 @@ async function createTestSetup(
 
   // Add initial keys
   for (const key of initialKeys) {
-    await apiKeyService.addKey(key.group, key.value, key.description);
+    // Generate a unique name from the value to avoid name/value collision
+    const name = `${key.value}-key`;
+    await apiKeyService.addKey(key.group, name, key.value, key.description);
   }
 
   const functionRouter = new FunctionRouter({

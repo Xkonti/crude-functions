@@ -8,11 +8,15 @@ import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { HashService } from "../encryption/hash_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
+import { UserService } from "../users/user_service.ts";
 import type { Auth } from "../auth/auth.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+// Test hash key (32 bytes base64-encoded)
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 /**
  * Creates a mock Auth object for testing.
@@ -46,13 +50,16 @@ const API_KEYS_SCHEMA = `
   CREATE TABLE api_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     value TEXT NOT NULL,
+    value_hash TEXT,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     modified_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
   CREATE INDEX idx_api_keys_group ON api_keys(group_id);
+  CREATE INDEX idx_api_keys_hash ON api_keys(group_id, value_hash);
 `;
 
 const ROUTES_SCHEMA = `
@@ -158,7 +165,10 @@ async function createTestApp(
   const encryptionService = new EncryptionService({
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
-  const apiKeyService = new ApiKeyService({ db, encryptionService });
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+  const apiKeyService = new ApiKeyService({ db, encryptionService, hashService });
 
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
@@ -176,9 +186,10 @@ async function createTestApp(
 
   const app = new Hono();
   const auth = createMockAuth({ authenticated });
+  const userService = new UserService({ db, auth });
   app.route(
     "/web",
-    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService })
+    createWebRoutes({ auth, db, userService, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService })
   );
 
   return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService, settingsService };
@@ -570,6 +581,7 @@ Deno.test("POST /web/keys/create creates key", async () => {
   try {
     const formData = new FormData();
     formData.append("group", "newkey");
+    formData.append("name", "newkey-name");
     formData.append("value", "newvalue123");
     formData.append("description", "test description");
 

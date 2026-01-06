@@ -219,6 +219,7 @@ export class KeyRotationService {
       phased_out_version: keys.current_version,
       last_rotation_finished_at: keys.last_rotation_finished_at, // Don't update until complete
       better_auth_secret: newAuthSecret,
+      hash_key: keys.hash_key, // Hash key doesn't rotate
     };
 
     await this.keyStorage.saveKeys(updatedKeys);
@@ -267,6 +268,7 @@ export class KeyRotationService {
         phased_out_version: null,
         last_rotation_finished_at: new Date().toISOString(),
         better_auth_secret: keys.better_auth_secret,
+        hash_key: keys.hash_key, // Hash key doesn't rotate
       };
 
       await this.keyStorage.saveKeys(completedKeys);

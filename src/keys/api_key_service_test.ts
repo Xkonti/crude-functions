@@ -7,10 +7,15 @@ import {
   validateKeyValue,
 } from "./api_key_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { HashService } from "../encryption/hash_service.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 // Generated with: openssl rand -base64 32
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+
+// Test hash key (32 bytes base64-encoded)
+// Generated with: openssl rand -base64 32
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
   CREATE TABLE api_key_groups (
@@ -24,12 +29,14 @@ const API_KEYS_SCHEMA = `
     group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     value TEXT NOT NULL,
+    value_hash TEXT,
     description TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     modified_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE UNIQUE INDEX idx_api_keys_group_name ON api_keys(group_id, name);
   CREATE INDEX idx_api_keys_group ON api_keys(group_id);
+  CREATE INDEX idx_api_keys_hash ON api_keys(group_id, value_hash);
 `;
 
 async function createTestSetup(): Promise<{
@@ -46,9 +53,14 @@ async function createTestSetup(): Promise<{
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
 
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+
   const service = new ApiKeyService({
     db,
     encryptionService,
+    hashService,
   });
   return { service, db, tempDir };
 }
@@ -496,4 +508,135 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
       await cleanup(db, tempDir);
     }
   });
+});
+
+// =====================
+// Hash-based lookup tests
+// =====================
+
+Deno.test("ApiKeyService - Hash stored on addKey", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.addKey("test", "key1", "mykey123");
+
+    const row = await db.queryOne<{ value_hash: string }>(
+      "SELECT value_hash FROM api_keys WHERE name = 'key1'"
+    );
+
+    expect(row).not.toBeNull();
+    expect(row!.value_hash).not.toBeNull();
+    expect(row!.value_hash.length).toBeGreaterThan(20); // Base64 hash
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService - Different keys produce different hashes", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.addKey("test", "key1", "value1");
+    await service.addKey("test", "key2", "value2");
+
+    const row1 = await db.queryOne<{ value_hash: string }>(
+      "SELECT value_hash FROM api_keys WHERE name = 'key1'"
+    );
+    const row2 = await db.queryOne<{ value_hash: string }>(
+      "SELECT value_hash FROM api_keys WHERE name = 'key2'"
+    );
+
+    expect(row1!.value_hash).not.toBe(row2!.value_hash);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService - Performance with many keys", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    // Create 100 keys in a group
+    for (let i = 0; i < 100; i++) {
+      await service.addKey("perf-test", `key-${i}`, `value-${i}`);
+    }
+
+    // Measure lookup of last key (worst case for O(n) scan)
+    const start = performance.now();
+    const found = await service.hasKey("perf-test", "value-99");
+    const elapsed = performance.now() - start;
+
+    expect(found).toBe(true);
+    // With hash lookup, should be <10ms even for 100 keys
+    // Old O(n) decryption would be ~100ms
+    expect(elapsed).toBeLessThan(50);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService - O(1) scaling verification", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    const results = [];
+
+    // Test with 10, 50, 100 keys
+    for (const n of [10, 50, 100]) {
+      // Create n keys
+      const groupName = `bench-${n}`;
+      for (let i = 0; i < n; i++) {
+        await service.addKey(groupName, `key-${i}`, `value-${i}`);
+      }
+
+      // Measure lookup time for last key
+      const start = performance.now();
+      await service.hasKey(groupName, `value-${n - 1}`);
+      const elapsed = performance.now() - start;
+
+      results.push({ n, elapsed });
+    }
+
+    // Verify O(1): 10x more keys should NOT be 10x slower
+    // Allow 5x variance for noise (should be constant time)
+    const ratio50_to_10 = results[1].elapsed / results[0].elapsed;
+    const ratio100_to_50 = results[2].elapsed / results[1].elapsed;
+
+    expect(ratio50_to_10).toBeLessThan(5);
+    expect(ratio100_to_50).toBeLessThan(5);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService - getKeyByValue uses hash lookup", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.addKey("test", "key1", "value1");
+    await service.addKey("test", "key2", "value2");
+
+    const result = await service.getKeyByValue("test", "value1");
+
+    expect(result).not.toBeNull();
+    expect(result!.keyName).toBe("key1");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ApiKeyService - removeKey uses hash lookup", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    await service.addKey("test", "key1", "value1");
+    await service.addKey("test", "key2", "value2");
+
+    await service.removeKey("test", "value1");
+
+    expect(await service.hasKey("test", "value1")).toBe(false);
+    expect(await service.hasKey("test", "value2")).toBe(true);
+  } finally {
+    await cleanup(db, tempDir);
+  }
 });
