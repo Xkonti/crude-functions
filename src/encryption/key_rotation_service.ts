@@ -23,7 +23,7 @@ import { logger } from "../utils/logger.ts";
 /**
  * Tables containing encrypted data that need key rotation.
  */
-const ENCRYPTED_TABLES: EncryptedTable[] = ["secrets", "apiKeys"];
+const ENCRYPTED_TABLES: EncryptedTable[] = ["secrets", "apiKeys", "settings"];
 
 /**
  * Maximum consecutive failures before auto-stopping.
@@ -332,16 +332,28 @@ export class KeyRotationService {
 
   /**
    * Fetch a batch of records that need re-encryption.
+   * For settings table, only fetches rows where isEncrypted = 1.
+   * For other tables, all rows are encrypted.
    */
   private async fetchBatch(
     table: EncryptedTable,
     phasedOutVersion: string
   ): Promise<EncryptedRecord[]> {
-    const query = `
-      SELECT id, value, updatedAt FROM ${table}
-      WHERE value LIKE ?
-      LIMIT ?
-    `;
+    let query: string;
+
+    if (table === "settings") {
+      query = `
+        SELECT id, value, updatedAt FROM ${table}
+        WHERE isEncrypted = 1 AND value LIKE ?
+        LIMIT ?
+      `;
+    } else {
+      query = `
+        SELECT id, value, updatedAt FROM ${table}
+        WHERE value LIKE ?
+        LIMIT ?
+      `;
+    }
 
     const rows = await this.db.queryAll<EncryptedRecord>(query, [
       `${phasedOutVersion}%`,
