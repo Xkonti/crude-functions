@@ -41,9 +41,16 @@ export class VersionedEncryptionService {
   private currentVersion!: string;
   private phasedOutVersion!: string | null;
 
+  /**
+   * LOCK ORDERING HIERARCHY (to prevent deadlocks):
+   * 1. rotationLock - must be acquired first
+   * 2. keyMutex - must be acquired second
+   *
+   * Never acquire keyMutex before rotationLock.
+   * Never call updateKeys() while holding rotationLock externally.
+   */
   // Mutex for thread-safe key updates
   private readonly keyMutex = new Mutex();
-
   // Rotation lock - when acquired, blocks all encrypt/decrypt operations
   private readonly rotationLock = new Mutex();
 

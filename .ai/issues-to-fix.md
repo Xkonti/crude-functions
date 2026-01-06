@@ -2,45 +2,6 @@
 
 ### Critical Issues
 
-#### 3. Race Condition in updateKeys() with Concurrent Encrypt/Decrypt
-
-**Location:** `src/encryption/versioned_encryption_service.ts:236-242`
-
-The `updateKeys()` method acquires only `keyMutex`, while `encrypt()` and `decrypt()` acquire only `rotationLock`. This creates a race condition window where encryption could occur with mismatched key/version pairs during key updates.
-
-**Race scenario:**
-
-1. Thread A calls `encrypt()`, acquires `rotationLock`, enters `encryptUnlocked()`
-2. Thread B calls `updateKeys()`, acquires `keyMutex`, begins updating keys
-3. Thread A reads `this.rawCurrentKey` which Thread B is modifying
-4. Thread A may use cached key that doesn't match the new version
-
-**Impact:** Can cause encryption with mismatched key/version pairs, making data undecryptable.
-
-#### 4. Cache Invalidation Race in Key Rotation
-
-**Location:** `src/encryption/versioned_encryption_service.ts:111-114, 318-349`
-
-When `validateAndSetKeys()` sets `this.currentKey = null` and `this.phasedOutKey = null`, there's no guarantee that concurrent operations won't still be using cached references to the old CryptoKey objects. JavaScript object references are not atomic.
-
-**Impact:** Encryption/decryption with wrong key during rotation.
-
-#### 5. Deadlock Risk with Nested Lock Acquisition
-
-**Location:** `src/encryption/key_rotation_service.ts:288-318`
-
-The service has two mutexes (`keyMutex` and `rotationLock`) with no clear lock ordering hierarchy documented. While current implementation is careful, this structural vulnerability makes the code fragile and prone to deadlocks during future maintenance.
-
-**Impact:** High risk of future deadlocks during maintenance.
-
-#### 6. Integer Overflow in Base64 Conversion
-
-**Location:** `src/encryption/utils.ts:31-34`
-
-The `bytesToBase64()` function uses `String.fromCharCode(...bytes)` with spread operator, which can cause stack overflow for large byte arrays. JavaScript call stacks typically limit to ~65536 arguments, so any data larger than ~65KB will fail.
-
-**Impact:** Prevents encryption of large values (>65KB), causing service failures.
-
 #### 7. No Validation of Decrypted Data Length
 
 **Location:** `src/encryption/versioned_encryption_service.ts:192-228`
@@ -139,12 +100,6 @@ Calls to `encryptionService.decrypt()` don't have try-catch blocks. If any secre
 
 ### Minor Issues
 
-#### 17. No Limit on Plaintext Size
-
-**Location:** `src/encryption/versioned_encryption_service.ts:138-168`
-
-No validation or limit on plaintext size before encryption. Very large plaintexts (SQLite TEXT can hold ~1GB) could cause memory issues.
-
 #### 18. base64ToBytes Doesn't Handle Invalid Base64 Gracefully
 
 **Location:** `src/encryption/utils.ts:9-22`
@@ -157,31 +112,11 @@ Error wrapping loses context from original `atob()` errors.
 
 After slicing IV, no check that it's exactly 12 bytes (covered by issue #7).
 
-#### 20. TextEncoder/TextDecoder Not Checked for Availability
-
-Multiple locations - assumes globals exist, which is fine for Deno but not portable.
-
 #### 21. KeyRotationService.stop() Has Fixed 60-Second Timeout
 
 **Location:** `src/encryption/key_rotation_service.ts:123-145`
 
 Hard-coded timeout may be insufficient for very large databases.
-
-#### 22. isEncryptedWithPhasedOutKey() Returns False for Empty String
-
-**Location:** `src/encryption/versioned_encryption_service.ts:269-274`
-
-Logic is correct but could be clearer.
-
-### Positive Observations
-
-The encryption service implementation has several strong patterns:
-
-1. **Excellent use of TypeScript's `using` declaration** for automatic lock release - prevents lock leaks
-2. **Comprehensive test coverage** including edge cases like empty strings and special characters
-3. **Clear separation between locked and unlocked variants** prevents accidental deadlocks
-4. **Proper use of AES-256-GCM** with random IVs and authenticated encryption
-5. **Good logging** throughout for debugging
 
 ---
 
@@ -352,59 +287,3 @@ After 26 rotations, version wraps Z → A. By design, old keys are discarded, so
 **Location:** `src/encryption/key_storage_service.ts:50-54`
 
 Direct write to key file without atomic write pattern (write to temp, then rename). Partial writes possible if process crashes mid-write.
-
-### Positive Observations
-
-The key rotation service has several good patterns:
-
-1. **Proper lock usage** - Uses `using` disposable pattern for automatic lock release
-2. **Graceful shutdown** - `stop()` method waits for in-progress rotation with timeout
-3. **Resumption logic** - Correctly detects incomplete rotations and resumes
-4. **Batch processing** - Batches with sleep intervals prevent overwhelming database
-5. **Optimistic concurrency** - Using `modified_at` is correct pattern for long-running operations
-6. **Idempotent start** - Prevents duplicate timers correctly
-
----
-
-## Summary by Severity
-
-### Encryption Service
-
-- **Critical:** 7 issues - partial config validation, version collision, race conditions, deadlock risk, stack overflow, length validation
-- **Moderate:** 9 issues - openssl validation, timeouts, file system races, JSON validation, retry logic
-- **Minor:** 6 issues - size limits, error wrapping, portability
-
-### Key Rotation Service
-
-- **Critical:** 5 issues - failed writes, race conditions, flag management, transaction handling, permission errors
-- **Moderate:** 8 issues - retry logic, lock handling, validation, session handling, error recovery
-- **Minor:** 5 issues - timer cleanup, time calculations, lock timeouts, version wrapping, atomic writes
-
-## Recommended Priority Order for Fixes
-
-1. **Encryption Service Issue #3** - Race condition in updateKeys() (most likely to cause production issues)
-2. **Key Rotation Issue #1** - Failed key file write recovery (data loss risk)
-3. **Key Rotation Issue #5** - File permission error handling (data loss risk)
-4. **Encryption Service Issue #1** - Partial phased-out key config (data loss risk)
-5. **Encryption Service Issue #2** - Version collision check (silent corruption risk)
-6. **Encryption Service Issue #6** - Stack overflow in base64 conversion (breaks large values)
-7. **Key Rotation Issue #4** - Multi-table transaction wrapper (consistency)
-8. **Key Rotation Issue #2** - Timer check race condition (concurrency)
-9. **Encryption Service Issue #7** - Length validation in decrypt (better errors)
-10. **Key Rotation Issue #8** - Validation before clearing phased out key (data loss prevention)
-
-# Architecture issues
-
-  🟡 Major Consistency Issues
-
-  Error Handling Inconsistency
-
-- Some methods return null on not found
-- Some throw errors
-- Some silently succeed
-- Fix: Document and enforce consistent patterns across services
-
-  Query Pattern Duplication
-
-- ExecutionMetricsService.getByRouteId() has 4 identical SQL queries
-- Fix: Build queries dynamically (~25 lines saved)
