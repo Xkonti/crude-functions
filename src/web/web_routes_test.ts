@@ -8,6 +8,7 @@ import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { SettingsService } from "../settings/settings_service.ts";
 import type { Auth } from "../auth/auth.ts";
 
 // Test encryption key (32 bytes base64-encoded)
@@ -97,6 +98,19 @@ const EXECUTION_METRICS_SCHEMA = `
   CREATE INDEX idx_execution_metrics_timestamp ON execution_metrics(timestamp);
 `;
 
+const SETTINGS_SCHEMA = `
+  CREATE TABLE settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    user_id TEXT,
+    value TEXT,
+    is_encrypted INTEGER NOT NULL DEFAULT 0,
+    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(user_id, ''));
+  CREATE INDEX idx_settings_name ON settings(name);
+`;
+
 interface TestRoute {
   name: string;
   handler: string;
@@ -115,6 +129,7 @@ interface TestContext {
   fileService: FileService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
+  settingsService: SettingsService;
 }
 
 interface CreateTestAppOptions {
@@ -136,6 +151,7 @@ async function createTestApp(
   await db.exec(ROUTES_SCHEMA);
   await db.exec(CONSOLE_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
+  await db.exec(SETTINGS_SCHEMA);
 
   await Deno.mkdir(codePath);
 
@@ -150,6 +166,8 @@ async function createTestApp(
   const fileService = new FileService({ basePath: codePath });
   const consoleLogService = new ConsoleLogService({ db });
   const executionMetricsService = new ExecutionMetricsService({ db });
+  const settingsService = new SettingsService({ db, encryptionService });
+  await settingsService.bootstrapGlobalSettings();
 
   // Add initial routes
   for (const route of initialRoutes) {
@@ -160,10 +178,10 @@ async function createTestApp(
   const auth = createMockAuth({ authenticated });
   app.route(
     "/web",
-    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService })
+    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService })
   );
 
-  return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService };
+  return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService, settingsService };
 }
 
 async function cleanup(db: DatabaseService, tempDir: string) {
