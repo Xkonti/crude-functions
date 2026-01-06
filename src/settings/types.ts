@@ -17,6 +17,9 @@ export const SettingNames = {
   ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS: "encryption.key-rotation.interval-days",
   ENCRYPTION_KEY_ROTATION_BATCH_SIZE: "encryption.key-rotation.batch-size",
   ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS: "encryption.key-rotation.batch-sleep-ms",
+
+  // Security
+  API_ACCESS_GROUPS: "api.access-groups",
 } as const;
 
 /**
@@ -39,6 +42,7 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS]: "90",
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE]: "100",
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS]: "100",
+  [SettingNames.API_ACCESS_GROUPS]: "",
 };
 
 /**
@@ -48,11 +52,11 @@ export interface SettingMetadata {
   name: SettingName;
   label: string;
   description: string;
-  inputType: "text" | "number" | "select";
+  inputType: "text" | "number" | "select" | "checkboxGroup";
   options?: readonly string[];
   min?: number;
   max?: number;
-  category: "Logging" | "Metrics" | "Encryption";
+  category: "Logging" | "Metrics" | "Encryption" | "Security";
 }
 
 /**
@@ -140,6 +144,13 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     max: 5000,
     category: "Encryption",
   },
+  [SettingNames.API_ACCESS_GROUPS]: {
+    name: SettingNames.API_ACCESS_GROUPS,
+    label: "API Access Groups",
+    description: "API key groups allowed to access management endpoints",
+    inputType: "checkboxGroup",
+    category: "Security",
+  },
 };
 
 /**
@@ -160,5 +171,8 @@ export const SettingsByCategory = {
     SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS,
     SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE,
     SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS,
+  ],
+  Security: [
+    SettingNames.API_ACCESS_GROUPS,
   ],
 } as const;

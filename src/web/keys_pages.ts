@@ -89,7 +89,7 @@ export function createKeysPages(
                       .map(
                         (key) => `
                       <tr>
-                        <td><code>${key.id === -1 ? "env" : key.id}</code></td>
+                        <td><code>${key.id}</code></td>
                         <td class="secret-value">
                           <span class="masked">••••••••</span>
                           <span class="revealed" style="display:none;">
@@ -106,11 +106,7 @@ export function createKeysPages(
                         </td>
                         <td>${key.description ? escapeHtml(key.description) : "<em>none</em>"}</td>
                         <td class="actions">
-                          ${
-                            key.id === -1
-                              ? "<em>env</em>"
-                              : `<a href="/web/keys/${key.id}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>`
-                          }
+                          <a href="/web/keys/${key.id}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                         </td>
                       </tr>
                     `
@@ -432,12 +428,6 @@ export function createKeysPages(
     const id = parseInt(idStr, 10);
     if (isNaN(id)) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
-    }
-
-    if (id === -1) {
-      return c.redirect(
-        "/web/keys?error=" + encodeURIComponent("Cannot delete environment-provided management key")
-      );
     }
 
     return c.html(

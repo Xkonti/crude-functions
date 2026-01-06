@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import {
   SettingNames,
   GlobalSettingDefaults,
@@ -16,10 +17,11 @@ import {
 
 export interface SettingsPagesOptions {
   settingsService: SettingsService;
+  apiKeyService: ApiKeyService;
 }
 
 export function createSettingsPages(options: SettingsPagesOptions): Hono {
-  const { settingsService } = options;
+  const { settingsService, apiKeyService } = options;
   const routes = new Hono();
 
   // GET / - Main settings page with tab support
@@ -40,7 +42,10 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
       settingsData[name] = value ?? GlobalSettingDefaults[name];
     }
 
-    const content = renderServerSettingsTab(settingsData, success, error);
+    // Load available groups for checkboxGroup settings
+    const availableGroups = await apiKeyService.getGroups();
+
+    const content = renderServerSettingsTab(settingsData, availableGroups, success, error);
     return c.html(layout("Server Settings", content, getLayoutUser(c)));
   });
 
@@ -58,7 +63,10 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
         encodeURIComponent("Invalid form data"));
     }
 
-    const { updates, errors } = parseAndValidateSettings(formData);
+    // Load available groups for validation and re-rendering
+    const availableGroups = await apiKeyService.getGroups();
+
+    const { updates, errors } = parseAndValidateSettings(formData, availableGroups);
 
     if (errors.length > 0) {
       // Load current values and merge with form data for re-display
@@ -70,7 +78,7 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
       return c.html(
         layout(
           "Server Settings",
-          renderServerSettingsTab(settingsData, undefined, errors.join(". ")),
+          renderServerSettingsTab(settingsData, availableGroups, undefined, errors.join(". ")),
           getLayoutUser(c)
         ),
         400
@@ -135,6 +143,7 @@ function renderUserSettingsTab(): string {
 // Helper: Render server settings tab
 function renderServerSettingsTab(
   data: Record<string, string>,
+  availableGroups: ApiKeyGroup[],
   success?: string,
   error?: string
 ): string {
@@ -143,7 +152,7 @@ function renderServerSettingsTab(
     ${renderTabs("server")}
     ${flashMessages(success, error)}
     <form method="POST" action="/web/settings/server">
-      ${renderSettingsForm(data)}
+      ${renderSettingsForm(data, availableGroups)}
       <div class="grid">
         <button type="submit">Save Settings</button>
         <a href="/web" role="button" class="secondary">Cancel</a>
@@ -153,7 +162,10 @@ function renderServerSettingsTab(
 }
 
 // Helper: Render settings form grouped by category
-function renderSettingsForm(data: Record<string, string>): string {
+function renderSettingsForm(
+  data: Record<string, string>,
+  availableGroups: ApiKeyGroup[]
+): string {
   const categories = Object.entries(SettingsByCategory);
 
   return categories.map(([categoryName, settingNames]) => {
@@ -184,6 +196,29 @@ function renderSettingsForm(data: Record<string, string>): string {
         ].filter(Boolean).join(" ");
 
         inputHtml = `<input ${attrs} />`;
+      } else if (metadata.inputType === "checkboxGroup") {
+        // Parse currently selected IDs from comma-separated string
+        const selectedIds = value
+          ? value.split(",").map((id) => parseInt(id.trim(), 10)).filter((id) => !isNaN(id))
+          : [];
+
+        if (availableGroups.length === 0) {
+          inputHtml = `
+            <p><em>No API key groups defined. <a href="/web/keys/create-group">Create a group</a> first.</em></p>
+          `;
+        } else {
+          inputHtml = `
+            <fieldset>
+              ${availableGroups.map((group) => `
+                <label>
+                  <input type="checkbox" name="${escapeHtml(name)}" value="${group.id}"
+                         ${selectedIds.includes(group.id) ? "checked" : ""}>
+                  <strong>${escapeHtml(group.name)}</strong>${group.description ? `: ${escapeHtml(group.description)}` : ""}
+                </label>
+              `).join("")}
+            </fieldset>
+          `;
+        }
       } else {
         inputHtml = `
           <input type="text"
@@ -212,16 +247,35 @@ function renderSettingsForm(data: Record<string, string>): string {
 }
 
 // Helper: Parse and validate form data
-function parseAndValidateSettings(formData: FormData): {
+function parseAndValidateSettings(
+  formData: FormData,
+  availableGroups: ApiKeyGroup[]
+): {
   updates: Record<string, string>;
   errors: string[];
 } {
   const updates: Record<string, string> = {};
   const errors: string[] = [];
 
+  // Get valid group IDs for validation
+  const validGroupIds = new Set(availableGroups.map((g) => g.id));
+
   for (const name of Object.values(SettingNames)) {
-    const value = formData.get(name)?.toString().trim() ?? "";
     const metadata = SettingsMetadata[name];
+
+    if (metadata.inputType === "checkboxGroup") {
+      // Handle checkbox groups - getAll for multiple values
+      const selectedValues = formData.getAll(name).map((v) => v.toString().trim());
+      const selectedIds = selectedValues
+        .map((v) => parseInt(v, 10))
+        .filter((id) => !isNaN(id) && validGroupIds.has(id));
+
+      // Checkbox groups are optional (empty = no groups selected)
+      updates[name] = selectedIds.join(",");
+      continue;
+    }
+
+    const value = formData.get(name)?.toString().trim() ?? "";
 
     if (!value) {
       errors.push(`${metadata.label} is required`);

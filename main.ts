@@ -209,9 +209,16 @@ keyRotationService.start();
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
   db,
-  managementKeyFromEnv: Deno.env.get("MANAGEMENT_API_KEY"),
   encryptionService,
 });
+
+// Ensure management group exists and set default access groups
+const mgmtGroupId = await apiKeyService.getOrCreateGroup("management", "Management API keys");
+const currentAccessGroups = await settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
+if (!currentAccessGroups) {
+  await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+  console.log("✓ Default API access group set to management");
+}
 
 // Initialize secrets service
 const secretsService = new SecretsService({
@@ -241,7 +248,7 @@ app.get("/ping", (c) => c.json({ pong: true }));
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
 // Hybrid auth middleware (accepts session OR API key)
-const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService });
+const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService, settingsService });
 
 // Protected API management routes
 app.use("/api/keys/*", hybridAuth);

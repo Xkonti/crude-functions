@@ -27,7 +27,7 @@ const API_KEYS_SCHEMA = `
   CREATE INDEX idx_api_keys_group ON api_keys(group_id);
 `;
 
-async function createTestApp(managementKeyFromEnv?: string): Promise<{
+async function createTestApp(): Promise<{
   app: Hono;
   service: ApiKeyService;
   db: DatabaseService;
@@ -44,7 +44,6 @@ async function createTestApp(managementKeyFromEnv?: string): Promise<{
 
   const service = new ApiKeyService({
     db,
-    managementKeyFromEnv: managementKeyFromEnv ?? "env-mgmt-key",
     encryptionService,
   });
 
@@ -60,7 +59,7 @@ async function cleanup(db: DatabaseService, tempDir: string): Promise<void> {
 }
 
 // GET /api/keys tests
-Deno.test("GET /api/keys returns groups array with management from env", async () => {
+Deno.test("GET /api/keys returns empty groups array when no keys", async () => {
   const { app, db, tempDir } = await createTestApp();
 
   try {
@@ -68,8 +67,7 @@ Deno.test("GET /api/keys returns groups array with management from env", async (
     expect(res.status).toBe(200);
 
     const json = await res.json();
-    // Should include management from env
-    expect(json.groups).toContain("management");
+    expect(json.groups).toEqual([]);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -88,7 +86,6 @@ Deno.test("GET /api/keys returns all key groups", async () => {
     const json = await res.json();
     expect(json.groups).toContain("email");
     expect(json.groups).toContain("service");
-    expect(json.groups).toContain("management"); // from env
   } finally {
     await cleanup(db, tempDir);
   }
@@ -266,24 +263,6 @@ Deno.test("DELETE /api/keys/by-id/:id returns 400 for invalid ID", async () => {
 
     const json = await res.json();
     expect(json.error).toContain("Invalid");
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
-Deno.test("DELETE /api/keys/by-id/:id returns 403 for env management key", async () => {
-  const { app, db, tempDir } = await createTestApp();
-
-  try {
-    // ID -1 is the synthetic ID for env-provided management key
-    const res = await app.request("/api/keys/by-id/-1", {
-      method: "DELETE",
-    });
-
-    expect(res.status).toBe(403);
-
-    const json = await res.json();
-    expect(json.error).toContain("environment");
   } finally {
     await cleanup(db, tempDir);
   }

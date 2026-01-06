@@ -48,14 +48,9 @@ export function validateKeyValue(value: string): boolean {
 export interface ApiKeyServiceOptions {
   /** Database service instance */
   db: DatabaseService;
-  /** Management API key from environment variable (optional) */
-  managementKeyFromEnv?: string;
   /** Encryption service for encrypting API keys at rest */
   encryptionService: IEncryptionService;
 }
-
-/** Synthetic ID for environment-provided management key */
-const ENV_KEY_ID = -1;
 
 /**
  * Service for managing API keys and key groups stored in SQLite database.
@@ -63,12 +58,10 @@ const ENV_KEY_ID = -1;
  */
 export class ApiKeyService {
   private readonly db: DatabaseService;
-  private readonly managementKeyFromEnv?: string;
   private readonly encryptionService: IEncryptionService;
 
   constructor(options: ApiKeyServiceOptions) {
     this.db = options.db;
-    this.managementKeyFromEnv = options.managementKeyFromEnv;
     this.encryptionService = options.encryptionService;
   }
 
@@ -179,7 +172,6 @@ export class ApiKeyService {
 
   /**
    * Get all API keys grouped by their group name.
-   * Includes environment-provided management key if configured.
    */
   async getAll(): Promise<Map<string, ApiKey[]>> {
     const rows = await this.db.queryAll<{
@@ -214,19 +206,6 @@ export class ApiKeyService {
       result.set(row.group_name, existing);
     }
 
-    // Merge env management key if present
-    if (this.managementKeyFromEnv) {
-      const mgmtKeys = result.get("management") || [];
-      if (!mgmtKeys.some((k) => k.value === this.managementKeyFromEnv)) {
-        mgmtKeys.push({
-          id: ENV_KEY_ID,
-          value: this.managementKeyFromEnv,
-          description: "from environment",
-        });
-        result.set("management", mgmtKeys);
-      }
-    }
-
     return result;
   }
 
@@ -239,48 +218,28 @@ export class ApiKeyService {
     const normalizedGroup = group.toLowerCase();
 
     const groupRow = await this.getGroupByName(normalizedGroup);
-
-    // For management group, allow access even if group doesn't exist in DB
-    // (could be env-only)
-    if (!groupRow && normalizedGroup !== "management") {
+    if (!groupRow) {
       return null;
     }
 
-    const keys: ApiKey[] = [];
+    const rows = await this.db.queryAll<{
+      id: number;
+      value: string;
+      description: string | null;
+    }>("SELECT id, value, description FROM api_keys WHERE group_id = ?", [
+      groupRow.id,
+    ]);
 
-    if (groupRow) {
-      const rows = await this.db.queryAll<{
-        id: number;
-        value: string;
-        description: string | null;
-      }>("SELECT id, value, description FROM api_keys WHERE group_id = ?", [
-        groupRow.id,
-      ]);
+    // Decrypt all keys in parallel
+    const decryptedKeys = await Promise.all(
+      rows.map(async (r) => ({
+        id: r.id,
+        value: await this.decryptKey(r.value),
+        description: r.description ?? undefined,
+      }))
+    );
 
-      // Decrypt all keys in parallel
-      const decryptedKeys = await Promise.all(
-        rows.map(async (r) => ({
-          id: r.id,
-          value: await this.decryptKey(r.value),
-          description: r.description ?? undefined,
-        }))
-      );
-
-      keys.push(...decryptedKeys);
-    }
-
-    // Add env key for management group
-    if (normalizedGroup === "management" && this.managementKeyFromEnv) {
-      if (!keys.some((k) => k.value === this.managementKeyFromEnv)) {
-        keys.push({
-          id: ENV_KEY_ID,
-          value: this.managementKeyFromEnv,
-          description: "from environment",
-        });
-      }
-    }
-
-    return keys.length > 0 || groupRow ? keys : null;
+    return decryptedKeys;
   }
 
   /**
@@ -338,14 +297,6 @@ export class ApiKeyService {
   async hasKey(group: string, keyValue: string): Promise<boolean> {
     const normalizedGroup = group.toLowerCase();
 
-    // Check env key first
-    if (
-      normalizedGroup === "management" &&
-      keyValue === this.managementKeyFromEnv
-    ) {
-      return true;
-    }
-
     const groupRow = await this.getGroupByName(normalizedGroup);
     if (!groupRow) {
       return false;
@@ -381,22 +332,6 @@ export class ApiKeyService {
     keyValue: string
   ): Promise<{ keyId: number; groupId: number } | null> {
     const normalizedGroup = group.toLowerCase();
-
-    // Check env management key first
-    if (
-      normalizedGroup === "management" &&
-      keyValue === this.managementKeyFromEnv
-    ) {
-      // For env management key, we need to get/create the group
-      const mgmtGroup = await this.getOrCreateGroup(
-        "management",
-        "Management API keys"
-      );
-      return {
-        keyId: ENV_KEY_ID, // -1 for synthetic env key
-        groupId: mgmtGroup,
-      };
-    }
 
     const groupRow = await this.getGroupByName(normalizedGroup);
     if (!groupRow) {
@@ -462,18 +397,9 @@ export class ApiKeyService {
    * Remove a specific key by group and value.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to remove
-   * @throws Error if attempting to remove environment-provided management key
    */
   async removeKey(group: string, keyValue: string): Promise<void> {
     const normalizedGroup = group.toLowerCase();
-
-    // Cannot remove env management key
-    if (
-      normalizedGroup === "management" &&
-      keyValue === this.managementKeyFromEnv
-    ) {
-      throw new Error("Cannot remove environment-provided management key");
-    }
 
     const groupRow = await this.getGroupByName(normalizedGroup);
     if (!groupRow) {
@@ -501,14 +427,8 @@ export class ApiKeyService {
    * Remove a key by its unique ID.
    * Useful for web UI where passing the key value over the wire is undesirable.
    * @param id - The unique key ID
-   * @throws Error if attempting to remove environment-provided management key (id = -1)
    */
   async removeKeyById(id: number): Promise<void> {
-    // Cannot remove env management key
-    if (id === ENV_KEY_ID) {
-      throw new Error("Cannot remove environment-provided management key");
-    }
-
     await this.db.execute("DELETE FROM api_keys WHERE id = ?", [id]);
   }
 
