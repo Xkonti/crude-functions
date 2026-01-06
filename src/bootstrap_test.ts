@@ -37,12 +37,12 @@ const SETTINGS_SCHEMA = `
   CREATE TABLE settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    user_id TEXT,
+    userId TEXT,
     value TEXT,
-    is_encrypted INTEGER NOT NULL DEFAULT 0,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(user_id, ''));
+  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
   CREATE INDEX idx_settings_name ON settings(name);
 `;
 

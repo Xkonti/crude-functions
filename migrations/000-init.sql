@@ -181,13 +181,13 @@ CREATE TABLE IF NOT EXISTS secrets (
 CREATE TABLE IF NOT EXISTS settings (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL,
-  user_id TEXT REFERENCES user(id) ON DELETE CASCADE,
+  userId TEXT REFERENCES user(id) ON DELETE CASCADE,
   value TEXT,
-  is_encrypted INTEGER NOT NULL DEFAULT 0,
-  modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+  isEncrypted INTEGER NOT NULL DEFAULT 0,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_name_user
-ON settings(name, COALESCE(user_id, ''));
+ON settings(name, COALESCE(userId, ''));
 CREATE INDEX IF NOT EXISTS idx_settings_name ON settings(name);
-CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(userId) WHERE userId IS NOT NULL;
