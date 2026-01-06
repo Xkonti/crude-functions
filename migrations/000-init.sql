@@ -131,7 +131,7 @@ CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
 CREATE TABLE IF NOT EXISTS consoleLogs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   requestId TEXT NOT NULL,
-  routeId INTEGER,                       -- References routes.id (not FK, allows route deletion)
+  routeId INTEGER REFERENCES routes(id) ON DELETE CASCADE,
   level TEXT NOT NULL,
   message TEXT NOT NULL,
   args TEXT,
@@ -146,7 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_consoleLogs_timestamp ON consoleLogs(timestamp);
 -- Execution metrics table - stores execution timing data for analytics
 CREATE TABLE IF NOT EXISTS executionMetrics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  routeId INTEGER NOT NULL,
+  routeId INTEGER NOT NULL,  -- No FK: orphaned records retained for global metrics aggregation
   type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
   avgTimeMs REAL NOT NULL,
   maxTimeMs INTEGER NOT NULL,
@@ -171,8 +171,8 @@ CREATE TABLE IF NOT EXISTS secrets (
   comment TEXT,
   scope INTEGER NOT NULL,
   functionId INTEGER REFERENCES routes(id) ON DELETE CASCADE,
-  apiGroupId INTEGER REFERENCES api_key_groups(id) ON DELETE CASCADE,
-  apiKeyId INTEGER REFERENCES api_keys(id) ON DELETE CASCADE,
+  apiGroupId INTEGER REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
+  apiKeyId INTEGER REFERENCES apiKeys(id) ON DELETE CASCADE,
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
