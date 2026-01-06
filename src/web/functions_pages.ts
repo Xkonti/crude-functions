@@ -14,6 +14,7 @@ import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret, SecretPreview } from "../secrets/types.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
+import { formatForDisplay } from "../utils/datetime.ts";
 import {
   layout,
   escapeHtml,
@@ -175,10 +176,6 @@ function formatTimeShort(date: Date): string {
   const s = date.getSeconds().toString().padStart(2, "0");
   const ms = date.getMilliseconds().toString().padStart(3, "0");
   return `${h}:${m}:${s}.${ms}`;
-}
-
-function formatTimestampFull(date: Date): string {
-  return date.toISOString().replace("T", " ").substring(0, 23);
 }
 
 // Time flooring utilities for metrics
@@ -633,7 +630,7 @@ function renderLogsPage(
         : `
       <p style="color: #6c757d;">
         Showing ${logs.length} log${logs.length === 1 ? "" : "s"}${isViewingOlder ? " (viewing older)" : " (newest)"}:
-        <strong>${formatTimestampFull(logs[logs.length - 1].timestamp)}</strong> to <strong>${formatTimestampFull(logs[0].timestamp)}</strong>.
+        <strong>${formatForDisplay(logs[logs.length - 1].timestamp)}</strong> to <strong>${formatForDisplay(logs[0].timestamp)}</strong>.
         Click a row to expand.
       </p>
       <table class="logs-table">
@@ -660,7 +657,7 @@ function renderLogsPage(
                 const fullBase64 = toBase64(fullMessage);
                 return `
             <tr class="log-row" onclick="toggleLogDetail(${i})">
-              <td><code title="${escapeHtml(formatTimestampFull(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
+              <td><code title="${escapeHtml(formatForDisplay(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
               <td>${renderLogLevelBadge(log.level)}</td>
               <td><code class="request-id-copy" title="Click to copy: ${escapeHtml(log.requestId)}" onclick="copyRequestId(event, '${escapeHtml(log.requestId)}')">${escapeHtml(requestIdShort)}</code></td>
               <td class="log-message" data-raw="${truncatedBase64}"></td>

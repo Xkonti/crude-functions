@@ -413,11 +413,6 @@ The key rotation service has several good patterns:
 
   🟡 Major Consistency Issues
 
-  Timestamp Handling Chaos
-
-- ExecutionMetricsService has custom formatDateForSqlite() helper
-- ConsoleLogService uses toISOString() directly
-- Fix: Extract shared timestamp utilities
   Error Handling Inconsistency
 
 - Some methods return null on not found

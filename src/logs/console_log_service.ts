@@ -1,5 +1,6 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { ConsoleLog, NewConsoleLog } from "./types.ts";
+import { formatForSqlite, parseSqliteTimestamp } from "../utils/datetime.ts";
 
 export interface ConsoleLogServiceOptions {
   db: DatabaseService;
@@ -147,7 +148,7 @@ export class ConsoleLogService {
   async deleteOlderThan(date: Date): Promise<number> {
     const result = await this.db.execute(
       `DELETE FROM console_logs WHERE timestamp < ?`,
-      [date.toISOString()]
+      [formatForSqlite(date)]
     );
 
     return result.changes;
@@ -218,7 +219,7 @@ export class ConsoleLogService {
       level: row.level as ConsoleLog["level"],
       message: row.message,
       args: row.args ?? undefined,
-      timestamp: new Date(row.timestamp),
+      timestamp: parseSqliteTimestamp(row.timestamp),
     };
   }
 }

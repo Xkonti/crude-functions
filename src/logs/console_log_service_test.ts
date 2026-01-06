@@ -224,6 +224,45 @@ Deno.test("ConsoleLogService deletes logs older than date", async () => {
   }
 });
 
+Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    // Manually insert logs with SQLite format timestamps (simulating old data from DB)
+    const oldDate = new Date("2020-01-01T12:00:00.000Z");
+    const sqliteFormat = oldDate.toISOString().replace("T", " ").slice(0, 19);
+
+    await db.execute(
+      `INSERT INTO console_logs (request_id, route_id, level, message, timestamp)
+       VALUES (?, ?, ?, ?, ?)`,
+      ["old-sqlite-format", 1, "log", "Old SQLite format log", sqliteFormat]
+    );
+
+    // Also insert a newer log using the service (will use CURRENT_TIMESTAMP)
+    await service.store({
+      requestId: "newer-request",
+      routeId: 1,
+      level: "log",
+      message: "Newer message",
+    });
+
+    // Delete logs older than a date between the two logs
+    const cutoffDate = new Date("2021-01-01T00:00:00.000Z");
+    const deleted = await service.deleteOlderThan(cutoffDate);
+
+    // Should delete the old SQLite-format log but not the newer one
+    expect(deleted).toBe(1);
+
+    const oldLogs = await service.getByRequestId("old-sqlite-format");
+    expect(oldLogs.length).toBe(0);
+
+    const newLogs = await service.getByRequestId("newer-request");
+    expect(newLogs.length).toBe(1);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
 Deno.test("ConsoleLogService deletes logs by routeId", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
