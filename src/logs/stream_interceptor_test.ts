@@ -9,8 +9,8 @@ import {
 } from "./stream_interceptor.ts";
 import { runInRequestContext } from "./request_context.ts";
 
-const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE consoleLogs (
+const EXECUTION_LOGS_SCHEMA = `
+  CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requestId TEXT NOT NULL,
     routeId INTEGER,
@@ -19,7 +19,7 @@ const CONSOLE_LOGS_SCHEMA = `
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_consoleLogs_requestId ON consoleLogs(requestId);
+  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
 `;
 
 async function createTestSetup(): Promise<{
@@ -31,7 +31,7 @@ async function createTestSetup(): Promise<{
   const tempDir = await Deno.makeTempDir();
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
-  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_LOGS_SCHEMA);
 
   const logService = new ConsoleLogService({ db });
   const interceptor = new StreamInterceptor({ logService });

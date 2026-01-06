@@ -127,8 +127,8 @@ CREATE TABLE IF NOT EXISTS routes (
 
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
 
--- Console logs table - stores captured console output from function handlers
-CREATE TABLE IF NOT EXISTS consoleLogs (
+-- Execution logs table - stores captured console output from function handlers
+CREATE TABLE IF NOT EXISTS executionLogs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   requestId TEXT NOT NULL,
   routeId INTEGER REFERENCES routes(id) ON DELETE CASCADE,
@@ -138,10 +138,10 @@ CREATE TABLE IF NOT EXISTS consoleLogs (
   timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_requestId ON consoleLogs(requestId);
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_routeId ON consoleLogs(routeId, id);
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_route_level ON consoleLogs(routeId, level, id);
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_timestamp ON consoleLogs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_requestId ON executionLogs(requestId);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_routeId ON executionLogs(routeId, id);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_route_level ON executionLogs(routeId, level, id);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_timestamp ON executionLogs(timestamp);
 
 -- Execution metrics table - stores execution timing data for analytics
 CREATE TABLE IF NOT EXISTS executionMetrics (

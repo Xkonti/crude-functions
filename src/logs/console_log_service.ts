@@ -38,7 +38,7 @@ export class ConsoleLogService {
   async store(entry: NewConsoleLog): Promise<void> {
     try {
       await this.db.execute(
-        `INSERT INTO consoleLogs (requestId, routeId, level, message, args)
+        `INSERT INTO executionLogs (requestId, routeId, level, message, args)
          VALUES (?, ?, ?, ?, ?)`,
         [
           entry.requestId,
@@ -60,7 +60,7 @@ export class ConsoleLogService {
   async getByRequestId(requestId: string): Promise<ConsoleLog[]> {
     const rows = await this.db.queryAll<ConsoleLogRow>(
       `SELECT id, requestId, routeId, level, message, args, timestamp
-       FROM consoleLogs
+       FROM executionLogs
        WHERE requestId = ?
        ORDER BY id ASC`,
       [requestId]
@@ -81,12 +81,12 @@ export class ConsoleLogService {
 
     const sql = limit
       ? `SELECT id, requestId, routeId, level, message, args, timestamp
-         FROM consoleLogs
+         FROM executionLogs
          WHERE routeId = ?
          ORDER BY id DESC
          LIMIT ?`
       : `SELECT id, requestId, routeId, level, message, args, timestamp
-         FROM consoleLogs
+         FROM executionLogs
          WHERE routeId = ?
          ORDER BY id DESC`;
 
@@ -112,7 +112,7 @@ export class ConsoleLogService {
 
     const rows = await this.db.queryAll<ConsoleLogRow>(
       `SELECT id, requestId, routeId, level, message, args, timestamp
-       FROM consoleLogs
+       FROM executionLogs
        WHERE routeId = ? AND id < ?
        ORDER BY id DESC
        LIMIT ?`,
@@ -132,7 +132,7 @@ export class ConsoleLogService {
 
     const rows = await this.db.queryAll<ConsoleLogRow>(
       `SELECT id, requestId, routeId, level, message, args, timestamp
-       FROM consoleLogs
+       FROM executionLogs
        ORDER BY id DESC
        LIMIT ?`,
       [limit]
@@ -147,7 +147,7 @@ export class ConsoleLogService {
    */
   async deleteOlderThan(date: Date): Promise<number> {
     const result = await this.db.execute(
-      `DELETE FROM consoleLogs WHERE timestamp < ?`,
+      `DELETE FROM executionLogs WHERE timestamp < ?`,
       [formatForSqlite(date)]
     );
 
@@ -160,7 +160,7 @@ export class ConsoleLogService {
    */
   async deleteByRouteId(routeId: number): Promise<number> {
     const result = await this.db.execute(
-      `DELETE FROM consoleLogs WHERE routeId = ?`,
+      `DELETE FROM executionLogs WHERE routeId = ?`,
       [routeId]
     );
 
@@ -172,7 +172,7 @@ export class ConsoleLogService {
    */
   async getDistinctRouteIds(): Promise<number[]> {
     const rows = await this.db.queryAll<{ routeId: number }>(
-      `SELECT DISTINCT routeId FROM consoleLogs WHERE routeId IS NOT NULL`
+      `SELECT DISTINCT routeId FROM executionLogs WHERE routeId IS NOT NULL`
     );
     return rows.map((row) => row.routeId);
   }
@@ -189,7 +189,7 @@ export class ConsoleLogService {
     // Find the id threshold - the id of the (maxLogs)th newest log
     // Logs older than this will be deleted
     const thresholdRow = await this.db.queryOne<{ id: number }>(
-      `SELECT id FROM consoleLogs
+      `SELECT id FROM executionLogs
        WHERE routeId = ?
        ORDER BY id DESC
        LIMIT 1 OFFSET ?`,
@@ -203,7 +203,7 @@ export class ConsoleLogService {
 
     // Delete all logs for this route with id less than threshold
     const result = await this.db.execute(
-      `DELETE FROM consoleLogs
+      `DELETE FROM executionLogs
        WHERE routeId = ? AND id < ?`,
       [routeId, thresholdRow.id]
     );

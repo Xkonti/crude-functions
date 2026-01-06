@@ -76,8 +76,8 @@ const ROUTES_SCHEMA = `
   CREATE INDEX idx_routes_route ON routes(route);
 `;
 
-const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE consoleLogs (
+const EXECUTION_LOGS_SCHEMA = `
+  CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requestId TEXT NOT NULL,
     routeId INTEGER,
@@ -86,8 +86,8 @@ const CONSOLE_LOGS_SCHEMA = `
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_consoleLogs_requestId ON consoleLogs(requestId);
-  CREATE INDEX idx_consoleLogs_routeId ON consoleLogs(routeId, id);
+  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
+  CREATE INDEX idx_executionLogs_routeId ON executionLogs(routeId, id);
 `;
 
 const EXECUTION_METRICS_SCHEMA = `
@@ -156,7 +156,7 @@ async function createTestApp(
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
   await db.exec(ROUTES_SCHEMA);
-  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
   await db.exec(SETTINGS_SCHEMA);
 

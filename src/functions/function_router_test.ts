@@ -51,8 +51,8 @@ CREATE TABLE IF NOT EXISTS routes (
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
 `;
 
-const CONSOLE_LOGS_SCHEMA = `
-CREATE TABLE IF NOT EXISTS consoleLogs (
+const EXECUTION_LOGS_SCHEMA = `
+CREATE TABLE IF NOT EXISTS executionLogs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   requestId TEXT NOT NULL,
   routeId INTEGER REFERENCES routes(id) ON DELETE CASCADE,
@@ -61,10 +61,10 @@ CREATE TABLE IF NOT EXISTS consoleLogs (
   args TEXT,
   timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_requestId ON consoleLogs(requestId);
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_routeId ON consoleLogs(routeId, id);
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_route_level ON consoleLogs(routeId, level, id);
-CREATE INDEX IF NOT EXISTS idx_consoleLogs_timestamp ON consoleLogs(timestamp);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_requestId ON executionLogs(requestId);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_routeId ON executionLogs(routeId, id);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_route_level ON executionLogs(routeId, level, id);
+CREATE INDEX IF NOT EXISTS idx_executionLogs_timestamp ON executionLogs(timestamp);
 `;
 
 const EXECUTION_METRICS_SCHEMA = `
@@ -126,7 +126,7 @@ async function createTestSetup(
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
   await db.exec(ROUTES_SCHEMA);
-  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
   await db.exec(SECRETS_SCHEMA);
 

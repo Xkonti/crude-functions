@@ -2,8 +2,8 @@ import { expect } from "@std/expect";
 import { DatabaseService } from "../database/database_service.ts";
 import { ConsoleLogService } from "./console_log_service.ts";
 
-const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE consoleLogs (
+const EXECUTION_LOGS_SCHEMA = `
+  CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requestId TEXT NOT NULL,
     routeId INTEGER,
@@ -12,10 +12,10 @@ const CONSOLE_LOGS_SCHEMA = `
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_consoleLogs_requestId ON consoleLogs(requestId);
-  CREATE INDEX idx_consoleLogs_routeId ON consoleLogs(routeId, id);
-  CREATE INDEX idx_consoleLogs_route_level ON consoleLogs(routeId, level, id);
-  CREATE INDEX idx_consoleLogs_timestamp ON consoleLogs(timestamp);
+  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
+  CREATE INDEX idx_executionLogs_routeId ON executionLogs(routeId, id);
+  CREATE INDEX idx_executionLogs_route_level ON executionLogs(routeId, level, id);
+  CREATE INDEX idx_executionLogs_timestamp ON executionLogs(timestamp);
 `;
 
 async function createTestSetup(): Promise<{
@@ -26,7 +26,7 @@ async function createTestSetup(): Promise<{
   const tempDir = await Deno.makeTempDir();
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
-  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_LOGS_SCHEMA);
 
   const service = new ConsoleLogService({ db });
   return { service, db, tempDir };
@@ -233,7 +233,7 @@ Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async (
     const sqliteFormat = oldDate.toISOString().replace("T", " ").slice(0, 19);
 
     await db.execute(
-      `INSERT INTO consoleLogs (requestId, routeId, level, message, timestamp)
+      `INSERT INTO executionLogs (requestId, routeId, level, message, timestamp)
        VALUES (?, ?, ?, ?, ?)`,
       ["old-sqlite-format", 1, "log", "Old SQLite format log", sqliteFormat]
     );
