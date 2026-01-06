@@ -10,16 +10,16 @@ import {
 import { runInRequestContext } from "./request_context.ts";
 
 const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE console_logs (
+  CREATE TABLE consoleLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id TEXT NOT NULL,
-    route_id INTEGER,
+    requestId TEXT NOT NULL,
+    routeId INTEGER,
     level TEXT NOT NULL,
     message TEXT NOT NULL,
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_console_logs_request_id ON console_logs(request_id);
+  CREATE INDEX idx_consoleLogs_requestId ON consoleLogs(requestId);
 `;
 
 async function createTestSetup(): Promise<{

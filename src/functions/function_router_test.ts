@@ -52,16 +52,16 @@ CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
 `;
 
 const CONSOLE_LOGS_SCHEMA = `
-CREATE TABLE IF NOT EXISTS console_logs (
+CREATE TABLE IF NOT EXISTS consoleLogs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  request_id TEXT NOT NULL,
-  route_id INTEGER,
+  requestId TEXT NOT NULL,
+  routeId INTEGER,
   level TEXT NOT NULL,
   message TEXT NOT NULL,
   args TEXT,
   timestamp TEXT DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX IF NOT EXISTS idx_console_logs_request_id ON console_logs(request_id);
+CREATE INDEX IF NOT EXISTS idx_consoleLogs_requestId ON consoleLogs(requestId);
 `;
 
 const EXECUTION_METRICS_SCHEMA = `

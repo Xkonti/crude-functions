@@ -3,19 +3,19 @@ import { DatabaseService } from "../database/database_service.ts";
 import { ConsoleLogService } from "./console_log_service.ts";
 
 const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE console_logs (
+  CREATE TABLE consoleLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id TEXT NOT NULL,
-    route_id INTEGER,
+    requestId TEXT NOT NULL,
+    routeId INTEGER,
     level TEXT NOT NULL,
     message TEXT NOT NULL,
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_console_logs_request_id ON console_logs(request_id);
-  CREATE INDEX idx_console_logs_route_id ON console_logs(route_id, id);
-  CREATE INDEX idx_console_logs_route_level ON console_logs(route_id, level, id);
-  CREATE INDEX idx_console_logs_timestamp ON console_logs(timestamp);
+  CREATE INDEX idx_consoleLogs_requestId ON consoleLogs(requestId);
+  CREATE INDEX idx_consoleLogs_routeId ON consoleLogs(routeId, id);
+  CREATE INDEX idx_consoleLogs_route_level ON consoleLogs(routeId, level, id);
+  CREATE INDEX idx_consoleLogs_timestamp ON consoleLogs(timestamp);
 `;
 
 async function createTestSetup(): Promise<{
@@ -233,7 +233,7 @@ Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async (
     const sqliteFormat = oldDate.toISOString().replace("T", " ").slice(0, 19);
 
     await db.execute(
-      `INSERT INTO console_logs (request_id, route_id, level, message, timestamp)
+      `INSERT INTO consoleLogs (requestId, routeId, level, message, timestamp)
        VALUES (?, ?, ?, ?, ?)`,
       ["old-sqlite-format", 1, "log", "Old SQLite format log", sqliteFormat]
     );
