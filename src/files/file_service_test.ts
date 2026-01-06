@@ -307,3 +307,71 @@ Deno.test("FileService handles special characters in content", async () => {
     await cleanup(tempDir);
   }
 });
+
+// ============================================================================
+// Path Traversal Security Tests
+// ============================================================================
+
+Deno.test("FileService rejects simple .. traversal", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    let errorThrown = false;
+    try {
+      await service.getFile("../etc/passwd");
+    } catch (error) {
+      errorThrown = true;
+      expect((error as Error).message).toContain("escapes base directory");
+    }
+    expect(errorThrown).toBe(true);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService rejects nested .. traversal", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    let errorThrown = false;
+    try {
+      await service.getFile("code/../../../etc/passwd");
+    } catch (error) {
+      errorThrown = true;
+      expect((error as Error).message).toContain("escapes base directory");
+    }
+    expect(errorThrown).toBe(true);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService rejects symlink escape attempts", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    // Create a symlink pointing outside base directory
+    const symlinkPath = `${basePath}/evil`;
+    await Deno.symlink("/etc", symlinkPath);
+
+    // Try to access through symlink - should be rejected
+    let errorThrown = false;
+    try {
+      await service.getFile("evil/passwd");
+    } catch (error) {
+      errorThrown = true;
+      expect((error as Error).message).toContain("escapes base directory");
+    }
+    expect(errorThrown).toBe(true);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService allows valid relative paths", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    await service.writeFile("valid/path.ts", "content");
+    const content = await service.getFile("valid/path.ts");
+    expect(content).toBe("content");
+  } finally {
+    await cleanup(tempDir);
+  }
+});

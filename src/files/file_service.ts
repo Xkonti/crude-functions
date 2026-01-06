@@ -1,3 +1,5 @@
+import { resolve, normalize as pathNormalize } from "@std/path";
+
 /**
  * Validates that a file path is in a valid format.
  * Rejects empty paths, paths with null bytes, and absolute paths.
@@ -20,12 +22,80 @@ export function normalizePath(path: string): string {
 /**
  * Checks if a path is safe (no directory traversal).
  * Rejects paths containing ".." or starting with "./".
+ * @deprecated Use resolveAndValidatePath instead for proper security
  */
 export function isPathSafe(path: string): boolean {
   const normalized = normalizePath(path);
   if (normalized.includes("..")) return false;
   if (normalized.startsWith("./")) return false;
   return true;
+}
+
+/**
+ * Resolves and validates a path within a base directory.
+ * Prevents directory traversal including symlink escapes.
+ * @throws Error if path escapes base directory
+ */
+export async function resolveAndValidatePath(
+  basePath: string,
+  relativePath: string
+): Promise<string> {
+  // Normalize the relative path
+  const normalized = normalizePath(relativePath);
+
+  // Reject absolute paths from input - must be relative
+  if (normalized.startsWith("/")) {
+    throw new Error(`Path must be relative: ${relativePath}`);
+  }
+
+  // Resolve to absolute path (handles .., and normalization)
+  const resolvedPath = resolve(basePath, normalized);
+  const normalizedBase = pathNormalize(basePath);
+
+  // CRITICAL: Verify the resolved path is within base directory
+  if (
+    !resolvedPath.startsWith(normalizedBase + "/") &&
+    resolvedPath !== normalizedBase
+  ) {
+    throw new Error(`Path escapes base directory: ${relativePath}`);
+  }
+
+  // Check for symlink escapes by verifying the real path of each component
+  // Start from the base and walk up to the target path
+  const pathComponents = resolvedPath.substring(normalizedBase.length + 1).split("/");
+  let currentPath = normalizedBase;
+
+  for (const component of pathComponents) {
+    if (!component) continue; // Skip empty components
+
+    currentPath = `${currentPath}/${component}`;
+
+    try {
+      // Check if this component exists (could be file, dir, or symlink)
+      const stat = await Deno.lstat(currentPath); // lstat doesn't follow symlinks
+
+      // If it's a symlink, verify where it points
+      if (stat.isSymlink) {
+        const realPath = await Deno.realPath(currentPath);
+        // Verify the symlink target is still within base directory
+        if (
+          !realPath.startsWith(normalizedBase + "/") &&
+          realPath !== normalizedBase
+        ) {
+          throw new Error(`Path escapes base directory: ${relativePath}`);
+        }
+      }
+    } catch (error) {
+      // If lstat/realPath fails with our security error, re-throw it
+      if (error instanceof Error && error.message.includes("escapes base directory")) {
+        throw error;
+      }
+      // If component doesn't exist (NotFound), that's okay - it might be created later
+      // Other errors (permission) are also okay for path validation
+    }
+  }
+
+  return resolvedPath;
 }
 
 export interface FileMetadata {
@@ -47,9 +117,10 @@ export class FileService {
 
   /**
    * Resolves a relative path to an absolute path within the base directory.
+   * Uses secure path validation to prevent traversal attacks.
    */
-  private resolvePath(relativePath: string): string {
-    return `${this.basePath}/${normalizePath(relativePath)}`;
+  private async resolvePath(relativePath: string): Promise<string> {
+    return await resolveAndValidatePath(this.basePath, relativePath);
   }
 
   /**
@@ -134,7 +205,7 @@ export class FileService {
    * Returns null if the file doesn't exist.
    */
   async getFile(path: string): Promise<string | null> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     try {
       return await Deno.readTextFile(absPath);
     } catch (error) {
@@ -149,7 +220,7 @@ export class FileService {
    * Checks if a file exists at the given relative path.
    */
   async fileExists(path: string): Promise<boolean> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     try {
       const stat = await Deno.stat(absPath);
       return stat.isFile;
@@ -167,7 +238,7 @@ export class FileService {
    * Returns true if the file was created, false if it was updated.
    */
   async writeFile(path: string, content: string): Promise<boolean> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     const exists = await this.fileExists(path);
 
     // Ensure parent directories exist
@@ -185,7 +256,7 @@ export class FileService {
    * Deletes a file at the given relative path.
    */
   async deleteFile(path: string): Promise<void> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     await Deno.remove(absPath);
   }
 }
