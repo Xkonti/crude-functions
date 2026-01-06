@@ -441,3 +441,54 @@ Deno.test("MigrationExecutionError contains version and filename", () => {
   expect(error.message).toContain("005-add-users.sql");
   expect(error.originalError).toBeInstanceOf(Error);
 });
+
+Deno.test("MigrationService - failed migration rolls back atomically", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const dbPath = `${tempDir}/test.db`;
+  const migrationsDir = `${tempDir}/migrations`;
+
+  try {
+    await Deno.mkdir(migrationsDir);
+
+    // Create initial migration
+    await Deno.writeTextFile(
+      `${migrationsDir}/000-init.sql`,
+      `CREATE TABLE schema_version (version INTEGER);
+       INSERT INTO schema_version (version) VALUES (0);`
+    );
+
+    const db = new DatabaseService({ databasePath: dbPath });
+    await db.open();
+
+    const service = new MigrationService({ db, migrationsDir });
+
+    // Apply init migration
+    await service.migrate();
+    expect(await service.getCurrentVersion()).toBe(0);
+
+    // Create migration with syntax error AFTER first migration succeeds
+    await Deno.writeTextFile(
+      `${migrationsDir}/001-broken.sql`,
+      `CREATE TABLE users (id INTEGER);
+       INSERT INTO users VALUES (1);
+       THIS IS INVALID SQL;
+       INSERT INTO users VALUES (2);`
+    );
+
+    // Attempt broken migration - should fail
+    await expect(service.migrate()).rejects.toThrow(MigrationExecutionError);
+
+    // Verify rollback - version unchanged
+    expect(await service.getCurrentVersion()).toBe(0);
+
+    // Verify rollback - table not created
+    const tables = await db.queryAll<{ name: string }>(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+    );
+    expect(tables.length).toBe(0);
+
+    await db.close();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

@@ -1,4 +1,5 @@
 import type { DatabaseService } from "./database_service.ts";
+import type { TransactionContext } from "./types.ts";
 import {
   MigrationError,
   MigrationFileError,
@@ -165,6 +166,7 @@ export class MigrationService {
 
   /**
    * Applies a single migration and updates the schema version.
+   * The migration SQL and version update are executed atomically within a transaction.
    *
    * @param migration - The migration to apply
    * @throws MigrationFileError if the migration file cannot be read
@@ -179,19 +181,27 @@ export class MigrationService {
       throw new MigrationFileError(migration.path, error);
     }
 
-    // Execute the migration
+    // Execute migration and version update atomically
     try {
-      await this.db.exec(sql);
+      await this.db.transaction(async (tx) => {
+        // Execute the migration SQL
+        await tx.exec(sql);
+
+        // Update the schema version (now atomic with migration)
+        await this.updateVersionInTransaction(tx, migration.version);
+      });
     } catch (error) {
+      // If it's already a MigrationFileError, re-throw as is
+      if (error instanceof MigrationFileError) {
+        throw error;
+      }
+      // Otherwise wrap in MigrationExecutionError
       throw new MigrationExecutionError(
         migration.version,
         migration.filename,
         error
       );
     }
-
-    // Update the schema version
-    await this.updateVersion(migration.version);
   }
 
   /**
@@ -212,6 +222,33 @@ export class MigrationService {
     } else {
       // Update existing version
       await this.db.execute("UPDATE schema_version SET version = ?", [version]);
+    }
+  }
+
+  /**
+   * Updates the schema version within a transaction context.
+   * Inserts if no version exists, updates otherwise.
+   *
+   * @param tx - Transaction context
+   * @param version - Version number to set
+   */
+  private async updateVersionInTransaction(
+    tx: TransactionContext,
+    version: number
+  ): Promise<void> {
+    // Check if a version row exists
+    const existing = await tx.queryOne<{ version: number }>(
+      "SELECT version FROM schema_version LIMIT 1"
+    );
+
+    if (existing === null) {
+      // Insert initial version
+      await tx.execute("INSERT INTO schema_version (version) VALUES (?)", [
+        version,
+      ]);
+    } else {
+      // Update existing version
+      await tx.execute("UPDATE schema_version SET version = ?", [version]);
     }
   }
 }

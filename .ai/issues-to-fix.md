@@ -413,13 +413,6 @@ The key rotation service has several good patterns:
 
 🔴 Critical Issues to Fix Now
 
-  1. Database: Missing Transaction Support (High Priority)
-
-- Location: src/database/database_service.ts
-- Problem: No transaction API exists, and migrations don't use transactions
-- Impact: Failed migrations leave database in inconsistent state
-- Fix: Add transaction() method to DatabaseService and wrap migrations
-
   2. Security: API Key Timing Attack (High Priority)
 
 - Location: src/keys/api_key_service.ts:297-320
@@ -473,36 +466,6 @@ The key rotation service has several good patterns:
 
 - ExecutionMetricsService.getByRouteId() has 4 identical SQL queries
 - Fix: Build queries dynamically (~25 lines saved)
-
-# Database access outside dedicated services
-
-  FOUND VIOLATIONS! The following web page files directly access the database, violating the service architecture:
-
-  src/web/setup_pages.ts:
-
-- Line 25: db.queryOne("SELECT id FROM user LIMIT 1")
-- Line 147-149: db.queryOne("SELECT COUNT(*) as count FROM user")
-- Line 163-165: db.execute("UPDATE user SET role = ? WHERE id = ?", ...)
-
-  src/web/users_pages.ts:
-
-- Line 66-68: db.queryAll("SELECT id, email, name, role, createdAt FROM user ORDER BY createdAt DESC")
-- Line 175-177: db.queryOne("SELECT id, email, name, role, createdAt FROM user WHERE id = ?", ...)
-- Line 197-199: db.queryOne("SELECT id, email, name, role FROM user WHERE id = ?", ...)
-- Line 274-276: db.queryOne("SELECT id, email FROM user WHERE id = ?", ...)
-- Line 304-306: db.queryOne("SELECT id, email FROM user WHERE id = ?", ...)
-
-  src/web/auth_pages.ts:
-
-- Line 29: db.queryOne("SELECT id FROM user LIMIT 1")
-
-  Impact: These violations break the stated architecture pattern where services should "fully own the DB." This creates:
-
-- Inconsistent data access patterns
-- Harder to maintain/refactor
-- Bypasses any service-level caching or validation
-
-  Recommendation: Create a UserService to encapsulate all user table operations, then refactor these web pages to use it.
 
 # Database inconsistencies
 
