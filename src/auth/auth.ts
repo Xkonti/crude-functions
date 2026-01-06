@@ -126,7 +126,7 @@ export function createAuth(options: AuthOptions) {
     },
 
     // Dynamic origin validation based on incoming request
-    trustedOrigins: async (request?: Request) => {
+    trustedOrigins: (request?: Request) => {
       return getTrustedOrigins(options.baseUrl, request);
     },
 
