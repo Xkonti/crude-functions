@@ -40,6 +40,7 @@ import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
 import { SettingsService } from "./src/settings/settings_service.ts";
 import { SettingNames } from "./src/settings/types.ts";
+import { UserService } from "./src/users/user_service.ts";
 import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
 
 /**
@@ -159,6 +160,12 @@ const auth = createAuth({
   hasUsers,
 });
 
+// Initialize user service
+const userService = new UserService({
+  db,
+  auth,
+});
+
 // Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
 // Captures both console.* methods AND direct process.stdout/stderr writes
@@ -273,6 +280,7 @@ app.route("/api/files", createFileRoutes(fileService));
 app.route("/web", createWebRoutes({
   auth,
   db,
+  userService,
   fileService,
   routesService,
   apiKeyService,
@@ -287,7 +295,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, processIsolator };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

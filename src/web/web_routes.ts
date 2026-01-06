@@ -20,10 +20,12 @@ import type { ExecutionMetricsService } from "../metrics/execution_metrics_servi
 import type { IEncryptionService } from "../encryption/types.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { UserService } from "../users/user_service.ts";
 
 export interface WebRoutesOptions {
   auth: Auth;
   db: DatabaseService;
+  userService: UserService;
   fileService: FileService;
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
@@ -34,17 +36,17 @@ export interface WebRoutesOptions {
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService } = options;
+  const { auth, db, userService, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
   const secretsService = new SecretsService({ db, encryptionService });
 
   // Mount setup pages (public - only accessible when no users exist)
-  routes.route("/setup", createSetupPages({ db }));
+  routes.route("/setup", createSetupPages({ auth, userService }));
 
   // Mount auth pages (login/logout - no auth required)
-  routes.route("/", createAuthPages({ auth, db }));
+  routes.route("/", createAuthPages({ auth, userService }));
 
   // Apply session auth to all other web routes
   routes.use("/*", createSessionAuthMiddleware({ auth }));
@@ -89,7 +91,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
 
   // Mount sub-routers
   routes.route("/password", createPasswordPages());
-  routes.route("/users", createUsersPages({ db, auth }));
+  routes.route("/users", createUsersPages({ userService }));
   routes.route("/code", createCodePages(fileService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService));
   routes.route("/keys", createKeysPages(apiKeyService, secretsService));

@@ -1,6 +1,5 @@
 import { Hono } from "@hono/hono";
-import type { DatabaseService } from "../database/database_service.ts";
-import type { Auth } from "../auth/auth.ts";
+import type { UserService } from "../users/user_service.ts";
 import {
   layout,
   escapeHtml,
@@ -10,18 +9,6 @@ import {
   formatDate,
   getLayoutUser,
 } from "./templates.ts";
-
-/**
- * User row from the database.
- */
-interface UserRow {
-  id: string;
-  email: string;
-  name: string | null;
-  role: string | null;
-  createdAt: string;
-  [key: string]: unknown;
-}
 
 /**
  * Session user type from Better Auth context.
@@ -36,8 +23,7 @@ interface SessionUser {
  * Options for creating the users pages router.
  */
 export interface UsersPagesOptions {
-  db: DatabaseService;
-  auth: Auth;
+  userService: UserService;
 }
 
 /**
@@ -46,7 +32,7 @@ export interface UsersPagesOptions {
  * Provides CRUD operations for user management.
  */
 export function createUsersPages(options: UsersPagesOptions): Hono {
-  const { db, auth } = options;
+  const { userService } = options;
   const routes = new Hono();
 
   /**
@@ -63,9 +49,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const error = c.req.query("error");
     const currentUser = getSessionUser(c);
 
-    const users = await db.queryAll<UserRow>(
-      "SELECT id, email, name, role, createdAt FROM user ORDER BY createdAt DESC"
-    );
+    const users = await userService.getAll();
 
     const content = `
       <h1>Users</h1>
@@ -94,8 +78,8 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
               <tr>
                 <td><strong>${escapeHtml(user.email)}</strong>${user.id === currentUser?.id ? " <em>(you)</em>" : ""}</td>
                 <td>${user.name ? escapeHtml(user.name) : "<em>-</em>"}</td>
-                <td><code>${user.role ? escapeHtml(user.role) : "<em>none</em>"}</code></td>
-                <td>${formatDate(new Date(user.createdAt))}</td>
+                <td><code>${user.roles.length > 0 ? escapeHtml(user.roles.join(", ")) : "<em>none</em>"}</code></td>
+                <td>${formatDate(user.createdAt)}</td>
                 <td class="actions">
                   <a href="/web/users/edit/${encodeURIComponent(user.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
                   ${user.id !== currentUser?.id ? `<a href="/web/users/delete/${encodeURIComponent(user.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>` : ""}
@@ -137,25 +121,13 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     }
 
     try {
-      // Use Better Auth admin API to create user
-      const createBody: {
-        email: string;
-        password: string;
-        name: string;
-        role?: string;
-      } = {
+      // Create user via UserService
+      await userService.createUser({
         email: userData.email,
         password: userData.password,
-        name: userData.name || "",
-      };
-
-      // Add role if provided (empty string defaults to "userMgmt" via admin plugin config)
-      if (userData.role) {
-        createBody.role = userData.role;
-      }
-
-      // @ts-expect-error - Better Auth role field supports custom string values despite type definition
-      await auth.api.createUser({ body: createBody, headers: c.req.raw.headers });
+        name: userData.name || undefined,
+        role: userData.role || undefined,
+      }, c.req.raw.headers);
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User created: ${userData.email}`));
     } catch (err) {
@@ -172,10 +144,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const userId = c.req.param("id");
     const error = c.req.query("error");
 
-    const user = await db.queryOne<UserRow>(
-      "SELECT id, email, name, role, createdAt FROM user WHERE id = ?",
-      [userId]
-    );
+    const user = await userService.getById(userId);
 
     if (!user) {
       return c.redirect("/web/users?error=" + encodeURIComponent("User not found"));
@@ -194,10 +163,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
   routes.post("/edit/:id", async (c) => {
     const userId = c.req.param("id");
 
-    const user = await db.queryOne<UserRow>(
-      "SELECT id, email, name, role FROM user WHERE id = ?",
-      [userId]
-    );
+    const user = await userService.getById(userId);
 
     if (!user) {
       return c.redirect("/web/users?error=" + encodeURIComponent("User not found"));
@@ -226,26 +192,11 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     }
 
     try {
-      // Update password if provided (using Better Auth admin API)
-      if (editData.password) {
-        await auth.api.setUserPassword({
-          body: {
-            userId: userId,
-            newPassword: editData.password,
-          },
-          headers: c.req.raw.headers,
-        });
-      }
-
-      // Update role using Better Auth admin API
-      // Cast needed because role field supports custom string values (e.g., "permanent,userMgmt")
-      await auth.api.setRole({
-        body: {
-          userId: userId,
-          role: editData.role as "userMgmt" | "userRead",
-        },
-        headers: c.req.raw.headers,
-      });
+      // Update user via UserService
+      await userService.updateUser(userId, {
+        password: editData.password || undefined,
+        role: editData.role,
+      }, c.req.raw.headers);
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User updated: ${user.email}`));
     } catch (err) {
@@ -271,10 +222,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       return c.redirect("/web/users?error=" + encodeURIComponent("You cannot delete your own account"));
     }
 
-    const user = await db.queryOne<UserRow>(
-      "SELECT id, email FROM user WHERE id = ?",
-      [userId]
-    );
+    const user = await userService.getById(userId);
 
     if (!user) {
       return c.redirect("/web/users?error=" + encodeURIComponent("User not found"));
@@ -301,29 +249,12 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       return c.redirect("/web/users?error=" + encodeURIComponent("You cannot delete your own account"));
     }
 
-    const user = await db.queryOne<UserRow>(
-      "SELECT id, email FROM user WHERE id = ?",
-      [userId]
-    );
-
-    if (!user) {
-      return c.redirect("/web/users?error=" + encodeURIComponent("User not found"));
-    }
-
-    // Check if user has permanent role
-    const roles = user.role?.split(',') || [];
-    if (roles.includes('permanent')) {
-      return c.redirect("/web/users?error=" + encodeURIComponent("Cannot delete permanent admin user"));
-    }
-
     try {
-      // Delete user using Better Auth admin API
-      await auth.api.removeUser({
-        body: { userId },
-        headers: c.req.raw.headers,
-      });
+      // Delete user via UserService (handles permanent role check)
+      await userService.deleteUser(userId, c.req.raw.headers);
 
-      return c.redirect("/web/users?success=" + encodeURIComponent(`User deleted: ${user.email}`));
+      const user = await userService.getById(userId);
+      return c.redirect("/web/users?success=" + encodeURIComponent(`User deleted`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete user";
       return c.redirect("/web/users?error=" + encodeURIComponent(message));
@@ -383,9 +314,10 @@ function renderUserForm(
  */
 function renderEditForm(
   action: string,
-  user: { email: string; name?: string | null; role?: string | null },
+  user: { email: string; name?: string; roles?: string[] },
   error?: string
 ): string {
+  const roleString = user.roles ? user.roles.join(",") : "";
   return `
     <h1>Edit User</h1>
     ${error ? flashMessages(undefined, error) : ""}
@@ -406,7 +338,7 @@ function renderEditForm(
       </label>
       <label>
         Role
-        <input type="text" name="role" value="${escapeHtml(user.role ?? "")}"
+        <input type="text" name="role" value="${escapeHtml(roleString)}"
                placeholder="e.g., userMgmt or permanent,userMgmt" />
         <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
       </label>
