@@ -45,6 +45,26 @@ const STOP_TIMEOUT_MS = 60000;
  * 4. Generate new key, swap keys, begin re-encryption
  * 5. Process tables in batches with locking
  * 6. Complete rotation, clear phased_out key
+ *
+ * ## Key Retention and Data Recovery
+ *
+ * **Version cycling**: Encryption key versions use letters A-Z and wrap from Z back to A
+ * after 26 rotations. This is a design choice to keep version identifiers single-character.
+ *
+ * **Old key disposal**: After each rotation completes, the phased_out key is permanently
+ * discarded. Only the current key remains. All encrypted data is re-encrypted during
+ * rotation to use the new current key.
+ *
+ * **Backup restoration implications**: Database backups can only be decrypted using the
+ * encryption keys that were active when the backup was created. Once a key rotation
+ * completes, the old key is gone. This means:
+ * - Encrypted database backups older than one rotation cycle cannot be restored
+ * - With default 90-day rotation interval, backups older than ~90 days are unrecoverable
+ * - Plan backup retention policies accordingly
+ *
+ * **Incomplete rotation recovery**: If rotation fails partway through, the phased_out key
+ * remains available. The service will automatically resume incomplete rotations on the next
+ * check cycle, ensuring no data becomes permanently inaccessible due to partial rotation.
  */
 export class KeyRotationService {
   private readonly db: DatabaseService;
@@ -53,6 +73,7 @@ export class KeyRotationService {
   private readonly config: KeyRotationConfig;
 
   private timerId: number | null = null;
+  private isStarting = false;
   private isRotating = false;
   private stopRequested = false;
   private consecutiveFailures = 0;
@@ -67,10 +88,16 @@ export class KeyRotationService {
   /**
    * Start the rotation check timer.
    * Checks immediately on start, then on configured interval.
+   * Timer only starts if initial check succeeds.
    */
   start(): void {
     if (this.timerId !== null) {
       logger.warn("[KeyRotation] Already running");
+      return;
+    }
+
+    if (this.isStarting) {
+      logger.warn("[KeyRotation] Start already in progress");
       return;
     }
 
@@ -79,46 +106,64 @@ export class KeyRotationService {
         `rotation interval ${this.config.rotationIntervalDays} days`
     );
 
-    // Run immediately on start
+    this.isStarting = true;
+
+    // Run initial check first, only start timer if it succeeds
     this.checkAndRotate()
       .then(() => {
         this.consecutiveFailures = 0;
+
+        // Check if stop was requested during initial check
+        if (this.stopRequested) {
+          this.isStarting = false;
+          logger.debug(
+            "[KeyRotation] Stop requested during startup, timer not started"
+          );
+          return;
+        }
+
+        // Initial check succeeded, start the timer
+        this.timerId = setInterval(() => {
+          this.checkAndRotate()
+            .then(() => {
+              this.consecutiveFailures = 0;
+            })
+            .catch((error) => {
+              this.consecutiveFailures++;
+              logger.error(
+                `[KeyRotation] Check failed (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
+                error
+              );
+
+              // Auto-shutdown after max failures
+              if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                logger.error(
+                  "[KeyRotation] Max consecutive failures reached, stopping service"
+                );
+                if (this.timerId !== null) {
+                  clearInterval(this.timerId);
+                  this.timerId = null;
+                }
+              }
+            });
+        }, this.config.checkIntervalSeconds * 1000);
+
+        this.isStarting = false;
+        logger.debug("[KeyRotation] Timer started successfully");
       })
       .catch((error) => {
         this.consecutiveFailures++;
-        logger.error("[KeyRotation] Initial check failed:", error);
+        this.isStarting = false;
+        logger.error(
+          "[KeyRotation] Initial check failed, timer not started:",
+          error
+        );
       });
-
-    // Schedule interval
-    this.timerId = setInterval(() => {
-      this.checkAndRotate()
-        .then(() => {
-          this.consecutiveFailures = 0;
-        })
-        .catch((error) => {
-          this.consecutiveFailures++;
-          logger.error(
-            `[KeyRotation] Check failed (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
-            error
-          );
-
-          // Auto-shutdown after max failures
-          if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-            logger.error(
-              "[KeyRotation] Max consecutive failures reached, stopping service"
-            );
-            if (this.timerId !== null) {
-              clearInterval(this.timerId);
-              this.timerId = null;
-            }
-          }
-        });
-    }, this.config.checkIntervalSeconds * 1000);
   }
 
   /**
    * Stop the rotation service.
-   * Waits for any in-progress rotation to complete (with timeout).
+   * Waits for any in-progress startup or rotation to complete (with timeout).
    */
   async stop(): Promise<void> {
     if (this.timerId !== null) {
@@ -128,12 +173,12 @@ export class KeyRotationService {
 
     this.stopRequested = true;
 
-    // Wait for any in-progress rotation to complete with timeout
+    // Wait for startup or rotation to complete with timeout
     const startTime = Date.now();
-    while (this.isRotating) {
+    while (this.isStarting || this.isRotating) {
       if (Date.now() - startTime > STOP_TIMEOUT_MS) {
         logger.warn(
-          "[KeyRotation] Stop timeout exceeded, rotation may still be running"
+          "[KeyRotation] Stop timeout exceeded, startup/rotation may still be running"
         );
         break;
       }

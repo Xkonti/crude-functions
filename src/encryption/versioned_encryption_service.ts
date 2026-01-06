@@ -246,6 +246,14 @@ export class VersionedEncryptionService {
       // Decode base64 to bytes
       const combined = base64ToBytes(data);
 
+      // AES-GCM minimum: 12-byte IV + 16-byte auth tag = 28 bytes
+      const MIN_ENCRYPTED_LENGTH = 28;
+      if (combined.length < MIN_ENCRYPTED_LENGTH) {
+        throw new DecryptionError(
+          `Corrupted encrypted data: expected at least ${MIN_ENCRYPTED_LENGTH} bytes, got ${combined.length}`
+        );
+      }
+
       // Extract IV (first 12 bytes) and ciphertext (rest)
       const iv = combined.slice(0, 12);
       const ciphertext = combined.slice(12);

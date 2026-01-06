@@ -1,40 +1,5 @@
 # Key rotation issues
 
-### Critical Issues
-
-#### 7. No Validation of Decrypted Data Length
-
-**Location:** `src/encryption/versioned_encryption_service.ts:192-228`
-
-After decryption, there's no validation that the combined IV+ciphertext had sufficient bytes. If corrupted data has < 12 bytes after base64 decode, the IV slice could be partial or empty, leading to cryptic errors from `crypto.subtle.decrypt()`.
-
-**Impact:** Poor error messages obscure data corruption issues.
-
-### Moderate Issues
-
-#### 8. openssl Command Could Fail Silently in Unexpected Ways
-
-**Location:** `src/encryption/key_storage_service.ts:60-77`
-
-The `generateKey()` method only checks exit code but doesn't validate that output is valid base64 or has correct length.
-
-**Edge cases not handled:**
-
-- openssl not installed (code 127)
-- stdout empty but exit code 0
-- stdout contains warnings before the key
-- Non-base64 characters in output
-
-**Impact:** Could generate invalid keys leading to service startup failures.
-
-#### 9. No Timeout on openssl Command Execution
-
-**Location:** `src/encryption/key_storage_service.ts:61-67`
-
-No timeout parameter on `Deno.Command`. If openssl hangs (insufficient entropy, buggy build, process suspension), service initialization hangs forever.
-
-**Impact:** Service hangs indefinitely on startup.
-
 #### 10. File System Race Condition in ensureInitialized()
 
 **Location:** `src/encryption/key_storage_service.ts:101-133`
@@ -255,35 +220,3 @@ Key generation uses external `openssl` command. If openssl not installed or fail
 Database errors during rotation cause exit and resume from beginning. No distinction between transient errors (should retry) and fatal errors (should stop). Transient connection issues cause full rotation restart rather than resuming from current position.
 
 **Impact:** Rotation may restart unnecessarily but will eventually succeed - wastes resources.
-
-### Minor Issues
-
-#### 14. Timer Interval Not Cleared on Start Failure
-
-**Location:** `src/encryption/key_rotation_service.ts:83-116`
-
-Timer scheduled after initial check starts but before it completes. If initial check fails, timer continues running. More semantic issue than functional bug.
-
-#### 15. Rotation Interval Calculation Doesn't Account for Leap Seconds/DST
-
-**Location:** `src/encryption/key_rotation_service.ts:173-178`
-
-Simple millisecond arithmetic doesn't account for DST transitions or leap seconds. Given rotation intervals measured in days (default 90), error is negligible (<0.001%).
-
-#### 16. No Rate Limiting on Encryption Service Lock Acquisition
-
-**Location:** `src/encryption/key_rotation_service.ts:291-312`
-
-No timeout on lock acquisition. If another process holds rotation lock indefinitely, could hang. Unlikely given current usage patterns (only rotation service uses this lock).
-
-#### 17. Version Wrapping from Z to A Not Explicitly Tested in Service
-
-**Location:** `src/encryption/key_rotation_service.ts:202`
-
-After 26 rotations, version wraps Z → A. By design, old keys are discarded, so data older than 2 rotation cycles (180 days default) cannot be decrypted. Should be documented but isn't a bug.
-
-#### 18. No Atomic Write Pattern for Key File
-
-**Location:** `src/encryption/key_storage_service.ts:50-54`
-
-Direct write to key file without atomic write pattern (write to temp, then rename). Partial writes possible if process crashes mid-write.

@@ -308,6 +308,26 @@ Deno.test("VersionedEncryptionService - Decryption", async (t) => {
     await expect(service.decrypt("A")).rejects.toThrow(DecryptionError);
   });
 
+  await t.step("throws DecryptionError with clear message for truncated base64 data", async () => {
+    const service = new VersionedEncryptionService({
+      currentKey: TEST_KEY_A,
+      currentVersion: "A",
+    });
+
+    // Valid version + base64 that decodes to only 10 bytes (< 28 minimum)
+    const truncatedData = "A" + btoa("0123456789"); // 10 bytes
+
+    try {
+      await service.decrypt(truncatedData);
+      throw new Error("Should have thrown DecryptionError");
+    } catch (error) {
+      expect(error).toBeInstanceOf(DecryptionError);
+      expect((error as Error).message).toContain("Corrupted encrypted data");
+      expect((error as Error).message).toContain("10");
+      expect((error as Error).message).toContain("28");
+    }
+  });
+
   await t.step("throws DecryptionError for wrong key", async () => {
     const serviceA = new VersionedEncryptionService({
       currentKey: TEST_KEY_A,
