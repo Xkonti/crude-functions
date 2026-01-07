@@ -30,6 +30,7 @@ import { ConsoleLogService } from "./src/logs/console_log_service.ts";
 import { StreamInterceptor } from "./src/logs/stream_interceptor.ts";
 import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
 import { MetricsAggregationService } from "./src/metrics/metrics_aggregation_service.ts";
+import { MetricsStateService } from "./src/metrics/metrics_state_service.ts";
 import type { MetricsAggregationConfig } from "./src/metrics/types.ts";
 import { LogTrimmingService } from "./src/logs/log_trimming_service.ts";
 import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
@@ -184,6 +185,9 @@ streamInterceptor.install();
 // Initialize execution metrics service
 const executionMetricsService = new ExecutionMetricsService({ db });
 
+// Initialize metrics state service (for aggregation watermarks)
+const metricsStateService = new MetricsStateService({ db });
+
 // Initialize and start metrics aggregation service
 const metricsAggregationConfig: MetricsAggregationConfig = {
   aggregationIntervalSeconds: await getIntSetting(SettingNames.METRICS_AGGREGATION_INTERVAL_SECONDS, 60),
@@ -191,6 +195,7 @@ const metricsAggregationConfig: MetricsAggregationConfig = {
 };
 const metricsAggregationService = new MetricsAggregationService({
   metricsService: executionMetricsService,
+  stateService: metricsStateService,
   config: metricsAggregationConfig,
 });
 metricsAggregationService.start();

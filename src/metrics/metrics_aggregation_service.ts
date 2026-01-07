@@ -1,9 +1,11 @@
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
-import type { MetricsAggregationConfig, ExecutionMetric } from "./types.ts";
+import type { MetricsStateService } from "./metrics_state_service.ts";
+import type { MetricsAggregationConfig, MetricType } from "./types.ts";
 import { logger } from "../utils/logger.ts";
 
 export interface MetricsAggregationServiceOptions {
   metricsService: ExecutionMetricsService;
+  stateService: MetricsStateService;
   config: MetricsAggregationConfig;
   /** Maximum minutes to process per aggregation run. Defaults to 60. */
   maxMinutesPerRun?: number;
@@ -12,14 +14,18 @@ export interface MetricsAggregationServiceOptions {
 /**
  * Service for aggregating execution metrics into time-based summaries.
  *
- * Runs on a configurable interval to:
- * - Aggregate execution metrics into minute summaries
- * - Aggregate minute summaries into hour summaries (when hour completes)
- * - Aggregate hour summaries into day summaries (when day completes)
- * - Clean up old day metrics based on retention policy
+ * Uses a watermark-based approach with three sequential passes:
+ * 1. MINUTES PASS: Aggregate executions → minute records (global + per-route)
+ * 2. HOURS PASS: Aggregate minutes → hour records (global + per-route)
+ * 3. DAYS PASS: Aggregate hours → day records (global + per-route)
+ *
+ * Global metrics (routeId=NULL) combine data from all functions.
+ * Watermarks track progress to ensure crash recovery with minimal reprocessing.
+ * Cleanup happens at the end of all passes.
  */
 export class MetricsAggregationService {
   private readonly metricsService: ExecutionMetricsService;
+  private readonly stateService: MetricsStateService;
   private readonly config: MetricsAggregationConfig;
   private readonly maxMinutesPerRun: number;
   private timerId: number | null = null;
@@ -33,8 +39,11 @@ export class MetricsAggregationService {
 
   constructor(options: MetricsAggregationServiceOptions) {
     this.metricsService = options.metricsService;
+    this.stateService = options.stateService;
     this.config = options.config;
-    this.maxMinutesPerRun = options.maxMinutesPerRun ?? MetricsAggregationService.DEFAULT_MAX_MINUTES_PER_RUN;
+    this.maxMinutesPerRun =
+      options.maxMinutesPerRun ??
+      MetricsAggregationService.DEFAULT_MAX_MINUTES_PER_RUN;
   }
 
   /**
@@ -49,7 +58,7 @@ export class MetricsAggregationService {
 
     logger.info(
       `[MetricsAggregation] Starting with interval ${this.config.aggregationIntervalSeconds}s, ` +
-      `retention ${this.config.retentionDays} days`
+        `retention ${this.config.retentionDays} days`
     );
 
     // Run immediately on start, then schedule interval
@@ -74,8 +83,13 @@ export class MetricsAggregationService {
             error
           );
 
-          if (this.consecutiveFailures >= MetricsAggregationService.MAX_CONSECUTIVE_FAILURES) {
-            logger.error("[MetricsAggregation] Max consecutive failures reached, stopping service");
+          if (
+            this.consecutiveFailures >=
+            MetricsAggregationService.MAX_CONSECUTIVE_FAILURES
+          ) {
+            logger.error(
+              "[MetricsAggregation] Max consecutive failures reached, stopping service"
+            );
             if (this.timerId !== null) {
               clearInterval(this.timerId);
               this.timerId = null;
@@ -102,7 +116,9 @@ export class MetricsAggregationService {
     const startTime = Date.now();
     while (this.isProcessing) {
       if (Date.now() - startTime > MetricsAggregationService.STOP_TIMEOUT_MS) {
-        logger.warn("[MetricsAggregation] Stop timeout exceeded, signaling stop request");
+        logger.warn(
+          "[MetricsAggregation] Stop timeout exceeded, signaling stop request"
+        );
         this.stopRequested = true;
         break;
       }
@@ -116,8 +132,7 @@ export class MetricsAggregationService {
 
   /**
    * Main aggregation loop - called by timer.
-   * Processes minutes one at a time, cascading to hours and days when complete.
-   * Also processes any pending hour and day aggregations independently.
+   * Runs three passes (minutes, hours, days) then cleans up old records.
    */
   private async runAggregation(): Promise<void> {
     if (this.isProcessing) {
@@ -127,60 +142,54 @@ export class MetricsAggregationService {
 
     this.isProcessing = true;
     try {
+      const now = new Date();
+
       // Clean up all old metrics first (any type)
       await this.cleanupOldMetrics();
 
       if (this.stopRequested) return;
 
-      const now = new Date();
-
-      // Process all complete minutes, cascading to hours and days
-      await this.processMinutesCascading(now);
+      // PASS 1: Process minutes (execution → minute)
+      await this.processMinutesPass(now);
 
       if (this.stopRequested) return;
 
-      // Process any pending hour aggregations (minute → hour)
-      // This handles cases where execution→minute processing has stopped
-      // but there are still completed hours to aggregate
-      await this.processPendingHours(now);
+      // PASS 2: Process hours (minute → hour)
+      await this.processHoursPass(now);
 
       if (this.stopRequested) return;
 
-      // Process any pending day aggregations (hour → day)
-      // This handles cases where hour aggregation has stopped
-      // but there are still completed days to aggregate
-      await this.processPendingDays(now);
+      // PASS 3: Process days (hour → day)
+      await this.processDaysPass(now);
 
+      if (this.stopRequested) return;
+
+      // CLEANUP: Delete processed source records
+      await this.cleanupProcessedRecords();
     } finally {
       this.isProcessing = false;
     }
   }
 
   /**
-   * Process minutes one at a time, cascading to hours and days when boundaries are crossed.
+   * MINUTES PASS: Aggregate execution records into minute records.
+   * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processMinutesCascading(now: Date): Promise<void> {
-    // Find the oldest unprocessed execution
-    const oldestExecution = await this.metricsService.getOldestByType("execution");
-    if (!oldestExecution) {
-      return; // No executions to process
-    }
+  private async processMinutesPass(now: Date): Promise<void> {
+    const currentMinute = this.floorToMinute(now);
 
-    // Get all routes that have execution metrics
-    const routeIds = await this.metricsService.getDistinctRouteIdsByType("execution");
-    if (routeIds.length === 0) {
-      return;
-    }
+    // Get or initialize marker
+    const startMarker = await this.getOrInitializeMinuteMarker(currentMinute);
+    if (!startMarker) return; // No data to process
 
-    let currentMinute = this.floorToMinute(oldestExecution.timestamp);
-    const endMinute = this.floorToMinute(now); // Don't process current incomplete minute
-
+    let marker = startMarker;
     let minutesProcessed = 0;
 
-    while (currentMinute < endMinute) {
+    // Process each complete minute
+    while (marker < currentMinute) {
       if (this.stopRequested) return;
 
-      // Limit processing per run to avoid long-running operations on startup
+      // Limit processing per run
       if (minutesProcessed >= this.maxMinutesPerRun) {
         logger.info(
           `[MetricsAggregation] Reached max minutes per run (${this.maxMinutesPerRun}), will continue in next run`
@@ -188,248 +197,305 @@ export class MetricsAggregationService {
         return;
       }
 
-      const minuteEnd = new Date(currentMinute.getTime() + 60 * 1000);
-      const currentHour = this.floorToHour(currentMinute);
-      const currentDay = this.floorToDay(currentMinute);
+      const windowStart = marker;
+      const windowEnd = new Date(marker.getTime() + 60 * 1000);
 
-      // Process this minute for all routes
-      for (const routeId of routeIds) {
-        await this.aggregateMinute(routeId, currentMinute, minuteEnd);
-      }
+      // Check if any records exist in this window
+      const hasRecords = await this.metricsService.hasRecordsInTimeWindow(
+        "execution",
+        windowStart,
+        windowEnd
+      );
 
-      // Check if we just completed an hour (moving to a new hour)
-      const nextMinute = minuteEnd;
-      const nextHour = this.floorToHour(nextMinute);
+      if (hasRecords) {
+        // Aggregate global metrics
+        const globalResult = await this.metricsService.aggregateGlobalInTimeWindow(
+          "execution",
+          windowStart,
+          windowEnd
+        );
 
-      if (nextHour > currentHour && nextHour <= this.floorToHour(now)) {
-        // Hour boundary crossed - aggregate the completed hour
-        if (this.stopRequested) return;
-
-        const hourEnd = new Date(currentHour.getTime() + 60 * 60 * 1000);
-        const minuteRouteIds = await this.metricsService.getDistinctRouteIdsByType("minute");
-
-        for (const routeId of minuteRouteIds) {
-          await this.aggregateHour(routeId, currentHour, hourEnd);
+        if (globalResult) {
+          await this.metricsService.store({
+            routeId: null,
+            type: "minute",
+            avgTimeMs: globalResult.avgTimeMs,
+            maxTimeMs: globalResult.maxTimeMs,
+            executionCount: globalResult.executionCount,
+            timestamp: windowStart,
+          });
         }
 
-        // Check if we just completed a day
-        const nextDay = this.floorToDay(nextHour);
-        if (nextDay > currentDay && nextDay <= this.floorToDay(now)) {
-          // Day boundary crossed - aggregate the completed day
-          if (this.stopRequested) return;
+        // Aggregate per-route metrics
+        const perRouteResults =
+          await this.metricsService.aggregatePerRouteInTimeWindow(
+            "execution",
+            windowStart,
+            windowEnd
+          );
 
-          const dayEnd = new Date(currentDay.getTime() + 24 * 60 * 60 * 1000);
-          const hourRouteIds = await this.metricsService.getDistinctRouteIdsByType("hour");
-
-          for (const routeId of hourRouteIds) {
-            await this.aggregateDay(routeId, currentDay, dayEnd);
-          }
+        for (const [routeId, result] of perRouteResults) {
+          await this.metricsService.store({
+            routeId,
+            type: "minute",
+            avgTimeMs: result.avgTimeMs,
+            maxTimeMs: result.maxTimeMs,
+            executionCount: result.executionCount,
+            timestamp: windowStart,
+          });
         }
       }
 
-      currentMinute = minuteEnd;
+      // Advance marker
+      marker = windowEnd;
+      await this.stateService.setMarker("lastProcessedMinute", marker);
       minutesProcessed++;
     }
   }
 
   /**
-   * Aggregate executions for a specific minute into a minute record.
+   * Get or initialize the minute marker.
+   * Returns null if no data to process and marker was set to current time.
    */
-  private async aggregateMinute(
-    routeId: number,
-    start: Date,
-    end: Date
-  ): Promise<void> {
-    const metrics = await this.metricsService.getByRouteIdTypeAndTimeRange(
-      routeId,
-      "execution",
-      start,
-      end
-    );
+  private async getOrInitializeMinuteMarker(currentMinute: Date): Promise<Date | null> {
+    const existingMarker = await this.stateService.getMarker("lastProcessedMinute");
+    if (existingMarker) return existingMarker;
 
-    if (metrics.length === 0) {
-      return; // No executions in this minute for this route
+    // Bootstrap based on oldest execution record
+    const oldestExecution = await this.metricsService.getOldestByType("execution");
+    if (oldestExecution) {
+      return this.floorToMinute(oldestExecution.timestamp);
     }
 
-    const aggregated = this.calculateAggregation(metrics);
-
-    // Store minute record and delete executions
-    await this.metricsService.store({
-      routeId,
-      type: "minute",
-      avgTimeMs: aggregated.avgTimeMs,
-      maxTimeMs: aggregated.maxTimeMs,
-      executionCount: aggregated.executionCount,
-      timestamp: start,
-    });
-
-    await this.metricsService.deleteByRouteIdTypeAndTimeRange(
-      routeId,
-      "execution",
-      start,
-      end
-    );
+    // No data to process - set marker to current minute and return null
+    await this.stateService.setMarker("lastProcessedMinute", currentMinute);
+    return null;
   }
 
   /**
-   * Aggregate minutes for a specific hour into an hour record.
+   * Get or initialize the hour marker.
+   * Returns null if no data to process and marker was set to current time.
    */
-  private async aggregateHour(
-    routeId: number,
-    start: Date,
-    end: Date
-  ): Promise<void> {
-    const metrics = await this.metricsService.getByRouteIdTypeAndTimeRange(
-      routeId,
-      "minute",
-      start,
-      end
-    );
+  private async getOrInitializeHourMarker(currentHour: Date): Promise<Date | null> {
+    const existingMarker = await this.stateService.getMarker("lastProcessedHour");
+    if (existingMarker) return existingMarker;
 
-    if (metrics.length === 0) {
-      return; // No minutes in this hour for this route
-    }
-
-    const aggregated = this.calculateAggregation(metrics);
-
-    // Store hour record and delete minutes
-    await this.metricsService.store({
-      routeId,
-      type: "hour",
-      avgTimeMs: aggregated.avgTimeMs,
-      maxTimeMs: aggregated.maxTimeMs,
-      executionCount: aggregated.executionCount,
-      timestamp: start,
-    });
-
-    await this.metricsService.deleteByRouteIdTypeAndTimeRange(
-      routeId,
-      "minute",
-      start,
-      end
-    );
-  }
-
-  /**
-   * Aggregate hours for a specific day into a day record.
-   */
-  private async aggregateDay(
-    routeId: number,
-    start: Date,
-    end: Date
-  ): Promise<void> {
-    const metrics = await this.metricsService.getByRouteIdTypeAndTimeRange(
-      routeId,
-      "hour",
-      start,
-      end
-    );
-
-    if (metrics.length === 0) {
-      return; // No hours in this day for this route
-    }
-
-    const aggregated = this.calculateAggregation(metrics);
-
-    // Store day record and delete hours
-    await this.metricsService.store({
-      routeId,
-      type: "day",
-      avgTimeMs: aggregated.avgTimeMs,
-      maxTimeMs: aggregated.maxTimeMs,
-      executionCount: aggregated.executionCount,
-      timestamp: start,
-    });
-
-    await this.metricsService.deleteByRouteIdTypeAndTimeRange(
-      routeId,
-      "hour",
-      start,
-      end
-    );
-  }
-
-  /**
-   * Process any pending hour aggregations from minute records.
-   * This runs independently of the execution processing loop to catch
-   * cases where there are no new executions but pending minutes exist.
-   */
-  private async processPendingHours(now: Date): Promise<void> {
-    // Find the oldest minute record
+    // Bootstrap based on oldest minute record
     const oldestMinute = await this.metricsService.getOldestByType("minute");
-    if (!oldestMinute) {
-      return; // No minute records to process
+    if (oldestMinute) {
+      return this.floorToHour(oldestMinute.timestamp);
     }
 
-    // Get the hour this minute belongs to
-    const oldestHour = this.floorToHour(oldestMinute.timestamp);
+    // No data to process - set marker to current hour and return null
+    await this.stateService.setMarker("lastProcessedHour", currentHour);
+    return null;
+  }
+
+  /**
+   * HOURS PASS: Aggregate minute records into hour records.
+   * Creates both global (routeId=NULL) and per-route records.
+   */
+  private async processHoursPass(now: Date): Promise<void> {
     const currentHour = this.floorToHour(now);
 
-    // Only process if the oldest minute is in a completed hour
-    if (oldestHour >= currentHour) {
-      return; // All minutes are in the current (incomplete) hour
-    }
+    // Get or initialize marker
+    const startMarker = await this.getOrInitializeHourMarker(currentHour);
+    if (!startMarker) return; // No data to process
 
-    // Get all routes that have minute records
-    const routeIds = await this.metricsService.getDistinctRouteIdsByType("minute");
-    if (routeIds.length === 0) {
-      return;
-    }
+    let marker = startMarker;
 
-    // Process each completed hour from oldest to current
-    let hourStart = oldestHour;
-    while (hourStart < currentHour) {
+    // Process each complete hour
+    while (marker < currentHour) {
       if (this.stopRequested) return;
 
-      const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000);
+      const windowStart = marker;
+      const windowEnd = new Date(marker.getTime() + 60 * 60 * 1000);
 
-      for (const routeId of routeIds) {
-        await this.aggregateHour(routeId, hourStart, hourEnd);
+      // Check if any records exist in this window
+      const hasRecords = await this.metricsService.hasRecordsInTimeWindow(
+        "minute",
+        windowStart,
+        windowEnd
+      );
+
+      if (hasRecords) {
+        // Aggregate global metrics
+        const globalResult = await this.metricsService.aggregateGlobalInTimeWindow(
+          "minute",
+          windowStart,
+          windowEnd
+        );
+
+        if (globalResult) {
+          await this.metricsService.store({
+            routeId: null,
+            type: "hour",
+            avgTimeMs: globalResult.avgTimeMs,
+            maxTimeMs: globalResult.maxTimeMs,
+            executionCount: globalResult.executionCount,
+            timestamp: windowStart,
+          });
+        }
+
+        // Aggregate per-route metrics
+        const perRouteResults =
+          await this.metricsService.aggregatePerRouteInTimeWindow(
+            "minute",
+            windowStart,
+            windowEnd
+          );
+
+        for (const [routeId, result] of perRouteResults) {
+          await this.metricsService.store({
+            routeId,
+            type: "hour",
+            avgTimeMs: result.avgTimeMs,
+            maxTimeMs: result.maxTimeMs,
+            executionCount: result.executionCount,
+            timestamp: windowStart,
+          });
+        }
       }
 
-      hourStart = hourEnd;
+      // Advance marker
+      marker = windowEnd;
+      await this.stateService.setMarker("lastProcessedHour", marker);
     }
   }
 
   /**
-   * Process any pending day aggregations from hour records.
-   * This runs independently of the hour processing loop to catch
-   * cases where there are no new hours but pending hours exist.
+   * Get or initialize the day marker.
+   * Returns null if no data to process and marker was set to current time.
    */
-  private async processPendingDays(now: Date): Promise<void> {
-    // Find the oldest hour record
+  private async getOrInitializeDayMarker(currentDay: Date): Promise<Date | null> {
+    const existingMarker = await this.stateService.getMarker("lastProcessedDay");
+    if (existingMarker) return existingMarker;
+
+    // Bootstrap based on oldest hour record
     const oldestHour = await this.metricsService.getOldestByType("hour");
-    if (!oldestHour) {
-      return; // No hour records to process
+    if (oldestHour) {
+      return this.floorToDay(oldestHour.timestamp);
     }
 
-    // Get the day this hour belongs to
-    const oldestDay = this.floorToDay(oldestHour.timestamp);
+    // No data to process - set marker to current day and return null
+    await this.stateService.setMarker("lastProcessedDay", currentDay);
+    return null;
+  }
+
+  /**
+   * DAYS PASS: Aggregate hour records into day records.
+   * Creates both global (routeId=NULL) and per-route records.
+   */
+  private async processDaysPass(now: Date): Promise<void> {
     const currentDay = this.floorToDay(now);
 
-    // Only process if the oldest hour is in a completed day
-    if (oldestDay >= currentDay) {
-      return; // All hours are in the current (incomplete) day
-    }
+    // Get or initialize marker
+    const startMarker = await this.getOrInitializeDayMarker(currentDay);
+    if (!startMarker) return; // No data to process
 
-    // Get all routes that have hour records
-    const routeIds = await this.metricsService.getDistinctRouteIdsByType("hour");
-    if (routeIds.length === 0) {
-      return;
-    }
+    let marker = startMarker;
 
-    // Process each completed day from oldest to current
-    let dayStart = oldestDay;
-    while (dayStart < currentDay) {
+    // Process each complete day
+    while (marker < currentDay) {
       if (this.stopRequested) return;
 
-      const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+      const windowStart = marker;
+      const windowEnd = new Date(marker.getTime() + 24 * 60 * 60 * 1000);
 
-      for (const routeId of routeIds) {
-        await this.aggregateDay(routeId, dayStart, dayEnd);
+      // Check if any records exist in this window
+      const hasRecords = await this.metricsService.hasRecordsInTimeWindow(
+        "hour",
+        windowStart,
+        windowEnd
+      );
+
+      if (hasRecords) {
+        // Aggregate global metrics
+        const globalResult = await this.metricsService.aggregateGlobalInTimeWindow(
+          "hour",
+          windowStart,
+          windowEnd
+        );
+
+        if (globalResult) {
+          await this.metricsService.store({
+            routeId: null,
+            type: "day",
+            avgTimeMs: globalResult.avgTimeMs,
+            maxTimeMs: globalResult.maxTimeMs,
+            executionCount: globalResult.executionCount,
+            timestamp: windowStart,
+          });
+        }
+
+        // Aggregate per-route metrics
+        const perRouteResults =
+          await this.metricsService.aggregatePerRouteInTimeWindow(
+            "hour",
+            windowStart,
+            windowEnd
+          );
+
+        for (const [routeId, result] of perRouteResults) {
+          await this.metricsService.store({
+            routeId,
+            type: "day",
+            avgTimeMs: result.avgTimeMs,
+            maxTimeMs: result.maxTimeMs,
+            executionCount: result.executionCount,
+            timestamp: windowStart,
+          });
+        }
       }
 
-      dayStart = dayEnd;
+      // Advance marker
+      marker = windowEnd;
+      await this.stateService.setMarker("lastProcessedDay", marker);
+    }
+  }
+
+  /**
+   * Clean up processed source records based on markers.
+   * Called at the end of all passes.
+   */
+  private async cleanupProcessedRecords(): Promise<void> {
+    const minuteMarker = await this.stateService.getMarker("lastProcessedMinute");
+    const hourMarker = await this.stateService.getMarker("lastProcessedHour");
+    const dayMarker = await this.stateService.getMarker("lastProcessedDay");
+
+    let totalDeleted = 0;
+
+    // Delete execution records up to minute marker
+    if (minuteMarker) {
+      const deleted = await this.metricsService.deleteByTypeBeforeTimestamp(
+        "execution",
+        minuteMarker
+      );
+      totalDeleted += deleted;
+    }
+
+    // Delete minute records up to hour marker
+    if (hourMarker) {
+      const deleted = await this.metricsService.deleteByTypeBeforeTimestamp(
+        "minute",
+        hourMarker
+      );
+      totalDeleted += deleted;
+    }
+
+    // Delete hour records up to day marker
+    if (dayMarker) {
+      const deleted = await this.metricsService.deleteByTypeBeforeTimestamp(
+        "hour",
+        dayMarker
+      );
+      totalDeleted += deleted;
+    }
+
+    if (totalDeleted > 0) {
+      logger.debug(
+        `[MetricsAggregation] Cleaned up ${totalDeleted} processed records`
+      );
     }
   }
 
@@ -445,41 +511,6 @@ export class MetricsAggregationService {
     if (deleted > 0) {
       logger.info(`[MetricsAggregation] Cleaned up ${deleted} old metrics`);
     }
-  }
-
-  /**
-   * Calculate aggregated values from a set of metrics.
-   * - avg = weighted average: sum(avg * count) / sum(count)
-   * - max = maximum of all max values
-   * - count = sum of all counts
-   */
-  private calculateAggregation(metrics: ExecutionMetric[]): {
-    avgTimeMs: number;
-    maxTimeMs: number;
-    executionCount: number;
-  } {
-    if (metrics.length === 0) {
-      return { avgTimeMs: 0, maxTimeMs: 0, executionCount: 0 };
-    }
-
-    let totalWeightedSum = 0;
-    let totalCount = 0;
-    let maxTime = 0;
-
-    for (const metric of metrics) {
-      totalWeightedSum += metric.avgTimeMs * metric.executionCount;
-      totalCount += metric.executionCount;
-      maxTime = Math.max(maxTime, metric.maxTimeMs);
-    }
-
-    // Handle case where all metrics have count 0
-    const avgTime = totalCount > 0 ? totalWeightedSum / totalCount : 0;
-
-    return {
-      avgTimeMs: avgTime,
-      maxTimeMs: maxTime,
-      executionCount: totalCount,
-    };
   }
 
   /**

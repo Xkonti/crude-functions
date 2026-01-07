@@ -4,7 +4,8 @@ export type MetricType = "execution" | "minute" | "hour" | "day";
 /** A stored execution metric entry */
 export interface ExecutionMetric {
   id: number;
-  routeId: number;
+  /** Route ID, or null for global (combined) metrics */
+  routeId: number | null;
   type: MetricType;
   avgTimeMs: number;
   maxTimeMs: number;
@@ -24,3 +25,16 @@ export interface MetricsAggregationConfig {
   /** Number of days to retain daily metrics (default: 90) */
   retentionDays: number;
 }
+
+/** Result of an aggregation query */
+export interface AggregationResult {
+  avgTimeMs: number;
+  maxTimeMs: number;
+  executionCount: number;
+}
+
+/** Keys used in metricsState table for tracking aggregation progress */
+export type MetricsStateKey =
+  | "lastProcessedMinute"
+  | "lastProcessedHour"
+  | "lastProcessedDay";

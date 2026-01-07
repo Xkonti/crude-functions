@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { DatabaseService } from "../database/database_service.ts";
 import { ExecutionMetricsService } from "./execution_metrics_service.ts";
 import { MetricsAggregationService } from "./metrics_aggregation_service.ts";
+import { MetricsStateService } from "./metrics_state_service.ts";
 
 // Helper functions for dynamic date calculation
 function floorToMinute(date: Date): Date {
@@ -48,7 +49,7 @@ function getPastDay(daysAgo: number): Date {
 const EXECUTION_METRICS_SCHEMA = `
   CREATE TABLE executionMetrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    routeId INTEGER NOT NULL,
+    routeId INTEGER,
     type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
     avgTimeMs REAL NOT NULL,
     maxTimeMs INTEGER NOT NULL,
@@ -56,13 +57,21 @@ const EXECUTION_METRICS_SCHEMA = `
     timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX idx_executionMetrics_routeId ON executionMetrics(routeId);
-  CREATE INDEX idx_executionMetrics_type_route_timestamp ON executionMetrics(type, routeId, timestamp);
+  CREATE INDEX idx_executionMetrics_type_route_timestamp ON executionMetrics(type, COALESCE(routeId, -1), timestamp);
   CREATE INDEX idx_executionMetrics_timestamp ON executionMetrics(timestamp);
+
+  CREATE TABLE metricsState (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  );
 `;
 
 interface TestSetup {
   aggregationService: MetricsAggregationService;
   metricsService: ExecutionMetricsService;
+  stateService: MetricsStateService;
   db: DatabaseService;
   tempDir: string;
 }
@@ -78,8 +87,10 @@ async function createTestSetup(
   await db.exec(EXECUTION_METRICS_SCHEMA);
 
   const metricsService = new ExecutionMetricsService({ db });
+  const stateService = new MetricsStateService({ db });
   const aggregationService = new MetricsAggregationService({
     metricsService,
+    stateService,
     config: {
       aggregationIntervalSeconds: intervalSeconds,
       retentionDays: retentionDays,
@@ -87,7 +98,7 @@ async function createTestSetup(
     maxMinutesPerRun,
   });
 
-  return { aggregationService, metricsService, db, tempDir };
+  return { aggregationService, metricsService, stateService, db, tempDir };
 }
 
 async function cleanup(setup: TestSetup): Promise<void> {
