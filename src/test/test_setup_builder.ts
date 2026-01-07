@@ -376,7 +376,7 @@ export class TestSetupBuilder {
    */
   private async hashPasswordBcrypt(password: string): Promise<string> {
     // Import bcrypt dynamically to avoid bundling issues
-    const { hash } = await import("jsr:@da/bcrypt@1.0.1");
+    const { hash } = await import("@da/bcrypt");
     return await hash(password);
   }
 
