@@ -1,8 +1,12 @@
 import { expect } from "@std/expect";
 import { DatabaseService } from "../database/database_service.ts";
 import { ConsoleLogService } from "./console_log_service.ts";
+import { SettingsService } from "../settings/settings_service.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
 
-const EXECUTION_LOGS_SCHEMA = `
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+
+const TEST_SCHEMA = `
   CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requestId TEXT NOT NULL,
@@ -16,23 +20,41 @@ const EXECUTION_LOGS_SCHEMA = `
   CREATE INDEX idx_executionLogs_routeId ON executionLogs(routeId, id);
   CREATE INDEX idx_executionLogs_route_level ON executionLogs(routeId, level, id);
   CREATE INDEX idx_executionLogs_timestamp ON executionLogs(timestamp);
+
+  CREATE TABLE settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    userId TEXT,
+    value TEXT,
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
 `;
 
 async function createTestSetup(): Promise<{
   service: ConsoleLogService;
   db: DatabaseService;
+  settingsService: SettingsService;
   tempDir: string;
 }> {
   const tempDir = await Deno.makeTempDir();
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
-  await db.exec(EXECUTION_LOGS_SCHEMA);
+  await db.exec(TEST_SCHEMA);
 
-  const service = new ConsoleLogService({ db });
-  return { service, db, tempDir };
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+  const settingsService = new SettingsService({ db, encryptionService });
+  await settingsService.bootstrapGlobalSettings();
+
+  const service = new ConsoleLogService({ db, settingsService });
+  return { service, db, settingsService, tempDir };
 }
 
-async function cleanup(db: DatabaseService, tempDir: string): Promise<void> {
+async function cleanup(service: ConsoleLogService, db: DatabaseService, tempDir: string): Promise<void> {
+  await service.shutdown();
   await db.close();
   await Deno.remove(tempDir, { recursive: true });
 }
@@ -45,12 +67,15 @@ Deno.test("ConsoleLogService stores log entry", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.store({
+    service.store({
       requestId: "test-request-1",
       routeId: 1,
       level: "log",
       message: "Test message",
     });
+
+    // Shutdown flushes buffered logs
+    await service.shutdown();
 
     const logs = await service.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -59,7 +84,7 @@ Deno.test("ConsoleLogService stores log entry", async () => {
     expect(logs[0].level).toBe("log");
     expect(logs[0].message).toBe("Test message");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -67,7 +92,7 @@ Deno.test("ConsoleLogService stores log with args", async () => {
   const { service, db, tempDir } = await createTestSetup();
 
   try {
-    await service.store({
+    service.store({
       requestId: "test-request-1",
       routeId: 1,
       level: "debug",
@@ -75,11 +100,12 @@ Deno.test("ConsoleLogService stores log with args", async () => {
       args: JSON.stringify([{ key: "value" }, 42]),
     });
 
+    await service.shutdown();
     const logs = await service.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
     expect(logs[0].args).toBe('[{"key":"value"},42]');
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -88,31 +114,32 @@ Deno.test("ConsoleLogService retrieves logs by requestId", async () => {
 
   try {
     // Store logs for different requests
-    await service.store({
+    service.store({
       requestId: "request-1",
       routeId: 1,
       level: "log",
       message: "Message 1",
     });
-    await service.store({
+    service.store({
       requestId: "request-2",
       routeId: 1,
       level: "log",
       message: "Message 2",
     });
-    await service.store({
+    service.store({
       requestId: "request-1",
       routeId: 1,
       level: "warn",
       message: "Message 3",
     });
 
+    await service.shutdown();
     const logs = await service.getByRequestId("request-1");
     expect(logs.length).toBe(2);
     expect(logs[0].message).toBe("Message 1");
     expect(logs[1].message).toBe("Message 3");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -121,32 +148,33 @@ Deno.test("ConsoleLogService retrieves logs by routeId", async () => {
 
   try {
     // Store logs for different routes
-    await service.store({
+    service.store({
       requestId: "request-1",
       routeId: 1,
       level: "log",
       message: "Route 1 - Message 1",
     });
-    await service.store({
+    service.store({
       requestId: "request-2",
       routeId: 2,
       level: "log",
       message: "Route 2 - Message 1",
     });
-    await service.store({
+    service.store({
       requestId: "request-3",
       routeId: 1,
       level: "warn",
       message: "Route 1 - Message 2",
     });
 
+    await service.shutdown();
     const logs = await service.getByRouteId(1);
     expect(logs.length).toBe(2);
     // Results are ordered newest to oldest (DESC)
     expect(logs[0].message).toBe("Route 1 - Message 2");
     expect(logs[1].message).toBe("Route 1 - Message 1");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -156,7 +184,7 @@ Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => 
   try {
     // Store multiple logs
     for (let i = 0; i < 5; i++) {
-      await service.store({
+      service.store({
         requestId: `request-${i}`,
         routeId: 1,
         level: "log",
@@ -164,13 +192,14 @@ Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => 
       });
     }
 
+    await service.shutdown();
     const logs = await service.getByRouteId(1, 3);
     expect(logs.length).toBe(3);
     // Results are ordered newest to oldest (DESC), limit 3 gets most recent
     expect(logs[0].message).toBe("Message 4");
     expect(logs[2].message).toBe("Message 2");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -180,7 +209,7 @@ Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
   try {
     // Store logs
     for (let i = 0; i < 5; i++) {
-      await service.store({
+      service.store({
         requestId: `request-${i}`,
         routeId: 1,
         level: "log",
@@ -188,6 +217,7 @@ Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
       });
     }
 
+    await service.shutdown();
     const logs = await service.getRecent(3);
     expect(logs.length).toBe(3);
     // Most recent first (DESC order)
@@ -195,7 +225,7 @@ Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
     expect(logs[1].message).toBe("Message 3");
     expect(logs[2].message).toBe("Message 2");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -204,12 +234,14 @@ Deno.test("ConsoleLogService deletes logs older than date", async () => {
 
   try {
     // Store a log
-    await service.store({
+    service.store({
       requestId: "old-request",
       routeId: 1,
       level: "log",
       message: "Old message",
     });
+
+    await service.shutdown();
 
     // Delete logs older than 1 second from now
     const futureDate = new Date(Date.now() + 1000);
@@ -220,7 +252,7 @@ Deno.test("ConsoleLogService deletes logs older than date", async () => {
     const logs = await service.getByRequestId("old-request");
     expect(logs.length).toBe(0);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -238,13 +270,15 @@ Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async (
       ["old-sqlite-format", 1, "log", "Old SQLite format log", sqliteFormat]
     );
 
-    // Also insert a newer log using the service (will use CURRENT_TIMESTAMP)
-    await service.store({
+    // Also insert a newer log using the service
+    service.store({
       requestId: "newer-request",
       routeId: 1,
       level: "log",
       message: "Newer message",
     });
+
+    await service.shutdown();
 
     // Delete logs older than a date between the two logs
     const cutoffDate = new Date("2021-01-01T00:00:00.000Z");
@@ -259,7 +293,7 @@ Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async (
     const newLogs = await service.getByRequestId("newer-request");
     expect(newLogs.length).toBe(1);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -268,18 +302,20 @@ Deno.test("ConsoleLogService deletes logs by routeId", async () => {
 
   try {
     // Store logs for different routes
-    await service.store({
+    service.store({
       requestId: "request-1",
       routeId: 1,
       level: "log",
       message: "Route 1 message",
     });
-    await service.store({
+    service.store({
       requestId: "request-2",
       routeId: 2,
       level: "log",
       message: "Route 2 message",
     });
+
+    await service.shutdown();
 
     const deleted = await service.deleteByRouteId(1);
     expect(deleted).toBe(1);
@@ -290,7 +326,7 @@ Deno.test("ConsoleLogService deletes logs by routeId", async () => {
     const logsRoute2 = await service.getByRouteId(2);
     expect(logsRoute2.length).toBe(1);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });
 
@@ -301,7 +337,7 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
     const levels = ["log", "debug", "info", "warn", "error", "trace"] as const;
 
     for (const level of levels) {
-      await service.store({
+      service.store({
         requestId: "request-1",
         routeId: 1,
         level,
@@ -309,6 +345,7 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
       });
     }
 
+    await service.shutdown();
     const logs = await service.getByRequestId("request-1");
     expect(logs.length).toBe(6);
 
@@ -317,6 +354,6 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
       expect(logs[i].message).toBe(`${levels[i]} message`);
     }
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(service, db, tempDir);
   }
 });

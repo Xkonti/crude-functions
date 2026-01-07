@@ -42,6 +42,7 @@ interface ChartDataPoint {
   maxTimeMs: number;
   executionCount: number;
   isCurrent: boolean;
+  isInterpolated: boolean;
 }
 
 interface MetricsSummary {
@@ -278,10 +279,12 @@ function aggregateMetrics(metrics: ExecutionMetric[]): {
  * - hour mode: execution records for current minute
  * - day mode: minute records for current hour + execution records for current minute
  * - days mode: hour records for current day + minute records for current hour + execution records for current minute
+ *
+ * For global metrics (routeId = null), aggregates data across ALL routes.
  */
 async function calculateCurrentPeriodMetric(
   metricsService: ExecutionMetricsService,
-  routeId: number,
+  routeId: number | null,
   mode: MetricsDisplayMode,
   now: Date
 ): Promise<ExecutionMetric | null> {
@@ -291,37 +294,33 @@ async function calculateCurrentPeriodMetric(
   // (getByRouteIdTypeAndTimeRange uses exclusive end: timestamp < end)
   const endTime = new Date(now.getTime() + 1000);
 
+  // Helper to fetch records based on whether this is global or per-route
+  const fetchRecords = (type: MetricType, start: Date, end: Date) => {
+    if (routeId === null) {
+      // Global: aggregate all per-route records
+      return metricsService.getAllPerRouteMetricsByTypeAndTimeRange(type, start, end);
+    } else {
+      // Per-route: fetch for specific route
+      return metricsService.getByRouteIdTypeAndTimeRange(routeId, type, start, end);
+    }
+  };
+
   // Always get execution records for current minute (unprocessed raw executions)
   const currentMinuteStart = floorToMinute(now);
-  const executionRecords = await metricsService.getByRouteIdTypeAndTimeRange(
-    routeId,
-    "execution",
-    currentMinuteStart,
-    endTime
-  );
+  const executionRecords = await fetchRecords("execution", currentMinuteStart, endTime);
   allMetrics.push(...executionRecords);
 
   if (mode === "day" || mode === "days") {
     // For day/days mode: also get minute records for current hour
     const currentHourStart = floorToHour(now);
-    const minuteRecords = await metricsService.getByRouteIdTypeAndTimeRange(
-      routeId,
-      "minute",
-      currentHourStart,
-      endTime
-    );
+    const minuteRecords = await fetchRecords("minute", currentHourStart, endTime);
     allMetrics.push(...minuteRecords);
   }
 
   if (mode === "days") {
     // For days mode: also get hour records for current day
     const currentDayStart = floorToDay(now);
-    const hourRecords = await metricsService.getByRouteIdTypeAndTimeRange(
-      routeId,
-      "hour",
-      currentDayStart,
-      endTime
-    );
+    const hourRecords = await fetchRecords("hour", currentDayStart, endTime);
     allMetrics.push(...hourRecords);
   }
 
@@ -355,11 +354,73 @@ async function calculateCurrentPeriodMetric(
 }
 
 /**
+ * Apply time interpolation to data points for avgTimeMs and maxTimeMs.
+ * - Before first real data: use first real value
+ * - Between real data points: linear interpolation
+ * - After last real data: use last real value
+ * Execution count is NOT interpolated (remains 0 for empty periods).
+ */
+function applyTimeInterpolation(dataPoints: ChartDataPoint[]): ChartDataPoint[] {
+  // Find all indices with real data (executionCount > 0)
+  const realIndices = dataPoints
+    .map((p, i) => (p.executionCount > 0 ? i : -1))
+    .filter((i) => i !== -1);
+
+  if (realIndices.length === 0) {
+    // No real data - return as-is (all zeros, all interpolated)
+    return dataPoints.map((p) => ({ ...p, isInterpolated: true }));
+  }
+
+  const firstReal = realIndices[0];
+  const lastReal = realIndices[realIndices.length - 1];
+
+  return dataPoints.map((point, i) => {
+    if (point.executionCount > 0) {
+      // Real data point - keep as-is
+      return { ...point, isInterpolated: false };
+    }
+
+    // Interpolated point
+    let avgTimeMs: number;
+    let maxTimeMs: number;
+
+    if (i < firstReal) {
+      // Before first real: use first real value
+      avgTimeMs = dataPoints[firstReal].avgTimeMs;
+      maxTimeMs = dataPoints[firstReal].maxTimeMs;
+    } else if (i > lastReal) {
+      // After last real: use last real value
+      avgTimeMs = dataPoints[lastReal].avgTimeMs;
+      maxTimeMs = dataPoints[lastReal].maxTimeMs;
+    } else {
+      // Between real points: linear interpolation
+      const prevReal = realIndices.filter((idx) => idx < i).pop()!;
+      const nextReal = realIndices.find((idx) => idx > i)!;
+      const ratio = (i - prevReal) / (nextReal - prevReal);
+
+      avgTimeMs =
+        dataPoints[prevReal].avgTimeMs +
+        ratio * (dataPoints[nextReal].avgTimeMs - dataPoints[prevReal].avgTimeMs);
+      maxTimeMs =
+        dataPoints[prevReal].maxTimeMs +
+        ratio * (dataPoints[nextReal].maxTimeMs - dataPoints[prevReal].maxTimeMs);
+    }
+
+    return {
+      ...point,
+      avgTimeMs,
+      maxTimeMs,
+      isInterpolated: true,
+    };
+  });
+}
+
+/**
  * Fetch metrics data for the specified mode and prepare chart data points.
  */
 async function fetchMetricsData(
   metricsService: ExecutionMetricsService,
-  routeId: number,
+  routeId: number | null,
   mode: MetricsDisplayMode,
   retentionDays: number
 ): Promise<ChartDataPoint[]> {
@@ -389,13 +450,11 @@ async function fetchMetricsData(
       break;
   }
 
-  // Fetch historical data
-  const metrics = await metricsService.getByRouteIdTypeAndTimeRange(
-    routeId,
-    sourceType,
-    startTime,
-    now
-  );
+  // Fetch historical data - use appropriate method based on routeId
+  const metrics =
+    routeId === null
+      ? await metricsService.getGlobalMetricsByTypeAndTimeRange(sourceType, startTime, now)
+      : await metricsService.getByRouteIdTypeAndTimeRange(routeId, sourceType, startTime, now);
 
   // Build data points map for easy lookup
   const dataMap = new Map<string, ExecutionMetric>();
@@ -412,8 +471,8 @@ async function fetchMetricsData(
     now
   );
 
-  // Generate all expected time slots
-  const dataPoints: ChartDataPoint[] = [];
+  // Generate all expected time slots (isInterpolated will be set by applyTimeInterpolation)
+  const rawDataPoints: ChartDataPoint[] = [];
   for (let i = expectedPoints - 1; i >= 0; i--) {
     const slotTime = getSlotTime(now, mode, i);
     const key = getTimePeriodKey(slotTime, mode);
@@ -421,37 +480,41 @@ async function fetchMetricsData(
     const isCurrent = i === 0;
 
     if (isCurrent && currentMetric) {
-      dataPoints.push({
+      rawDataPoints.push({
         label: formatMetricsTimeLabel(slotTime, mode),
         timestamp: slotTime,
         avgTimeMs: currentMetric.avgTimeMs,
         maxTimeMs: currentMetric.maxTimeMs,
         executionCount: currentMetric.executionCount,
         isCurrent: true,
+        isInterpolated: false,
       });
     } else if (metric) {
-      dataPoints.push({
+      rawDataPoints.push({
         label: formatMetricsTimeLabel(slotTime, mode),
         timestamp: slotTime,
         avgTimeMs: metric.avgTimeMs,
         maxTimeMs: metric.maxTimeMs,
         executionCount: metric.executionCount,
         isCurrent: false,
+        isInterpolated: false,
       });
     } else {
-      // Empty period - show as 0
-      dataPoints.push({
+      // Empty period - show as 0 (will be interpolated later)
+      rawDataPoints.push({
         label: formatMetricsTimeLabel(slotTime, mode),
         timestamp: slotTime,
         avgTimeMs: 0,
         maxTimeMs: 0,
         executionCount: 0,
         isCurrent: isCurrent,
+        isInterpolated: false, // Will be set true by applyTimeInterpolation
       });
     }
   }
 
-  return dataPoints;
+  // Apply interpolation to fill in missing time values with smooth transitions
+  return applyTimeInterpolation(rawDataPoints);
 }
 
 /**
@@ -686,12 +749,16 @@ function renderLogsPage(
 
 function renderMetricsPage(
   functionName: string,
-  routeId: number,
+  routeId: number | null,
   mode: MetricsDisplayMode,
   dataPoints: ChartDataPoint[],
   summary: MetricsSummary,
-  retentionDays: number
+  retentionDays: number,
+  allFunctions: FunctionRoute[]
 ): string {
+  const isGlobal = routeId === null;
+  const metricsBaseUrl = isGlobal ? "/web/functions/metrics/global" : `/web/functions/metrics/${routeId}`;
+  const refreshUrl = `${metricsBaseUrl}?mode=${mode}`;
   const modeLabels: Record<MetricsDisplayMode, string> = {
     hour: "Last Hour",
     day: "Last 24 Hours",
@@ -710,6 +777,7 @@ function renderMetricsPage(
   const maxTimes = JSON.stringify(dataPoints.map((p) => Number(p.maxTimeMs.toFixed(2))));
   const execCounts = JSON.stringify(dataPoints.map((p) => p.executionCount));
   const currentFlags = JSON.stringify(dataPoints.map((p) => p.isCurrent));
+  const interpolatedFlags = JSON.stringify(dataPoints.map((p) => p.isInterpolated));
 
   const styles = `
     <style>
@@ -761,6 +829,21 @@ function renderMetricsPage(
         padding: 2rem;
         color: var(--pico-muted-color);
       }
+      .source-selector {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-bottom: 1rem;
+      }
+      .source-selector label {
+        margin: 0;
+        font-weight: bold;
+      }
+      .source-selector select {
+        margin: 0;
+        width: auto;
+        min-width: 200px;
+      }
     </style>
   `;
 
@@ -773,6 +856,21 @@ function renderMetricsPage(
         const maxTimes = ${maxTimes};
         const execCounts = ${execCounts};
         const currentFlags = ${currentFlags};
+        const interpolatedFlags = ${interpolatedFlags};
+
+        // Color helpers for interpolated vs real data
+        const avgColor = 'rgb(75, 192, 192)';
+        const avgColorInterp = 'rgba(150, 150, 150, 0.5)';
+        const maxColor = 'rgb(255, 99, 132)';
+        const maxColorInterp = 'rgba(150, 150, 150, 0.5)';
+        const currentColor = 'rgb(255, 159, 64)';
+
+        // Helper to get point color based on current/interpolated flags
+        function getPointColor(index, normalColor) {
+          if (currentFlags[index]) return currentColor;
+          if (interpolatedFlags[index]) return avgColorInterp;
+          return normalColor;
+        }
 
         // Execution Time Chart
         const timeCtx = document.getElementById('executionTimeChart').getContext('2d');
@@ -784,24 +882,56 @@ function renderMetricsPage(
               {
                 label: 'Avg Time (ms)',
                 data: avgTimes,
-                borderColor: 'rgb(75, 192, 192)',
+                borderColor: avgColor,
                 backgroundColor: 'rgba(75, 192, 192, 0.1)',
                 tension: 0.1,
                 fill: true,
-                pointBackgroundColor: currentFlags.map((c) => c ? 'rgb(255, 159, 64)' : 'rgb(75, 192, 192)'),
-                pointBorderColor: currentFlags.map((c) => c ? 'rgb(255, 159, 64)' : 'rgb(75, 192, 192)'),
-                pointRadius: currentFlags.map((c) => c ? 6 : 3),
+                // Segment styling for interpolated regions (grey + dashed)
+                segment: {
+                  borderColor: function(ctx) {
+                    const p0Interp = interpolatedFlags[ctx.p0DataIndex];
+                    const p1Interp = interpolatedFlags[ctx.p1DataIndex];
+                    // Both points interpolated = grey segment
+                    if (p0Interp && p1Interp) return avgColorInterp;
+                    return avgColor;
+                  },
+                  borderDash: function(ctx) {
+                    const p0Interp = interpolatedFlags[ctx.p0DataIndex];
+                    const p1Interp = interpolatedFlags[ctx.p1DataIndex];
+                    // Both points interpolated = dashed line
+                    if (p0Interp && p1Interp) return [5, 5];
+                    return [];
+                  }
+                },
+                pointBackgroundColor: avgTimes.map((_, i) => getPointColor(i, avgColor)),
+                pointBorderColor: avgTimes.map((_, i) => getPointColor(i, avgColor)),
+                pointRadius: avgTimes.map((_, i) => currentFlags[i] ? 6 : (interpolatedFlags[i] ? 2 : 3)),
               },
               {
                 label: 'Max Time (ms)',
                 data: maxTimes,
-                borderColor: 'rgb(255, 99, 132)',
+                borderColor: maxColor,
                 backgroundColor: 'rgba(255, 99, 132, 0.1)',
                 tension: 0.1,
                 fill: false,
-                pointBackgroundColor: currentFlags.map((c) => c ? 'rgb(255, 159, 64)' : 'rgb(255, 99, 132)'),
-                pointBorderColor: currentFlags.map((c) => c ? 'rgb(255, 159, 64)' : 'rgb(255, 99, 132)'),
-                pointRadius: currentFlags.map((c) => c ? 6 : 3),
+                // Segment styling for interpolated regions (grey + dashed)
+                segment: {
+                  borderColor: function(ctx) {
+                    const p0Interp = interpolatedFlags[ctx.p0DataIndex];
+                    const p1Interp = interpolatedFlags[ctx.p1DataIndex];
+                    if (p0Interp && p1Interp) return maxColorInterp;
+                    return maxColor;
+                  },
+                  borderDash: function(ctx) {
+                    const p0Interp = interpolatedFlags[ctx.p0DataIndex];
+                    const p1Interp = interpolatedFlags[ctx.p1DataIndex];
+                    if (p0Interp && p1Interp) return [5, 5];
+                    return [];
+                  }
+                },
+                pointBackgroundColor: maxTimes.map((_, i) => getPointColor(i, maxColor)),
+                pointBorderColor: maxTimes.map((_, i) => getPointColor(i, maxColor)),
+                pointRadius: maxTimes.map((_, i) => currentFlags[i] ? 6 : (interpolatedFlags[i] ? 2 : 3)),
               }
             ]
           },
@@ -821,10 +951,14 @@ function renderMetricsPage(
               tooltip: {
                 callbacks: {
                   afterLabel: function(context) {
+                    const msgs = [];
                     if (currentFlags[context.dataIndex]) {
-                      return '(Current period - live data)';
+                      msgs.push('(Current period - live data)');
                     }
-                    return '';
+                    if (interpolatedFlags[context.dataIndex]) {
+                      msgs.push('(No activity - interpolated)');
+                    }
+                    return msgs.join('\\n');
                   }
                 }
               }
@@ -841,8 +975,8 @@ function renderMetricsPage(
             datasets: [{
               label: 'Executions',
               data: execCounts,
-              backgroundColor: currentFlags.map((c) => c ? 'rgba(255, 159, 64, 0.8)' : 'rgba(54, 162, 235, 0.8)'),
-              borderColor: currentFlags.map((c) => c ? 'rgb(255, 159, 64)' : 'rgb(54, 162, 235)'),
+              backgroundColor: execCounts.map((_, i) => currentFlags[i] ? 'rgba(255, 159, 64, 0.8)' : 'rgba(54, 162, 235, 0.8)'),
+              borderColor: execCounts.map((_, i) => currentFlags[i] ? 'rgb(255, 159, 64)' : 'rgb(54, 162, 235)'),
               borderWidth: 1
             }]
           },
@@ -878,6 +1012,15 @@ function renderMetricsPage(
 
   const hasData = dataPoints.some((p) => p.executionCount > 0);
 
+  // Build source selector options
+  const sourceOptions = [
+    `<option value="/web/functions/metrics/global?mode=${mode}" ${isGlobal ? "selected" : ""}>Server Stats</option>`,
+    ...allFunctions.map(
+      (fn) =>
+        `<option value="/web/functions/metrics/${fn.id}?mode=${mode}" ${fn.id === routeId ? "selected" : ""}>Function: ${escapeHtml(fn.name)}</option>`
+    ),
+  ].join("");
+
   return `
     ${styles}
     <h1>Metrics: ${escapeHtml(functionName)}</h1>
@@ -887,14 +1030,21 @@ function renderMetricsPage(
         <a href="/web/functions" role="button" class="secondary outline">&larr; Back to Functions</a>
       </div>
       <div style="text-align: right;">
-        <a href="/web/functions/metrics/${routeId}?mode=${mode}" role="button" class="outline">Refresh</a>
+        <a href="${refreshUrl}" role="button" class="outline">Refresh</a>
       </div>
     </div>
 
+    <div class="source-selector">
+      <label>Source:</label>
+      <select onchange="window.location.href = this.value">
+        ${sourceOptions}
+      </select>
+    </div>
+
     <div class="metrics-tabs">
-      <a href="/web/functions/metrics/${routeId}?mode=hour" class="${mode === "hour" ? "active" : ""}">Last Hour</a>
-      <a href="/web/functions/metrics/${routeId}?mode=day" class="${mode === "day" ? "active" : ""}">Last 24 Hours</a>
-      <a href="/web/functions/metrics/${routeId}?mode=days" class="${mode === "days" ? "active" : ""}">Last ${retentionDays} Days</a>
+      <a href="${metricsBaseUrl}?mode=hour" class="${mode === "hour" ? "active" : ""}">Last Hour</a>
+      <a href="${metricsBaseUrl}?mode=day" class="${mode === "day" ? "active" : ""}">Last 24 Hours</a>
+      <a href="${metricsBaseUrl}?mode=days" class="${mode === "days" ? "active" : ""}">Last ${retentionDays} Days</a>
     </div>
 
     <h2>${escapeHtml(modeLabels[mode])}</h2>
@@ -933,7 +1083,7 @@ function renderMetricsPage(
 
       <p style="color: var(--pico-muted-color); font-size: 0.85em;">
         <strong>Note:</strong> Orange data points indicate the current ${escapeHtml(periodLabels[mode])} (live data that updates on refresh).
-        Empty periods show as 0 values.
+        Dashed grey lines indicate periods with no recorded activity (values interpolated from adjacent data).
       </p>
 
       ${chartScript}
@@ -1563,6 +1713,47 @@ export function createFunctionsPages(
     return c.html(layout(`Logs: ${route.name}`, content, getLayoutUser(c)));
   });
 
+  // View global (server-wide) metrics
+  routes.get("/metrics/global", async (c) => {
+    const modeParam = c.req.query("mode") || "hour";
+
+    // Validate mode
+    const validModes: MetricsDisplayMode[] = ["hour", "day", "days"];
+    const mode: MetricsDisplayMode = validModes.includes(modeParam as MetricsDisplayMode)
+      ? (modeParam as MetricsDisplayMode)
+      : "hour";
+
+    // Get retention days from settings
+    const retentionDaysStr = await settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS);
+    const retentionDays = retentionDaysStr ? parseInt(retentionDaysStr, 10) : 90;
+
+    // Fetch global metrics data (routeId = null)
+    const dataPoints = await fetchMetricsData(
+      executionMetricsService,
+      null,
+      mode,
+      retentionDays
+    );
+
+    // Calculate summary
+    const summary = calculateSummary(dataPoints);
+
+    // Get all functions for source selector
+    const allFunctions = await routesService.getAll();
+
+    const content = renderMetricsPage(
+      "Server Stats",
+      null,
+      mode,
+      dataPoints,
+      summary,
+      retentionDays,
+      allFunctions
+    );
+
+    return c.html(layout("Metrics: Server Stats", content, getLayoutUser(c)));
+  });
+
   // View metrics for a function
   routes.get("/metrics/:id", async (c) => {
     const id = validateId(c.req.param("id"));
@@ -1598,13 +1789,17 @@ export function createFunctionsPages(
     // Calculate summary
     const summary = calculateSummary(dataPoints);
 
+    // Get all functions for source selector
+    const allFunctions = await routesService.getAll();
+
     const content = renderMetricsPage(
       route.name,
       id,
       mode,
       dataPoints,
       summary,
-      retentionDays
+      retentionDays,
+      allFunctions
     );
 
     return c.html(layout(`Metrics: ${route.name}`, content, getLayoutUser(c)));

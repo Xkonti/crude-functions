@@ -144,9 +144,10 @@ CREATE INDEX IF NOT EXISTS idx_executionLogs_route_level ON executionLogs(routeI
 CREATE INDEX IF NOT EXISTS idx_executionLogs_timestamp ON executionLogs(timestamp);
 
 -- Execution metrics table - stores execution timing data for analytics
+-- routeId is NULL for global metrics (combined across all functions)
 CREATE TABLE IF NOT EXISTS executionMetrics (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  routeId INTEGER NOT NULL,  -- No FK: orphaned records retained for global metrics aggregation
+  routeId INTEGER,  -- NULL for global metrics, no FK: orphaned records retained for aggregation
   type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
   avgTimeMs REAL NOT NULL,
   maxTimeMs INTEGER NOT NULL,
@@ -156,8 +157,16 @@ CREATE TABLE IF NOT EXISTS executionMetrics (
 
 CREATE INDEX IF NOT EXISTS idx_executionMetrics_routeId ON executionMetrics(routeId);
 CREATE INDEX IF NOT EXISTS idx_executionMetrics_type_route_timestamp
-  ON executionMetrics(type, routeId, timestamp);
+  ON executionMetrics(type, COALESCE(routeId, -1), timestamp);
 CREATE INDEX IF NOT EXISTS idx_executionMetrics_timestamp ON executionMetrics(timestamp);
+
+-- Metrics aggregation state - tracks watermarks for aggregation progress
+CREATE TABLE IF NOT EXISTS metricsState (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  key TEXT NOT NULL UNIQUE,
+  value TEXT NOT NULL,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
 
 --------------------------------------------------------------------------------
 -- Secrets and Settings

@@ -126,8 +126,6 @@ export class FunctionRouter {
             level: "exec_reject",
             message: `${method} ${fullUrl}`,
             args: JSON.stringify({ reason: "invalid_api_key" }),
-          }).catch((error) => {
-            globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
           });
 
           return c.json(
@@ -237,8 +235,6 @@ export class FunctionRouter {
         level: "exec_start",
         message: `${method} ${fullUrl}`,
         args: JSON.stringify({ origin, keyGroup, contentLength }),
-      }).catch((error) => {
-        globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
       });
 
       try {
@@ -260,8 +256,6 @@ export class FunctionRouter {
           routeId: route.id,
           level: "exec_end",
           message: `${durationMs}ms`,
-        }).catch((error) => {
-          globalThis.console.error("[FunctionRouter] Failed to store console log:", error);
         });
 
         // Store execution metric
@@ -292,8 +286,6 @@ export class FunctionRouter {
             routeId: route.id,
             level: "exec_end",
             message: `${durationMs}ms (load error)`,
-          }).catch((logError) => {
-            globalThis.console.error("[FunctionRouter] Failed to store console log:", logError);
           });
 
           return this.handleLoadError(c, error, requestId);
@@ -305,8 +297,6 @@ export class FunctionRouter {
           routeId: route.id,
           level: "exec_end",
           message: `${durationMs}ms (error)`,
-        }).catch((logError) => {
-          globalThis.console.error("[FunctionRouter] Failed to store console log:", logError);
         });
 
         // Store metric for failed executions

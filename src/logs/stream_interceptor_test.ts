@@ -8,8 +8,12 @@ import {
   originalStreams,
 } from "./stream_interceptor.ts";
 import { runInRequestContext } from "./request_context.ts";
+import { SettingsService } from "../settings/settings_service.ts";
+import { EncryptionService } from "../encryption/encryption_service.ts";
 
-const EXECUTION_LOGS_SCHEMA = `
+const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+
+const TEST_SCHEMA = `
   CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     requestId TEXT NOT NULL,
@@ -20,6 +24,16 @@ const EXECUTION_LOGS_SCHEMA = `
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
+
+  CREATE TABLE settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    userId TEXT,
+    value TEXT,
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
 `;
 
 async function createTestSetup(): Promise<{
@@ -31,20 +45,28 @@ async function createTestSetup(): Promise<{
   const tempDir = await Deno.makeTempDir();
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
-  await db.exec(EXECUTION_LOGS_SCHEMA);
+  await db.exec(TEST_SCHEMA);
 
-  const logService = new ConsoleLogService({ db });
+  const encryptionService = new EncryptionService({
+    encryptionKey: TEST_ENCRYPTION_KEY,
+  });
+  const settingsService = new SettingsService({ db, encryptionService });
+  await settingsService.bootstrapGlobalSettings();
+
+  const logService = new ConsoleLogService({ db, settingsService });
   const interceptor = new StreamInterceptor({ logService });
 
   return { logService, interceptor, db, tempDir };
 }
 
 async function cleanup(
+  logService: ConsoleLogService,
   interceptor: StreamInterceptor,
   db: DatabaseService,
   tempDir: string
 ): Promise<void> {
   interceptor.uninstall();
+  await logService.shutdown();
   await db.close();
   await Deno.remove(tempDir, { recursive: true });
 }
@@ -75,7 +97,7 @@ Deno.test("StreamInterceptor captures console.log within request context", async
     expect(logs[0].level).toBe("log");
     expect(logs[0].routeId).toBe(1);
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -109,7 +131,7 @@ Deno.test("StreamInterceptor captures all console methods with correct levels", 
     expect(levels).toContain("warn");
     expect(levels).toContain("error");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -134,7 +156,7 @@ Deno.test("StreamInterceptor captures process.stdout.write with stdout level", a
     expect(logs[0].message).toBe("Direct stdout message");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -159,7 +181,7 @@ Deno.test("StreamInterceptor captures process.stderr.write with stderr level", a
     expect(logs[0].message).toBe("Direct stderr message");
     expect(logs[0].level).toBe("stderr");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -178,7 +200,7 @@ Deno.test("StreamInterceptor does not capture logs outside request context", asy
     const allLogs = await logService.getRecent(100);
     expect(allLogs.length).toBe(0);
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -216,7 +238,7 @@ Deno.test("StreamInterceptor can be uninstalled", async () => {
     const logs2 = await logService.getByRequestId("test-request-2");
     expect(logs2.length).toBe(0);
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -255,12 +277,12 @@ Deno.test("StreamInterceptor install is idempotent", async () => {
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
 Deno.test("StreamInterceptor installed getter returns correct state", async () => {
-  const { interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, db, tempDir } = await createTestSetup();
 
   try {
     expect(interceptor.installed).toBe(false);
@@ -269,7 +291,7 @@ Deno.test("StreamInterceptor installed getter returns correct state", async () =
     interceptor.uninstall();
     expect(interceptor.installed).toBe(false);
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -295,7 +317,7 @@ Deno.test("StreamInterceptor handles Uint8Array input", async () => {
     expect(logs[0].message).toBe("Binary message");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -322,7 +344,7 @@ Deno.test("StreamInterceptor handles empty messages", async () => {
     expect(logs.length).toBe(1);
     expect(logs[0].message).toBe("Real message");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -352,7 +374,7 @@ Deno.test("StreamInterceptor captures Deno.stdout.writeSync", async () => {
     expect(logs[0].message).toBe("Deno stdout sync");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -378,7 +400,7 @@ Deno.test("StreamInterceptor captures Deno.stdout.write (async)", async () => {
     expect(logs[0].message).toBe("Deno stdout async");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -404,7 +426,7 @@ Deno.test("StreamInterceptor captures Deno.stderr.writeSync", async () => {
     expect(logs[0].message).toBe("Deno stderr sync");
     expect(logs[0].level).toBe("stderr");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -430,7 +452,7 @@ Deno.test("StreamInterceptor captures Deno.stderr.write (async)", async () => {
     expect(logs[0].message).toBe("Deno stderr async");
     expect(logs[0].level).toBe("stderr");
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });
 
@@ -449,6 +471,6 @@ Deno.test("StreamInterceptor does not capture Deno streams outside request conte
     const allLogs = await logService.getRecent(100);
     expect(allLogs.length).toBe(0);
   } finally {
-    await cleanup(interceptor, db, tempDir);
+    await cleanup(logService, interceptor, db, tempDir);
   }
 });

@@ -174,10 +174,10 @@ async function createTestApp(
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
   const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
-  const consoleLogService = new ConsoleLogService({ db });
-  const executionMetricsService = new ExecutionMetricsService({ db });
   const settingsService = new SettingsService({ db, encryptionService });
   await settingsService.bootstrapGlobalSettings();
+  const consoleLogService = new ConsoleLogService({ db, settingsService });
+  const executionMetricsService = new ExecutionMetricsService({ db });
 
   // Add initial routes
   for (const route of initialRoutes) {

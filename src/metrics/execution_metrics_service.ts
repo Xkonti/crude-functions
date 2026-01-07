@@ -1,5 +1,10 @@
 import type { DatabaseService } from "../database/database_service.ts";
-import type { ExecutionMetric, NewExecutionMetric, MetricType } from "./types.ts";
+import type {
+  ExecutionMetric,
+  NewExecutionMetric,
+  MetricType,
+  AggregationResult,
+} from "./types.ts";
 import { formatForSqlite, parseSqliteTimestamp } from "../utils/datetime.ts";
 
 export interface ExecutionMetricsServiceOptions {
@@ -10,12 +15,25 @@ export interface ExecutionMetricsServiceOptions {
 interface ExecutionMetricRow {
   [key: string]: unknown;
   id: number;
-  routeId: number;
+  routeId: number | null;
   type: string;
   avgTimeMs: number;
   maxTimeMs: number;
   executionCount: number;
   timestamp: string;
+}
+
+// Row type for aggregation queries
+interface AggregationRow {
+  [key: string]: unknown;
+  avgTimeMs: number | null;
+  maxTimeMs: number | null;
+  executionCount: number | null;
+}
+
+// Row type for per-route aggregation queries
+interface PerRouteAggregationRow extends AggregationRow {
+  routeId: number;
 }
 
 /**
@@ -171,20 +189,22 @@ export class ExecutionMetricsService {
 
   /**
    * Get all distinct route IDs that have metrics of any type.
+   * Excludes global metrics (routeId IS NULL).
    */
   async getDistinctRouteIds(): Promise<number[]> {
     const rows = await this.db.queryAll<{ routeId: number }>(
-      `SELECT DISTINCT routeId FROM executionMetrics`
+      `SELECT DISTINCT routeId FROM executionMetrics WHERE routeId IS NOT NULL`
     );
     return rows.map((row) => row.routeId);
   }
 
   /**
    * Get all distinct route IDs that have metrics of a specific type.
+   * Excludes global metrics (routeId IS NULL).
    */
   async getDistinctRouteIdsByType(type: MetricType): Promise<number[]> {
     const rows = await this.db.queryAll<{ routeId: number }>(
-      `SELECT DISTINCT routeId FROM executionMetrics WHERE type = ?`,
+      `SELECT DISTINCT routeId FROM executionMetrics WHERE type = ? AND routeId IS NOT NULL`,
       [type]
     );
     return rows.map((row) => row.routeId);
@@ -206,6 +226,47 @@ export class ExecutionMetricsService {
        WHERE routeId = ? AND type = ? AND timestamp >= ? AND timestamp < ?
        ORDER BY timestamp ASC`,
       [routeId, type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    return rows.map((row) => this.rowToMetric(row));
+  }
+
+  /**
+   * Get global metrics (routeId IS NULL) within a specific time range.
+   * Start is inclusive, end is exclusive.
+   */
+  async getGlobalMetricsByTypeAndTimeRange(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<ExecutionMetric[]> {
+    const rows = await this.db.queryAll<ExecutionMetricRow>(
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
+       WHERE routeId IS NULL AND type = ? AND timestamp >= ? AND timestamp < ?
+       ORDER BY timestamp ASC`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    return rows.map((row) => this.rowToMetric(row));
+  }
+
+  /**
+   * Get all per-route metrics (routeId IS NOT NULL) within a specific time range.
+   * Used for calculating global current period by aggregating all route data.
+   * Start is inclusive, end is exclusive.
+   */
+  async getAllPerRouteMetricsByTypeAndTimeRange(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<ExecutionMetric[]> {
+    const rows = await this.db.queryAll<ExecutionMetricRow>(
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
+       WHERE routeId IS NOT NULL AND type = ? AND timestamp >= ? AND timestamp < ?
+       ORDER BY timestamp ASC`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
     );
 
     return rows.map((row) => this.rowToMetric(row));
@@ -273,6 +334,138 @@ export class ExecutionMetricsService {
     const result = await this.db.execute(
       `DELETE FROM executionMetrics WHERE type = ? AND timestamp < ?`,
       [type, formatForSqlite(date)]
+    );
+
+    return result.changes;
+  }
+
+  // ============== Aggregation Methods ==============
+
+  /**
+   * Aggregate all metrics of a specific type within a time window into a global result.
+   * Uses weighted average for avgTimeMs.
+   * Excludes existing global metrics (routeId IS NULL).
+   *
+   * @param type - The metric type to aggregate
+   * @param start - Start of time window (inclusive)
+   * @param end - End of time window (exclusive)
+   * @returns Aggregation result, or null if no records exist in the window
+   */
+  async aggregateGlobalInTimeWindow(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<AggregationResult | null> {
+    const row = await this.db.queryOne<AggregationRow>(
+      `SELECT
+        SUM(avgTimeMs * executionCount) / SUM(executionCount) as avgTimeMs,
+        MAX(maxTimeMs) as maxTimeMs,
+        SUM(executionCount) as executionCount
+       FROM executionMetrics
+       WHERE type = ?
+         AND routeId IS NOT NULL
+         AND timestamp >= ?
+         AND timestamp < ?`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    if (!row || row.executionCount === null || row.executionCount === 0) {
+      return null;
+    }
+
+    return {
+      avgTimeMs: row.avgTimeMs ?? 0,
+      maxTimeMs: row.maxTimeMs ?? 0,
+      executionCount: row.executionCount,
+    };
+  }
+
+  /**
+   * Aggregate metrics of a specific type within a time window, grouped by route.
+   * Uses weighted average for avgTimeMs.
+   * Excludes global metrics (routeId IS NULL).
+   *
+   * @param type - The metric type to aggregate
+   * @param start - Start of time window (inclusive)
+   * @param end - End of time window (exclusive)
+   * @returns Map of routeId to aggregation result
+   */
+  async aggregatePerRouteInTimeWindow(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<Map<number, AggregationResult>> {
+    const rows = await this.db.queryAll<PerRouteAggregationRow>(
+      `SELECT
+        routeId,
+        SUM(avgTimeMs * executionCount) / SUM(executionCount) as avgTimeMs,
+        MAX(maxTimeMs) as maxTimeMs,
+        SUM(executionCount) as executionCount
+       FROM executionMetrics
+       WHERE type = ?
+         AND routeId IS NOT NULL
+         AND timestamp >= ?
+         AND timestamp < ?
+       GROUP BY routeId`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    const result = new Map<number, AggregationResult>();
+    for (const row of rows) {
+      if (row.executionCount !== null && row.executionCount > 0) {
+        result.set(row.routeId, {
+          avgTimeMs: row.avgTimeMs ?? 0,
+          maxTimeMs: row.maxTimeMs ?? 0,
+          executionCount: row.executionCount,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Check if any records of a specific type exist within a time window.
+   * Excludes global metrics (routeId IS NULL).
+   *
+   * @param type - The metric type to check
+   * @param start - Start of time window (inclusive)
+   * @param end - End of time window (exclusive)
+   * @returns True if records exist, false otherwise
+   */
+  async hasRecordsInTimeWindow(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<boolean> {
+    const row = await this.db.queryOne<{ found: number }>(
+      `SELECT 1 as found FROM executionMetrics
+       WHERE type = ?
+         AND routeId IS NOT NULL
+         AND timestamp >= ?
+         AND timestamp < ?
+       LIMIT 1`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    return row !== null;
+  }
+
+  /**
+   * Delete all metrics of a specific type before the specified timestamp.
+   * Includes both per-route and global metrics.
+   *
+   * @param type - The metric type to delete
+   * @param timestamp - Delete records with timestamp < this value
+   * @returns Number of deleted records
+   */
+  async deleteByTypeBeforeTimestamp(
+    type: MetricType,
+    timestamp: Date
+  ): Promise<number> {
+    const result = await this.db.execute(
+      `DELETE FROM executionMetrics WHERE type = ? AND timestamp < ?`,
+      [type, formatForSqlite(timestamp)]
     );
 
     return result.changes;
