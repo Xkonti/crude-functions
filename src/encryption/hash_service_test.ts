@@ -1,54 +1,67 @@
 import { expect } from "@std/expect";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { HashService } from "./hash_service.ts";
 
-// Test hash key (32 bytes base64-encoded)
-// Generated via: openssl rand -base64 32
-const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
-
 Deno.test("HashService - HMAC-SHA256 consistency", async () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
-  const hash1 = await service.computeHash("test-value");
-  const hash2 = await service.computeHash("test-value");
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    const hash1 = await ctx.hashService.computeHash("test-value");
+    const hash2 = await ctx.hashService.computeHash("test-value");
 
-  expect(hash1).toBe(hash2);
-  expect(hash1.length).toBeGreaterThan(20); // Base64 SHA256 = 44 chars
+    expect(hash1).toBe(hash2);
+    expect(hash1.length).toBeGreaterThan(20); // Base64 SHA256 = 44 chars
+  } finally {
+    await ctx.cleanup();
+  }
 });
 
 Deno.test("HashService - Different inputs produce different hashes", async () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
-  const hash1 = await service.computeHash("value1");
-  const hash2 = await service.computeHash("value2");
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    const hash1 = await ctx.hashService.computeHash("value1");
+    const hash2 = await ctx.hashService.computeHash("value2");
 
-  expect(hash1).not.toBe(hash2);
+    expect(hash1).not.toBe(hash2);
+  } finally {
+    await ctx.cleanup();
+  }
 });
 
 Deno.test("HashService - Different keys produce different hashes", async () => {
-  const service1 = new HashService({ hashKey: TEST_HASH_KEY });
-  const service2 = new HashService({
-    hashKey: "ZGVhZGJlZWZkZWFkYmVlZmRlYWRiZWVmZGVhZGJlZWY="
-  });
+  const ctx1 = await TestSetupBuilder.create().build();
+  const ctx2 = await TestSetupBuilder.create().build();
+  try {
+    const hash1 = await ctx1.hashService.computeHash("same-value");
+    const hash2 = await ctx2.hashService.computeHash("same-value");
 
-  const hash1 = await service1.computeHash("same-value");
-  const hash2 = await service2.computeHash("same-value");
-
-  expect(hash1).not.toBe(hash2);
+    expect(hash1).not.toBe(hash2);
+  } finally {
+    await ctx1.cleanup();
+    await ctx2.cleanup();
+  }
 });
 
-Deno.test("HashService - Timing-safe comparison true cases", () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
-
-  expect(service.timingSafeEqual("abc", "abc")).toBe(true);
-  expect(service.timingSafeEqual("", "")).toBe(true);
-  expect(service.timingSafeEqual("longstring123", "longstring123")).toBe(true);
+Deno.test("HashService - Timing-safe comparison true cases", async () => {
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    expect(ctx.hashService.timingSafeEqual("abc", "abc")).toBe(true);
+    expect(ctx.hashService.timingSafeEqual("", "")).toBe(true);
+    expect(ctx.hashService.timingSafeEqual("longstring123", "longstring123")).toBe(true);
+  } finally {
+    await ctx.cleanup();
+  }
 });
 
-Deno.test("HashService - Timing-safe comparison false cases", () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
-
-  expect(service.timingSafeEqual("abc", "abd")).toBe(false);
-  expect(service.timingSafeEqual("abc", "abcd")).toBe(false);
-  expect(service.timingSafeEqual("abc", "")).toBe(false);
-  expect(service.timingSafeEqual("", "abc")).toBe(false);
+Deno.test("HashService - Timing-safe comparison false cases", async () => {
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    expect(ctx.hashService.timingSafeEqual("abc", "abd")).toBe(false);
+    expect(ctx.hashService.timingSafeEqual("abc", "abcd")).toBe(false);
+    expect(ctx.hashService.timingSafeEqual("abc", "")).toBe(false);
+    expect(ctx.hashService.timingSafeEqual("", "abc")).toBe(false);
+  } finally {
+    await ctx.cleanup();
+  }
 });
 
 Deno.test("HashService - Invalid key length throws", () => {
@@ -58,41 +71,52 @@ Deno.test("HashService - Invalid key length throws", () => {
 });
 
 Deno.test("HashService - Empty string hashing works", async () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
-  const hash = await service.computeHash("");
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    const hash = await ctx.hashService.computeHash("");
 
-  expect(hash.length).toBeGreaterThan(0);
-  expect(typeof hash).toBe("string");
+    expect(hash.length).toBeGreaterThan(0);
+    expect(typeof hash).toBe("string");
+  } finally {
+    await ctx.cleanup();
+  }
 });
 
 Deno.test("HashService - Hash output is base64 encoded", async () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
-  const hash = await service.computeHash("test");
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    const hash = await ctx.hashService.computeHash("test");
 
-  // Base64 regex: only A-Z, a-z, 0-9, +, /, and = for padding
-  expect(/^[A-Za-z0-9+/]+=*$/.test(hash)).toBe(true);
+    // Base64 regex: only A-Z, a-z, 0-9, +, /, and = for padding
+    expect(/^[A-Za-z0-9+/]+=*$/.test(hash)).toBe(true);
 
-  // HMAC-SHA256 produces 32 bytes → 44 base64 characters (with padding)
-  expect(hash.length).toBe(44);
+    // HMAC-SHA256 produces 32 bytes → 44 base64 characters (with padding)
+    expect(hash.length).toBe(44);
+  } finally {
+    await ctx.cleanup();
+  }
 });
 
 Deno.test("HashService - Deterministic output for same input", async () => {
-  const service = new HashService({ hashKey: TEST_HASH_KEY });
+  const ctx = await TestSetupBuilder.create().build();
+  try {
+    const inputs = [
+      "test-key-1",
+      "test-key-2",
+      "very-long-api-key-with-many-characters-1234567890",
+      "short",
+      "",
+    ];
 
-  const inputs = [
-    "test-key-1",
-    "test-key-2",
-    "very-long-api-key-with-many-characters-1234567890",
-    "short",
-    "",
-  ];
+    for (const input of inputs) {
+      const hash1 = await ctx.hashService.computeHash(input);
+      const hash2 = await ctx.hashService.computeHash(input);
+      const hash3 = await ctx.hashService.computeHash(input);
 
-  for (const input of inputs) {
-    const hash1 = await service.computeHash(input);
-    const hash2 = await service.computeHash(input);
-    const hash3 = await service.computeHash(input);
-
-    expect(hash1).toBe(hash2);
-    expect(hash2).toBe(hash3);
+      expect(hash1).toBe(hash2);
+      expect(hash2).toBe(hash3);
+    }
+  } finally {
+    await ctx.cleanup();
   }
 });
