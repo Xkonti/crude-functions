@@ -112,3 +112,19 @@ export default async function (c, ctx) {
 - Application settings stored in database via `SettingsService`
 - API access controlled by `api.access-groups` database setting
 - Create API keys via web UI after initial admin setup
+
+## Testing
+
+**Philosophy**: Tests should be simple and focused on tested intent. Minimize infrastructure overhead.
+
+**TestSetupBuilder** (`src/test/test_setup_builder.ts`):
+- Use for service tests needing real database, migrations, and multiple services
+- Mirrors production initialization flow to prevent schema/initialization drift
+- Examples: `routes_service_test.ts`, `api_key_service_test.ts`
+
+**Simple helpers** (in-file functions):
+- Use for file-specific setup needs
+- Preferred for low-level utilities and simple unit tests
+- Examples: `env_isolator_test.ts`, `key_storage_service_test.ts`
+
+See `test_setup_builder.ts` header for detailed guidelines on when to use each approach.

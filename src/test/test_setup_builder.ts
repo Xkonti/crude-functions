@@ -1,24 +1,59 @@
 /**
- * Test setup builder for creating isolated test environments.
+ * Test setup builder for creating isolated test environments with real infrastructure.
  *
- * Uses real migrations and production initialization flow to ensure tests
- * run against the actual schema. Each test gets its own temp directory
- * for complete isolation.
+ * ## Purpose
  *
- * @example
+ * TestSetupBuilder provides production-like test environments to:
+ * - **Reduce code duplication** across test files that need similar infrastructure
+ * - **Eliminate hardcoded values** (schemas, initialization patterns) that drift from production
+ * - **Use real migrations** instead of mocking, ensuring tests validate actual database schema
+ * - **Bridge unit/integration gap** by testing services with real dependencies
+ * - **Centralize setup** that's shared across multiple test files
+ *
+ * ## When to Use TestSetupBuilder
+ *
+ * Use this builder for tests that need:
+ * - **Database and migrations**: Tests validating service behavior with real schema
+ * - **Multiple services working together**: Integration-style tests (e.g., RoutesService + FileService)
+ * - **Production initialization flow**: Tests that should match main.ts initialization
+ * - **Cross-cutting infrastructure**: Setup used by 2+ test files
+ *
+ * Examples: `routes_service_test.ts`, `api_key_service_test.ts`, `routes_toggle_test.ts`
+ *
+ * ## When NOT to Use TestSetupBuilder
+ *
+ * **Use simple helper functions instead** for:
+ * - **Low-level utilities**: Pure logic with no infrastructure (e.g., `env_isolator_test.ts`)
+ * - **File-specific setup**: Needs unique to one test file (e.g., `key_storage_service_test.ts`)
+ * - **Simple unit tests**: Testing a single class in isolation
+ *
+ * **Philosophy**: TestSetupBuilder is for shared infrastructure. Individual test files
+ * should be as simple as possible - use lightweight helpers within the test file itself.
+ *
+ * @example Service test using TestSetupBuilder
  * ```typescript
  * const ctx = await TestSetupBuilder.create()
- *   .withAdminUser("admin@test.com", "password123")
  *   .withApiKeyGroup("management", "Test keys")
  *   .withApiKey("management", "test-api-key")
  *   .withRoute("/hello", "hello.ts", { methods: ["GET"] })
- *   .withFile("hello.ts", `export default async (c) => c.json({ ok: true })`)
  *   .build();
  *
  * try {
- *   // ... run tests ...
+ *   const routes = await ctx.routesService.getAll();
+ *   expect(routes).toHaveLength(1);
  * } finally {
  *   await ctx.cleanup();
+ * }
+ * ```
+ *
+ * @example Simple helper (preferred for file-specific needs)
+ * ```typescript
+ * // In your_service_test.ts
+ * async function createTestContext(options?) {
+ *   const tempDir = await Deno.makeTempDir();
+ *   const service = new YourService({ ... });
+ *   const cleanup = async () => await Deno.remove(tempDir, { recursive: true });
+ *   return { service, cleanup };
  * }
  * ```
  */
@@ -54,7 +89,12 @@ import type {
  * Builder for creating isolated test environments with real migrations.
  *
  * Mirrors the production initialization flow from main.ts to ensure tests
- * run against the actual schema and configuration.
+ * run against the actual schema and configuration. This creates a complete
+ * application stack (database, migrations, all services) in each test's
+ * isolated temporary directory.
+ *
+ * Use this for service tests that need real infrastructure. For lightweight
+ * unit tests or file-specific needs, use a simple helper function instead.
  */
 export class TestSetupBuilder {
   private migrationsDir = "./migrations";
