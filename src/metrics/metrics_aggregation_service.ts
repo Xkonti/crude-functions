@@ -1,6 +1,6 @@
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
 import type { MetricsStateService } from "./metrics_state_service.ts";
-import type { MetricsAggregationConfig, MetricType } from "./types.ts";
+import type { MetricsAggregationConfig } from "./types.ts";
 import { logger } from "../utils/logger.ts";
 
 export interface MetricsAggregationServiceOptions {

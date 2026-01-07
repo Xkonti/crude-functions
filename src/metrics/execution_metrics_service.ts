@@ -232,6 +232,47 @@ export class ExecutionMetricsService {
   }
 
   /**
+   * Get global metrics (routeId IS NULL) within a specific time range.
+   * Start is inclusive, end is exclusive.
+   */
+  async getGlobalMetricsByTypeAndTimeRange(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<ExecutionMetric[]> {
+    const rows = await this.db.queryAll<ExecutionMetricRow>(
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
+       WHERE routeId IS NULL AND type = ? AND timestamp >= ? AND timestamp < ?
+       ORDER BY timestamp ASC`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    return rows.map((row) => this.rowToMetric(row));
+  }
+
+  /**
+   * Get all per-route metrics (routeId IS NOT NULL) within a specific time range.
+   * Used for calculating global current period by aggregating all route data.
+   * Start is inclusive, end is exclusive.
+   */
+  async getAllPerRouteMetricsByTypeAndTimeRange(
+    type: MetricType,
+    start: Date,
+    end: Date
+  ): Promise<ExecutionMetric[]> {
+    const rows = await this.db.queryAll<ExecutionMetricRow>(
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
+       WHERE routeId IS NOT NULL AND type = ? AND timestamp >= ? AND timestamp < ?
+       ORDER BY timestamp ASC`,
+      [type, formatForSqlite(start), formatForSqlite(end)]
+    );
+
+    return rows.map((row) => this.rowToMetric(row));
+  }
+
+  /**
    * Delete metrics for a route within a specific time range and type.
    * Start is inclusive, end is exclusive.
    * Returns the number of deleted metrics.
