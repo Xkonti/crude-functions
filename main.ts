@@ -178,7 +178,7 @@ const userService = new UserService({
 // Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
 // Captures both console.* methods AND direct process.stdout/stderr writes
-const consoleLogService = new ConsoleLogService({ db });
+const consoleLogService = new ConsoleLogService({ db, settingsService });
 const streamInterceptor = new StreamInterceptor({ logService: consoleLogService });
 streamInterceptor.install();
 
@@ -338,19 +338,23 @@ async function gracefulShutdown(signal: string) {
     stopLoggerRefresh();
     console.log("Logger refresh stopped");
 
-    // 4. Stop log trimming service (waits for current processing)
+    // 4. Flush buffered console logs
+    await consoleLogService.shutdown();
+    console.log("Console log service flushed");
+
+    // 5. Stop log trimming service (waits for current processing)
     await logTrimmingService.stop();
     console.log("Log trimming service stopped");
 
-    // 5. Stop aggregation service (waits for current processing)
+    // 6. Stop aggregation service (waits for current processing)
     await metricsAggregationService.stop();
     console.log("Metrics aggregation service stopped");
 
-    // 6. Stop key rotation service (waits for current rotation batch)
+    // 7. Stop key rotation service (waits for current rotation batch)
     await keyRotationService.stop();
     console.log("Key rotation service stopped");
 
-    // 7. Close database last
+    // 8. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {

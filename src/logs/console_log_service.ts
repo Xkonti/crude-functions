@@ -1,9 +1,20 @@
 import type { DatabaseService } from "../database/database_service.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
+import { SettingNames } from "../settings/types.ts";
 import type { ConsoleLog, NewConsoleLog } from "./types.ts";
 import { formatForSqlite, parseSqliteTimestamp } from "../utils/datetime.ts";
 
 export interface ConsoleLogServiceOptions {
   db: DatabaseService;
+  settingsService: SettingsService;
+}
+
+/**
+ * Buffered log entry with capture timestamp for ordering.
+ */
+interface BufferedLogEntry extends NewConsoleLog {
+  capturedAt: Date;
+  sequenceInBatch: number;
 }
 
 // Row type for database queries
@@ -23,34 +34,202 @@ interface ConsoleLogRow {
  *
  * Logs are captured from function handlers during execution and stored
  * in the database for later retrieval and analysis.
+ *
+ * Uses batching to reduce database writes - logs are buffered in memory
+ * and flushed either when the batch size is reached or after a delay.
  */
 export class ConsoleLogService {
   private readonly db: DatabaseService;
+  private readonly settingsService: SettingsService;
+
+  // Buffer management
+  private buffer: BufferedLogEntry[] = [];
+  private flushTimer: number | null = null;
+  private isFlushing = false;
+  private isShutdown = false;
+
+  // Settings (refreshed periodically)
+  private maxBatchSize = 50;
+  private maxDelayMs = 50;
+  private lastSettingsRefresh = 0;
+  private readonly settingsRefreshIntervalMs = 5000;
 
   constructor(options: ConsoleLogServiceOptions) {
     this.db = options.db;
+    this.settingsService = options.settingsService;
   }
 
   /**
    * Store a console log entry.
-   * This is fire-and-forget - failures are logged but don't throw.
+   * Buffers the entry and schedules a flush. Fire-and-forget pattern.
    */
-  async store(entry: NewConsoleLog): Promise<void> {
+  store(entry: NewConsoleLog): void {
+    if (this.isShutdown) return;
+
+    const bufferedEntry: BufferedLogEntry = {
+      ...entry,
+      capturedAt: new Date(),
+      sequenceInBatch: this.buffer.length,
+    };
+    this.buffer.push(bufferedEntry);
+
+    if (this.buffer.length >= this.maxBatchSize) {
+      this.scheduleFlush(true); // immediate flush
+    } else if (!this.flushTimer) {
+      this.scheduleFlush(false); // delayed flush
+    }
+  }
+
+  /**
+   * Flush any remaining buffered logs and stop the service.
+   * Should be called during graceful shutdown before closing the database.
+   */
+  async shutdown(): Promise<void> {
+    this.isShutdown = true;
+
+    // Clear any pending timer
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+
+    // Wait for any in-progress flush to complete
+    const maxWait = 5000;
+    const startTime = Date.now();
+    while (this.isFlushing && Date.now() - startTime < maxWait) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+
+    // Final flush of remaining buffer
+    await this.flush();
+    globalThis.console.log("[ConsoleLogService] Shutdown complete");
+  }
+
+  /**
+   * Schedule a flush of the buffer.
+   */
+  private scheduleFlush(immediate: boolean): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+
+    if (immediate) {
+      // Use queueMicrotask to not block the current store() call
+      queueMicrotask(() => this.flush());
+    } else {
+      this.flushTimer = setTimeout(() => {
+        this.flushTimer = null;
+        this.flush();
+      }, this.maxDelayMs);
+    }
+  }
+
+  /**
+   * Flush the current buffer to the database.
+   * Call this when you need to ensure logs are written immediately.
+   */
+  async flush(): Promise<void> {
+    // Prevent concurrent flushes
+    if (this.isFlushing) return;
+
+    // Atomically swap buffer
+    const toFlush = this.buffer;
+    this.buffer = [];
+
+    if (toFlush.length === 0) return;
+
+    this.isFlushing = true;
     try {
-      await this.db.execute(
-        `INSERT INTO executionLogs (requestId, routeId, level, message, args)
-         VALUES (?, ?, ?, ?, ?)`,
-        [
-          entry.requestId,
-          entry.routeId,
-          entry.level,
-          entry.message,
-          entry.args ?? null,
-        ]
-      );
+      await this.flushBatch(toFlush);
+      // Refresh settings after successful flush (if interval elapsed)
+      await this.maybeRefreshSettings();
+    } finally {
+      this.isFlushing = false;
+    }
+  }
+
+  /**
+   * Write a batch of entries to the database with retry on failure.
+   */
+  private async flushBatch(entries: BufferedLogEntry[]): Promise<void> {
+    try {
+      await this.executeBatchInsert(entries);
     } catch (error) {
-      // Fail silently - use globalThis.console to avoid recursion
-      globalThis.console.error("[ConsoleLogService] Failed to store log:", error);
+      globalThis.console.error("[ConsoleLogService] Batch flush failed, retrying:", error);
+      try {
+        await this.executeBatchInsert(entries);
+      } catch (retryError) {
+        globalThis.console.error("[ConsoleLogService] Retry failed, logs lost:", retryError);
+        // Logs are lost - acceptable for fire-and-forget pattern
+      }
+    }
+  }
+
+  /**
+   * Execute a batch INSERT with timestamp ordering.
+   * Applies microsecond offsets to preserve ordering within the batch.
+   */
+  private async executeBatchInsert(entries: BufferedLogEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+
+    // Build multi-row INSERT with explicit timestamps
+    const placeholders = entries.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
+    const sql = `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+                 VALUES ${placeholders}`;
+
+    // Flatten parameters with timestamp offsets for ordering
+    const params: (string | number | null)[] = [];
+    for (const entry of entries) {
+      // Add microsecond offset based on sequence to preserve order
+      const timestamp = new Date(entry.capturedAt.getTime());
+      // Add sequence * 1ms offset to ensure ordering (SQLite timestamp has ms precision)
+      timestamp.setTime(timestamp.getTime() + entry.sequenceInBatch);
+
+      params.push(
+        entry.requestId,
+        entry.routeId,
+        entry.level,
+        entry.message,
+        entry.args ?? null,
+        formatForSqlite(timestamp)
+      );
+    }
+
+    await this.db.execute(sql, params);
+  }
+
+  /**
+   * Refresh settings from database if the refresh interval has elapsed.
+   */
+  private async maybeRefreshSettings(): Promise<void> {
+    const now = Date.now();
+    if (now - this.lastSettingsRefresh < this.settingsRefreshIntervalMs) return;
+
+    this.lastSettingsRefresh = now;
+    try {
+      const batchSizeStr = await this.settingsService.getGlobalSetting(
+        SettingNames.LOG_BATCHING_MAX_BATCH_SIZE
+      );
+      const delayStr = await this.settingsService.getGlobalSetting(
+        SettingNames.LOG_BATCHING_MAX_DELAY_MS
+      );
+
+      if (batchSizeStr) {
+        const parsed = parseInt(batchSizeStr, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          this.maxBatchSize = parsed;
+        }
+      }
+
+      if (delayStr) {
+        const parsed = parseInt(delayStr, 10);
+        if (!isNaN(parsed) && parsed > 0) {
+          this.maxDelayMs = parsed;
+        }
+      }
+    } catch (error) {
+      globalThis.console.error("[ConsoleLogService] Failed to refresh settings:", error);
     }
   }
 

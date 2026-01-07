@@ -170,19 +170,13 @@ export class StreamInterceptor {
         const message = serializeMessage(firstArg);
         const serializedArgs = restArgs.length > 0 ? serializeArgs(restArgs) : undefined;
 
-        this.logService
-          .store({
-            requestId: context.requestId,
-            routeId: context.routeId,
-            level: method as ConsoleLogLevel,
-            message,
-            args: serializedArgs,
-          })
-          .catch((err) => {
-            originalDenoStderrWriteSync(
-              new TextEncoder().encode(`[StreamInterceptor] Failed to store log: ${err}\n`)
-            );
-          });
+        this.logService.store({
+          requestId: context.requestId,
+          routeId: context.routeId,
+          level: method as ConsoleLogLevel,
+          message,
+          args: serializedArgs,
+        });
 
         // Don't call original - logs are captured only (not forwarded to console)
       } else {
@@ -217,16 +211,12 @@ export class StreamInterceptor {
 
         // Only store non-empty messages
         if (message.length > 0) {
-          this.logService
-            .store({
-              requestId: context.requestId,
-              routeId: context.routeId,
-              level,
-              message,
-            })
-            .catch((err) => {
-              originalStderrWrite(`[StreamInterceptor] Failed to store log: ${err}\n`);
-            });
+          this.logService.store({
+            requestId: context.requestId,
+            routeId: context.routeId,
+            level,
+            message,
+          });
         }
 
         // Don't write to actual stream - logs are captured only
@@ -269,18 +259,12 @@ export class StreamInterceptor {
 
         // Only store non-empty messages
         if (message.length > 0) {
-          this.logService
-            .store({
-              requestId: context.requestId,
-              routeId: context.routeId,
-              level,
-              message,
-            })
-            .catch((err) => {
-              originalDenoStderrWriteSync(
-                new TextEncoder().encode(`[StreamInterceptor] Failed to store log: ${err}\n`)
-              );
-            });
+          this.logService.store({
+            requestId: context.requestId,
+            routeId: context.routeId,
+            level,
+            message,
+          });
         }
 
         // Don't write to actual stream - return the byte count as if written
@@ -315,18 +299,12 @@ export class StreamInterceptor {
 
         // Only store non-empty messages
         if (message.length > 0) {
-          this.logService
-            .store({
-              requestId: context.requestId,
-              routeId: context.routeId,
-              level,
-              message,
-            })
-            .catch((err) => {
-              originalDenoStderrWriteSync(
-                new TextEncoder().encode(`[StreamInterceptor] Failed to store log: ${err}\n`)
-              );
-            });
+          this.logService.store({
+            requestId: context.requestId,
+            routeId: context.routeId,
+            level,
+            message,
+          });
         }
 
         // Don't write to actual stream - return the byte count as if written
