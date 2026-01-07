@@ -9,10 +9,11 @@ export interface FunctionRoute {
   route: string;
   methods: string[];
   keys?: string[];
+  enabled: boolean;
 }
 
-/** Input type for adding new routes (id is auto-generated) */
-export type NewFunctionRoute = Omit<FunctionRoute, "id">;
+/** Input type for adding new routes (id and enabled are auto-generated/defaulted) */
+export type NewFunctionRoute = Omit<FunctionRoute, "id" | "enabled">;
 
 export interface RoutesServiceOptions {
   db: DatabaseService;
@@ -28,6 +29,7 @@ interface RouteRow {
   route: string;
   methods: string; // JSON string
   keys: string | null; // JSON string or null
+  enabled: number; // SQLite integer: 1 = enabled, 0 = disabled
 }
 
 /**
@@ -98,7 +100,7 @@ export class RoutesService {
    */
   async getAll(): Promise<FunctionRoute[]> {
     const rows = await this.db.queryAll<RouteRow>(
-      "SELECT id, name, description, handler, route, methods, keys FROM routes ORDER BY name"
+      "SELECT id, name, description, handler, route, methods, keys, enabled FROM routes ORDER BY name"
     );
 
     return rows.map((row) => this.rowToFunctionRoute(row));
@@ -109,7 +111,7 @@ export class RoutesService {
    */
   async getByName(name: string): Promise<FunctionRoute | null> {
     const row = await this.db.queryOne<RouteRow>(
-      "SELECT id, name, description, handler, route, methods, keys FROM routes WHERE name = ?",
+      "SELECT id, name, description, handler, route, methods, keys, enabled FROM routes WHERE name = ?",
       [name]
     );
 
@@ -125,7 +127,7 @@ export class RoutesService {
    */
   async getById(id: number): Promise<FunctionRoute | null> {
     const row = await this.db.queryOne<RouteRow>(
-      "SELECT id, name, description, handler, route, methods, keys FROM routes WHERE id = ?",
+      "SELECT id, name, description, handler, route, methods, keys, enabled FROM routes WHERE id = ?",
       [id]
     );
 
@@ -169,6 +171,7 @@ export class RoutesService {
       handler: row.handler,
       route: row.route,
       methods,
+      enabled: row.enabled === 1,
     };
 
     if (row.description) {
@@ -219,7 +222,7 @@ export class RoutesService {
       }
     }
 
-    // Insert the route
+    // Insert the route (enabled defaults to 1 in the schema)
     await this.db.execute(
       "INSERT INTO routes (name, description, handler, route, methods, keys) VALUES (?, ?, ?, ?, ?, ?)",
       [
@@ -332,5 +335,31 @@ export class RoutesService {
     if (result.changes > 0) {
       this.markDirty();
     }
+  }
+
+  /**
+   * Toggle the enabled state of a route by ID.
+   * Waits for any in-progress rebuild to complete before modifying.
+   */
+  async toggleRouteEnabled(id: number): Promise<boolean> {
+    // Wait for any in-progress rebuild to complete
+    using _lock = await this.rebuildMutex.acquire();
+
+    // Get current state
+    const route = await this.getById(id);
+    if (!route) {
+      throw new Error(`Route with id '${id}' not found`);
+    }
+
+    const newEnabledState = !route.enabled;
+
+    // Update the enabled state
+    await this.db.execute(
+      "UPDATE routes SET enabled = ? WHERE id = ?",
+      [newEnabledState ? 1 : 0, id]
+    );
+
+    this.markDirty();
+    return newEnabledState;
   }
 }

@@ -154,5 +154,23 @@ export function createRoutesRoutes(service: RoutesService): Hono {
     return c.json({ success: true });
   });
 
+  // PATCH /api/routes/:id/toggle - Toggle route enabled/disabled state
+  routes.patch("/:id/toggle", async (c) => {
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
+      return c.json({ error: "Invalid route ID" }, 400);
+    }
+
+    try {
+      const newEnabledState = await service.toggleRouteEnabled(id);
+      return c.json({ success: true, enabled: newEnabledState });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("not found")) {
+        return c.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
+  });
+
   return routes;
 }

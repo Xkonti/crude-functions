@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS routes (
   route TEXT NOT NULL,
   methods TEXT NOT NULL,  -- JSON array: ["GET", "POST"]
   keys TEXT,              -- JSON array: ["api"] or NULL
+  enabled INTEGER NOT NULL DEFAULT 1,  -- 1 = enabled, 0 = disabled
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 

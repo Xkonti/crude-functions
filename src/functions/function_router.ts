@@ -79,7 +79,10 @@ export class FunctionRouter {
   private buildRouter(routes: FunctionRoute[]): Hono {
     const router = new Hono();
 
-    for (const route of routes) {
+    // Filter out disabled routes - they should behave as if they don't exist
+    const enabledRoutes = routes.filter((route) => route.enabled);
+
+    for (const route of enabledRoutes) {
       // Create actual handler for each route
       const handler = this.createHandler(route);
 

@@ -1437,6 +1437,32 @@ export function createFunctionsPages(
     const allRoutes = await routesService.getAll();
 
     const content = `
+      <style>
+        .toggle-switch {
+          cursor: pointer;
+          user-select: none;
+          font-size: 1.5rem;
+          transition: opacity 0.2s;
+        }
+        .toggle-switch:hover {
+          opacity: 0.7;
+        }
+        .status-badge {
+          display: inline-block;
+          padding: 0.25rem 0.5rem;
+          border-radius: 4px;
+          font-size: 0.85rem;
+          font-weight: bold;
+        }
+        .status-enabled {
+          background-color: #d4edda;
+          color: #155724;
+        }
+        .status-disabled {
+          background-color: #f8d7da;
+          color: #721c24;
+        }
+      </style>
       <h1>Functions</h1>
       ${flashMessages(success, error)}
       <p>
@@ -1449,6 +1475,7 @@ export function createFunctionsPages(
         <table>
           <thead>
             <tr>
+              <th>Status</th>
               <th>Name</th>
               <th>Route</th>
               <th>Methods</th>
@@ -1461,7 +1488,15 @@ export function createFunctionsPages(
             ${allRoutes
               .map(
                 (fn) => `
-              <tr>
+              <tr id="route-row-${fn.id}">
+                <td style="text-align: center;">
+                  <span
+                    class="toggle-switch"
+                    id="toggle-${fn.id}"
+                    onclick="toggleRoute(${fn.id})"
+                    title="Click to ${fn.enabled ? 'disable' : 'enable'}"
+                  >${fn.enabled ? '✅' : '❌'}</span>
+                </td>
                 <td><strong>${escapeHtml(fn.name)}</strong></td>
                 <td><code>${escapeHtml(fn.route)}</code></td>
                 <td><div class="methods">${renderMethodBadges(fn.methods)}</div></td>
@@ -1480,6 +1515,41 @@ export function createFunctionsPages(
               .join("")}
           </tbody>
         </table>
+        <script>
+          async function toggleRoute(id) {
+            const toggleEl = document.getElementById('toggle-' + id);
+            const originalContent = toggleEl.textContent;
+
+            // Show loading state
+            toggleEl.textContent = '⏳';
+            toggleEl.style.cursor = 'wait';
+
+            try {
+              const response = await fetch('/api/routes/' + id + '/toggle', {
+                method: 'PATCH',
+                headers: {
+                  'Content-Type': 'application/json'
+                }
+              });
+
+              if (!response.ok) {
+                throw new Error('Failed to toggle route');
+              }
+
+              const data = await response.json();
+
+              // Update UI
+              toggleEl.textContent = data.enabled ? '✅' : '❌';
+              toggleEl.title = 'Click to ' + (data.enabled ? 'disable' : 'enable');
+              toggleEl.style.cursor = 'pointer';
+            } catch (error) {
+              console.error('Error toggling route:', error);
+              alert('Failed to toggle route. Please try again.');
+              toggleEl.textContent = originalContent;
+              toggleEl.style.cursor = 'pointer';
+            }
+          }
+        </script>
       `
       }
     `;
