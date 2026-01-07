@@ -1,10 +1,11 @@
 import { expect } from "@std/expect";
-import { DatabaseService } from "../database/database_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { KeyRotationService } from "./key_rotation_service.ts";
 import { KeyStorageService } from "./key_storage_service.ts";
 import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
 import type { KeyRotationConfig } from "./key_rotation_types.ts";
+import type { TestContext as BaseTestContext } from "../test/types.ts";
 
 // Test keys (32 bytes base64-encoded)
 const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
@@ -23,88 +24,47 @@ function createMockKeyGenerator() {
   };
 }
 
-const SECRETS_SCHEMA = `
-  CREATE TABLE secrets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    comment TEXT,
-    scope INTEGER NOT NULL DEFAULT 0,
-    functionId INTEGER,
-    apiGroupId INTEGER,
-    apiKeyId INTEGER,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-const API_KEYS_SCHEMA = `
-  CREATE TABLE apiKeyGroups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE apiKeys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
-    value TEXT NOT NULL,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-const SETTINGS_SCHEMA = `
-  CREATE TABLE settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT NOT NULL UNIQUE,
-    value TEXT NOT NULL,
-    isEncrypted INTEGER NOT NULL DEFAULT 0,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-interface TestContext {
-  tempDir: string;
-  db: DatabaseService;
+/**
+ * Extended test context for key rotation tests.
+ * Includes custom key storage and encryption services for rotation testing.
+ */
+interface TestContext extends BaseTestContext {
   keyStorage: KeyStorageService;
-  encryptionService: VersionedEncryptionService;
   config: KeyRotationConfig;
 }
 
+/**
+ * Creates a test context for key rotation tests.
+ * Uses TestSetupBuilder for database/migrations, but creates custom encryption
+ * services with mock key generator to avoid spawning openssl processes.
+ */
 async function createTestContext(
   keysOverride?: Partial<EncryptionKeyFile>
 ): Promise<TestContext> {
-  const tempDir = await Deno.makeTempDir();
-  const keyFilePath = `${tempDir}/encryption-keys.json`;
+  // Build base context with real migrations
+  const baseCtx = await TestSetupBuilder.create().build();
 
-  // Create key storage with mock key generator (avoids spawning openssl)
+  // Create custom key storage with mock key generator (avoids spawning openssl)
+  const keyFilePath = `${baseCtx.tempDir}/custom-encryption-keys.json`;
   const keyStorage = new KeyStorageService({
     keyFilePath,
     keyGenerator: createMockKeyGenerator(),
   });
+
+  // Create custom encryption keys with overrides
   const keys: EncryptionKeyFile = {
     current_key: TEST_KEY_A,
     current_version: "A",
     phased_out_key: null,
     phased_out_version: null,
     last_rotation_finished_at: new Date().toISOString(),
-    better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
-    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
+    better_auth_secret: baseCtx.encryptionKeys.better_auth_secret,
+    hash_key: baseCtx.encryptionKeys.hash_key,
     ...keysOverride,
   };
   await keyStorage.saveKeys(keys);
 
-  // Create database
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(SECRETS_SCHEMA);
-  await db.exec(API_KEYS_SCHEMA);
-  await db.exec(SETTINGS_SCHEMA);
-
-  // Create encryption service
+  // Create custom encryption service with our test keys
   const encryptionService = new VersionedEncryptionService({
     currentKey: keys.current_key,
     currentVersion: keys.current_version,
@@ -120,12 +80,20 @@ async function createTestContext(
     batchSleepMs: 1,
   };
 
-  return { tempDir, db, keyStorage, encryptionService, config };
+  return {
+    ...baseCtx,
+    keyStorage,
+    encryptionService, // Override with custom encryption service
+    config,
+  };
 }
 
+/**
+ * Cleanup test context.
+ * Delegates to the base context cleanup which handles db close and temp dir removal.
+ */
 async function cleanup(ctx: TestContext): Promise<void> {
-  await ctx.db.close();
-  await Deno.remove(ctx.tempDir, { recursive: true });
+  await ctx.cleanup();
 }
 
 // Helper to insert encrypted secrets
