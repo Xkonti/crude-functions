@@ -62,6 +62,7 @@ class TestHelpers {
   static async expectEncryptionFails(
     service: VersionedEncryptionService,
     plaintext: string,
+    // deno-lint-ignore no-explicit-any
     errorType: new (...args: any[]) => Error
   ): Promise<void> {
     await expect(service.encrypt(plaintext)).rejects.toThrow(errorType);
@@ -70,6 +71,7 @@ class TestHelpers {
   static async expectDecryptionFails(
     service: VersionedEncryptionService,
     encrypted: string,
+    // deno-lint-ignore no-explicit-any
     errorType: new (...args: any[]) => Error
   ): Promise<void> {
     await expect(service.decrypt(encrypted)).rejects.toThrow(errorType);
