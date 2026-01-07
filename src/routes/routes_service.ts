@@ -338,28 +338,25 @@ export class RoutesService {
   }
 
   /**
-   * Toggle the enabled state of a route by ID.
+   * Set the enabled state of a route by ID.
    * Waits for any in-progress rebuild to complete before modifying.
    */
-  async toggleRouteEnabled(id: number): Promise<boolean> {
+  async setRouteEnabled(id: number, enabled: boolean): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    // Get current state
+    // Verify route exists
     const route = await this.getById(id);
     if (!route) {
       throw new Error(`Route with id '${id}' not found`);
     }
 
-    const newEnabledState = !route.enabled;
-
     // Update the enabled state
     await this.db.execute(
       "UPDATE routes SET enabled = ? WHERE id = ?",
-      [newEnabledState ? 1 : 0, id]
+      [enabled ? 1 : 0, id]
     );
 
     this.markDirty();
-    return newEnabledState;
   }
 }

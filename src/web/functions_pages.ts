@@ -1520,20 +1520,25 @@ export function createFunctionsPages(
             const toggleEl = document.getElementById('toggle-' + id);
             const originalContent = toggleEl.textContent;
 
+            // Determine current state and calculate new state
+            const currentEnabled = originalContent === '✅';
+            const newEnabled = !currentEnabled;
+
             // Show loading state
             toggleEl.textContent = '⏳';
             toggleEl.style.cursor = 'wait';
 
             try {
-              const response = await fetch('/api/routes/' + id + '/toggle', {
-                method: 'PATCH',
+              const response = await fetch('/api/routes/' + id + '/enabled', {
+                method: 'PUT',
                 headers: {
                   'Content-Type': 'application/json'
-                }
+                },
+                body: JSON.stringify({ enabled: newEnabled })
               });
 
               if (!response.ok) {
-                throw new Error('Failed to toggle route');
+                throw new Error('Failed to update route');
               }
 
               const data = await response.json();
