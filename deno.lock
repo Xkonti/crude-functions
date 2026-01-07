@@ -170,6 +170,7 @@
   "workspace": {
     "dependencies": [
       "jsr:@core/asyncutil@*",
+      "jsr:@da/bcrypt@1.0.1",
       "jsr:@db/sqlite@*",
       "jsr:@hono/hono@*",
       "jsr:@soapbox/kysely-deno-sqlite@*",
