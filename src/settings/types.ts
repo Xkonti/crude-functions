@@ -77,7 +77,7 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     label: "Log Trimming Interval",
     description: "How often to trim old logs (seconds)",
     inputType: "number",
-    min: 60,
+    min: 1,
     max: 86400,
     category: "Logging",
   },
