@@ -7,15 +7,91 @@ const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 const TEST_KEY_B = "YjJiNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZTA=";
 
 // =====================
+// Test Helper Builder
+// =====================
+
+/**
+ * Builder for creating VersionedEncryptionService instances in tests.
+ * Inspired by TestSetupBuilder pattern, focused on encryption service needs.
+ */
+class EncryptionServiceBuilder {
+  private currentKey = TEST_KEY_A;
+  private currentVersion = "A";
+  private phasedOutKey?: string;
+  private phasedOutVersion?: string;
+
+  static create(): EncryptionServiceBuilder {
+    return new EncryptionServiceBuilder();
+  }
+
+  withCurrentKey(key: string, version: string): this {
+    this.currentKey = key;
+    this.currentVersion = version;
+    return this;
+  }
+
+  withPhasedOutKey(key: string, version: string): this {
+    this.phasedOutKey = key;
+    this.phasedOutVersion = version;
+    return this;
+  }
+
+  build(): VersionedEncryptionService {
+    return new VersionedEncryptionService({
+      currentKey: this.currentKey,
+      currentVersion: this.currentVersion,
+      phasedOutKey: this.phasedOutKey,
+      phasedOutVersion: this.phasedOutVersion,
+    });
+  }
+}
+
+/**
+ * Helper methods for common test patterns
+ */
+class TestHelpers {
+  static async expectRoundTrip(
+    service: VersionedEncryptionService,
+    plaintext: string
+  ): Promise<void> {
+    const encrypted = await service.encrypt(plaintext);
+    const decrypted = await service.decrypt(encrypted);
+    expect(decrypted).toBe(plaintext);
+  }
+
+  static async expectEncryptionFails(
+    service: VersionedEncryptionService,
+    plaintext: string,
+    errorType: typeof Error
+  ): Promise<void> {
+    await expect(service.encrypt(plaintext)).rejects.toThrow(errorType);
+  }
+
+  static async expectDecryptionFails(
+    service: VersionedEncryptionService,
+    encrypted: string,
+    errorType: typeof Error
+  ): Promise<void> {
+    await expect(service.decrypt(encrypted)).rejects.toThrow(errorType);
+  }
+
+  static expectVersionPrefix(encrypted: string, expectedVersion: string): void {
+    expect(encrypted.charAt(0)).toBe(expectedVersion);
+  }
+
+  static expectValidBase64(encrypted: string): void {
+    const base64Part = encrypted.slice(1);
+    expect(() => atob(base64Part)).not.toThrow();
+  }
+}
+
+// =====================
 // Constructor validation tests
 // =====================
 
 Deno.test("VersionedEncryptionService - Constructor validation", async (t) => {
   await t.step("accepts valid 256-bit base64 key", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create().build();
     expect(service.version).toBe("A");
   });
 
@@ -76,12 +152,10 @@ Deno.test("VersionedEncryptionService - Constructor validation", async (t) => {
   });
 
   await t.step("accepts valid phased out key and version", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
     expect(service.version).toBe("B");
     expect(service.phasedOutVersionChar).toBe("A");
   });
@@ -126,25 +200,15 @@ Deno.test("VersionedEncryptionService - Constructor validation", async (t) => {
 
 Deno.test("VersionedEncryptionService - Encryption", async (t) => {
   await t.step("encrypts plaintext with version prefix", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     const encrypted = await service.encrypt("hello world");
 
-    // First character should be the version
-    expect(encrypted.charAt(0)).toBe("A");
-    // Rest should be valid base64
-    const base64Part = encrypted.slice(1);
-    expect(() => atob(base64Part)).not.toThrow();
+    TestHelpers.expectVersionPrefix(encrypted, "A");
+    TestHelpers.expectValidBase64(encrypted);
   });
 
   await t.step("produces different output for same input (random IV)", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create().build();
 
     const encrypted1 = await service.encrypt("test");
     const encrypted2 = await service.encrypt("test");
@@ -153,13 +217,12 @@ Deno.test("VersionedEncryptionService - Encryption", async (t) => {
   });
 
   await t.step("uses current version in output", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "M",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_A, "M")
+      .build();
 
     const encrypted = await service.encrypt("test");
-    expect(encrypted.charAt(0)).toBe("M");
+    TestHelpers.expectVersionPrefix(encrypted, "M");
   });
 });
 
@@ -168,27 +231,20 @@ Deno.test("VersionedEncryptionService - Encryption", async (t) => {
 // =====================
 
 Deno.test("VersionedEncryptionService - Size validation", async (t) => {
-  const service = new VersionedEncryptionService({
-    currentKey: TEST_KEY_A,
-    currentVersion: "A",
-  });
+  const service = EncryptionServiceBuilder.create().build();
 
   await t.step("accepts plaintext at exactly 16KB", async () => {
-    const plaintext = "x".repeat(16 * 1024); // Exactly 16KB
-    const encrypted = await service.encrypt(plaintext);
-    expect(encrypted.charAt(0)).toBe("A");
-
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe(plaintext);
+    const plaintext = "x".repeat(16 * 1024);
+    await TestHelpers.expectRoundTrip(service, plaintext);
   });
 
   await t.step("rejects plaintext over 16KB", async () => {
-    const plaintext = "x".repeat(16 * 1024 + 1); // 16KB + 1 byte
-    await expect(service.encrypt(plaintext)).rejects.toThrow(OversizedPlaintextError);
+    const plaintext = "x".repeat(16 * 1024 + 1);
+    await TestHelpers.expectEncryptionFails(service, plaintext, OversizedPlaintextError);
   });
 
   await t.step("rejects large plaintext with helpful error message", async () => {
-    const plaintext = "x".repeat(20 * 1024); // 20KB
+    const plaintext = "x".repeat(20 * 1024);
     try {
       await service.encrypt(plaintext);
       throw new Error("Should have thrown OversizedPlaintextError");
@@ -201,24 +257,19 @@ Deno.test("VersionedEncryptionService - Size validation", async (t) => {
   });
 
   await t.step("validates size correctly with multi-byte UTF-8 characters", async () => {
-    // Each emoji is typically 4 bytes in UTF-8
-    // Create a string that's just under 16KB with emojis
     const emoji = "😀"; // 4 bytes
     const count = Math.floor((16 * 1024) / 4);
-    const plaintext = emoji.repeat(count); // Should be under 16KB
+    const plaintext = emoji.repeat(count);
 
-    const encrypted = await service.encrypt(plaintext);
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe(plaintext);
+    await TestHelpers.expectRoundTrip(service, plaintext);
   });
 
   await t.step("rejects oversized UTF-8 plaintext", async () => {
-    // Create a string that exceeds 16KB when encoded as UTF-8
     const emoji = "😀"; // 4 bytes
-    const count = Math.floor((16 * 1024) / 4) + 1; // Just over 16KB
+    const count = Math.floor((16 * 1024) / 4) + 1;
     const plaintext = emoji.repeat(count);
 
-    await expect(service.encrypt(plaintext)).rejects.toThrow(OversizedPlaintextError);
+    await TestHelpers.expectEncryptionFails(service, plaintext, OversizedPlaintextError);
   });
 });
 
@@ -228,94 +279,53 @@ Deno.test("VersionedEncryptionService - Size validation", async (t) => {
 
 Deno.test("VersionedEncryptionService - Decryption", async (t) => {
   await t.step("decrypts encrypted data back to original", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
-    const original = "hello world";
-    const encrypted = await service.encrypt(original);
-    const decrypted = await service.decrypt(encrypted);
-
-    expect(decrypted).toBe(original);
+    const service = EncryptionServiceBuilder.create().build();
+    await TestHelpers.expectRoundTrip(service, "hello world");
   });
 
   await t.step("handles multi-byte UTF-8 strings (emoji, unicode)", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
-    const original = "Hello! Caf\u00e9 \u2615";
-    const encrypted = await service.encrypt(original);
-    const decrypted = await service.decrypt(encrypted);
-
-    expect(decrypted).toBe(original);
+    const service = EncryptionServiceBuilder.create().build();
+    await TestHelpers.expectRoundTrip(service, "Hello! Caf\u00e9 \u2615");
   });
 
   await t.step("decrypts with phased out key when version matches", async () => {
-    // First encrypt with key A (version A)
-    const serviceA = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
+    // Encrypt with key A
+    const serviceA = EncryptionServiceBuilder.create().build();
     const encrypted = await serviceA.encrypt("secret data");
 
-    // Now create service with B as current and A as phased out
-    const serviceB = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    // Create service with B as current and A as phased out
+    const serviceB = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
-    // Should decrypt with phased out key
     const decrypted = await serviceB.decrypt(encrypted);
     expect(decrypted).toBe("secret data");
   });
 
   await t.step("throws DecryptionError for unknown version", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
-    // Manually create encrypted data with version X
+    const service = EncryptionServiceBuilder.create().build();
     const fakeEncrypted = "X" + btoa("fake-encrypted-data");
 
-    await expect(service.decrypt(fakeEncrypted)).rejects.toThrow(DecryptionError);
+    await TestHelpers.expectDecryptionFails(service, fakeEncrypted, DecryptionError);
   });
 
   await t.step("throws DecryptionError for tampered data", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     const encrypted = await service.encrypt("test");
-    // Tamper with the encrypted data (change a character in the middle)
     const tampered = encrypted.slice(0, 10) + "X" + encrypted.slice(11);
 
-    await expect(service.decrypt(tampered)).rejects.toThrow(DecryptionError);
+    await TestHelpers.expectDecryptionFails(service, tampered, DecryptionError);
   });
 
   await t.step("throws DecryptionError for too short data", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
-    await expect(service.decrypt("A")).rejects.toThrow(DecryptionError);
+    const service = EncryptionServiceBuilder.create().build();
+    await TestHelpers.expectDecryptionFails(service, "A", DecryptionError);
   });
 
   await t.step("throws DecryptionError with clear message for truncated base64 data", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
-    // Valid version + base64 that decodes to only 10 bytes (< 28 minimum)
-    const truncatedData = "A" + btoa("0123456789"); // 10 bytes
+    const service = EncryptionServiceBuilder.create().build();
+    const truncatedData = "A" + btoa("0123456789");
 
     try {
       await service.decrypt(truncatedData);
@@ -329,19 +339,15 @@ Deno.test("VersionedEncryptionService - Decryption", async (t) => {
   });
 
   await t.step("throws DecryptionError for wrong key", async () => {
-    const serviceA = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
+    const serviceA = EncryptionServiceBuilder.create().build();
     const encrypted = await serviceA.encrypt("test");
 
-    // Create new service with different key but same version
-    const serviceB = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "A",
-    });
+    // Create service with different key but same version
+    const serviceB = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "A")
+      .build();
 
-    await expect(serviceB.decrypt(encrypted)).rejects.toThrow(DecryptionError);
+    await TestHelpers.expectDecryptionFails(serviceB, encrypted, DecryptionError);
   });
 });
 
@@ -351,11 +357,7 @@ Deno.test("VersionedEncryptionService - Decryption", async (t) => {
 
 Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
   await t.step("updates to new key and version", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     expect(service.version).toBe("A");
 
     await service.updateKeys({
@@ -365,17 +367,12 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
 
     expect(service.version).toBe("B");
 
-    // New encryptions should use version B
     const encrypted = await service.encrypt("test");
-    expect(encrypted.charAt(0)).toBe("B");
+    TestHelpers.expectVersionPrefix(encrypted, "B");
   });
 
   await t.step("can add phased out key", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     expect(service.isRotating).toBe(false);
 
     await service.updateKeys({
@@ -390,12 +387,10 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
   });
 
   await t.step("can remove phased out key", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
     expect(service.isRotating).toBe(true);
 
@@ -409,23 +404,16 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
   });
 
   await t.step("blocks during encrypt operations (prevents race condition)", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     const results: string[] = [];
 
-    // Start encryption (will acquire rotationLock)
     const encryptPromise = service.encrypt("test data").then((encrypted) => {
       results.push("encrypt completed");
       return encrypted;
     });
 
-    // Give encrypt a chance to acquire the lock
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    // Try to update keys (should block until encrypt completes)
     const updatePromise = service.updateKeys({
       currentKey: TEST_KEY_B,
       currentVersion: "B",
@@ -433,21 +421,14 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
       results.push("updateKeys completed");
     });
 
-    // Wait for both to complete
     const encrypted = await encryptPromise;
     await updatePromise;
 
-    // Encrypt should complete before updateKeys
     expect(results).toEqual(["encrypt completed", "updateKeys completed"]);
-
-    // The encrypted data should have version A (the version when encrypt started)
-    expect(encrypted.charAt(0)).toBe("A");
-
-    // Now the service should be on version B
+    TestHelpers.expectVersionPrefix(encrypted, "A");
     expect(service.version).toBe("B");
 
-    // Verify data is decryptable (key and version are consistent)
-    // Need to add phased out key to decrypt old data
+    // Add phased out key to decrypt old data
     await service.updateKeys({
       currentKey: TEST_KEY_B,
       currentVersion: "B",
@@ -465,53 +446,38 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
 
 Deno.test("VersionedEncryptionService - isEncryptedWithPhasedOutKey", async (t) => {
   await t.step("returns false when no phased out key", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     const encrypted = await service.encrypt("test");
     expect(service.isEncryptedWithPhasedOutKey(encrypted)).toBe(false);
   });
 
   await t.step("returns false for current version", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
     const encrypted = await service.encrypt("test");
     expect(service.isEncryptedWithPhasedOutKey(encrypted)).toBe(false);
   });
 
   await t.step("returns true for phased out version", async () => {
-    // First encrypt with A
-    const serviceA = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
+    const serviceA = EncryptionServiceBuilder.create().build();
     const encrypted = await serviceA.encrypt("test");
 
-    // Create service with B current and A phased out
-    const serviceB = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const serviceB = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
     expect(serviceB.isEncryptedWithPhasedOutKey(encrypted)).toBe(true);
   });
 
   await t.step("returns false for empty string", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
     expect(service.isEncryptedWithPhasedOutKey("")).toBe(false);
   });
@@ -523,48 +489,33 @@ Deno.test("VersionedEncryptionService - isEncryptedWithPhasedOutKey", async (t) 
 
 Deno.test("VersionedEncryptionService - acquireRotationLock", async (t) => {
   await t.step("returns a disposable lock", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     const lock = await service.acquireRotationLock();
     expect(lock).toBeDefined();
     expect(typeof lock[Symbol.dispose]).toBe("function");
 
-    // Release the lock
     lock[Symbol.dispose]();
   });
 
   await t.step("blocks concurrent operations while held", async () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     const results: string[] = [];
 
-    // Acquire lock
     const lock = await service.acquireRotationLock();
     results.push("lock acquired");
 
-    // Start an encryption that will be blocked
     const encryptPromise = service.encrypt("test").then(() => {
       results.push("encrypt completed");
     });
 
-    // Give the encrypt a chance to start (it should be blocked)
     await new Promise((resolve) => setTimeout(resolve, 10));
     results.push("after delay");
 
-    // Release lock
     lock[Symbol.dispose]();
     results.push("lock released");
 
-    // Wait for encrypt to complete
     await encryptPromise;
 
-    // Encrypt should complete after lock release
     expect(results).toEqual([
       "lock acquired",
       "after delay",
@@ -579,31 +530,24 @@ Deno.test("VersionedEncryptionService - acquireRotationLock", async (t) => {
 // =====================
 
 Deno.test("VersionedEncryptionService - version getter", () => {
-  const service = new VersionedEncryptionService({
-    currentKey: TEST_KEY_A,
-    currentVersion: "Z",
-  });
+  const service = EncryptionServiceBuilder.create()
+    .withCurrentKey(TEST_KEY_A, "Z")
+    .build();
 
   expect(service.version).toBe("Z");
 });
 
 Deno.test("VersionedEncryptionService - isRotating getter", async (t) => {
   await t.step("returns false when no phased out key", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     expect(service.isRotating).toBe(false);
   });
 
   await t.step("returns true when phased out key exists", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
     expect(service.isRotating).toBe(true);
   });
@@ -611,21 +555,15 @@ Deno.test("VersionedEncryptionService - isRotating getter", async (t) => {
 
 Deno.test("VersionedEncryptionService - phasedOutVersionChar getter", async (t) => {
   await t.step("returns null when no phased out key", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_A,
-      currentVersion: "A",
-    });
-
+    const service = EncryptionServiceBuilder.create().build();
     expect(service.phasedOutVersionChar).toBe(null);
   });
 
   await t.step("returns version char when phased out key exists", () => {
-    const service = new VersionedEncryptionService({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
+    const service = EncryptionServiceBuilder.create()
+      .withCurrentKey(TEST_KEY_B, "B")
+      .withPhasedOutKey(TEST_KEY_A, "A")
+      .build();
 
     expect(service.phasedOutVersionChar).toBe("A");
   });
@@ -636,36 +574,22 @@ Deno.test("VersionedEncryptionService - phasedOutVersionChar getter", async (t) 
 // =====================
 
 Deno.test("VersionedEncryptionService - Round-trip tests", async (t) => {
-  const service = new VersionedEncryptionService({
-    currentKey: TEST_KEY_A,
-    currentVersion: "A",
-  });
+  const service = EncryptionServiceBuilder.create().build();
 
   await t.step("empty string", async () => {
-    const original = "";
-    const encrypted = await service.encrypt(original);
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    await TestHelpers.expectRoundTrip(service, "");
   });
 
   await t.step("long string (1KB+)", async () => {
-    const original = "x".repeat(2000);
-    const encrypted = await service.encrypt(original);
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    await TestHelpers.expectRoundTrip(service, "x".repeat(2000));
   });
 
   await t.step("JSON data", async () => {
     const original = JSON.stringify({ key: "value", nested: { arr: [1, 2, 3] } });
-    const encrypted = await service.encrypt(original);
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    await TestHelpers.expectRoundTrip(service, original);
   });
 
   await t.step("special characters", async () => {
-    const original = "!@#$%^&*()_+-=[]{}|;':\",./<>?`~\n\t\r";
-    const encrypted = await service.encrypt(original);
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe(original);
+    await TestHelpers.expectRoundTrip(service, "!@#$%^&*()_+-=[]{}|;':\",./<>?`~\n\t\r");
   });
 });
