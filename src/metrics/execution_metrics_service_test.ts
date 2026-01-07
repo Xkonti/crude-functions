@@ -3,18 +3,18 @@ import { DatabaseService } from "../database/database_service.ts";
 import { ExecutionMetricsService } from "./execution_metrics_service.ts";
 
 const EXECUTION_METRICS_SCHEMA = `
-  CREATE TABLE execution_metrics (
+  CREATE TABLE executionMetrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    route_id INTEGER NOT NULL,
+    routeId INTEGER NOT NULL,
     type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
-    avg_time_ms REAL NOT NULL,
-    max_time_ms INTEGER NOT NULL,
-    execution_count INTEGER NOT NULL DEFAULT 1,
+    avgTimeMs REAL NOT NULL,
+    maxTimeMs INTEGER NOT NULL,
+    executionCount INTEGER NOT NULL DEFAULT 1,
     timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_execution_metrics_route_id ON execution_metrics(route_id);
-  CREATE INDEX idx_execution_metrics_type_route_timestamp ON execution_metrics(type, route_id, timestamp);
-  CREATE INDEX idx_execution_metrics_timestamp ON execution_metrics(timestamp);
+  CREATE INDEX idx_executionMetrics_routeId ON executionMetrics(routeId);
+  CREATE INDEX idx_executionMetrics_type_route_timestamp ON executionMetrics(type, routeId, timestamp);
+  CREATE INDEX idx_executionMetrics_timestamp ON executionMetrics(timestamp);
 `;
 
 async function createTestSetup(): Promise<{

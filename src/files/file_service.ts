@@ -1,32 +1,6 @@
-/**
- * Validates that a file path is in a valid format.
- * Rejects empty paths, paths with null bytes, and absolute paths.
- */
-export function validateFilePath(path: string): boolean {
-  if (!path || path.length === 0) return false;
-  if (path.includes("\0")) return false;
-  if (path.startsWith("/")) return false;
-  return true;
-}
-
-/**
- * Normalizes a file path by trimming whitespace,
- * removing redundant slashes, and removing trailing slashes.
- */
-export function normalizePath(path: string): string {
-  return path.trim().replace(/\/+/g, "/").replace(/\/$/, "");
-}
-
-/**
- * Checks if a path is safe (no directory traversal).
- * Rejects paths containing ".." or starting with "./".
- */
-export function isPathSafe(path: string): boolean {
-  const normalized = normalizePath(path);
-  if (normalized.includes("..")) return false;
-  if (normalized.startsWith("./")) return false;
-  return true;
-}
+import {
+  resolveAndValidatePath,
+} from "../validation/files.ts";
 
 export interface FileMetadata {
   path: string;
@@ -47,9 +21,10 @@ export class FileService {
 
   /**
    * Resolves a relative path to an absolute path within the base directory.
+   * Uses secure path validation to prevent traversal attacks.
    */
-  private resolvePath(relativePath: string): string {
-    return `${this.basePath}/${normalizePath(relativePath)}`;
+  private async resolvePath(relativePath: string): Promise<string> {
+    return await resolveAndValidatePath(this.basePath, relativePath);
   }
 
   /**
@@ -134,7 +109,7 @@ export class FileService {
    * Returns null if the file doesn't exist.
    */
   async getFile(path: string): Promise<string | null> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     try {
       return await Deno.readTextFile(absPath);
     } catch (error) {
@@ -149,7 +124,7 @@ export class FileService {
    * Checks if a file exists at the given relative path.
    */
   async fileExists(path: string): Promise<boolean> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     try {
       const stat = await Deno.stat(absPath);
       return stat.isFile;
@@ -167,7 +142,7 @@ export class FileService {
    * Returns true if the file was created, false if it was updated.
    */
   async writeFile(path: string, content: string): Promise<boolean> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     const exists = await this.fileExists(path);
 
     // Ensure parent directories exist
@@ -185,7 +160,7 @@ export class FileService {
    * Deletes a file at the given relative path.
    */
   async deleteFile(path: string): Promise<void> {
-    const absPath = this.resolvePath(path);
+    const absPath = await this.resolvePath(path);
     await Deno.remove(absPath);
   }
 }

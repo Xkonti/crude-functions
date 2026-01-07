@@ -1,10 +1,9 @@
 import { expect } from "@std/expect";
+import { FileService } from "./file_service.ts";
 import {
-  FileService,
-  isPathSafe,
   normalizePath,
   validateFilePath,
-} from "./file_service.ts";
+} from "../validation/files.ts";
 
 // ============================================================================
 // Validation Function Tests
@@ -28,23 +27,6 @@ Deno.test("validateFilePath rejects paths with null bytes", () => {
 
 Deno.test("validateFilePath rejects absolute paths", () => {
   expect(validateFilePath("/absolute/path.ts")).toBe(false);
-});
-
-Deno.test("isPathSafe accepts safe paths", () => {
-  expect(isPathSafe("hello.ts")).toBe(true);
-  expect(isPathSafe("utils/helpers.ts")).toBe(true);
-  expect(isPathSafe("a/b/c/d.ts")).toBe(true);
-});
-
-Deno.test("isPathSafe rejects directory traversal with ..", () => {
-  expect(isPathSafe("../etc/passwd")).toBe(false);
-  expect(isPathSafe("utils/../../../etc/passwd")).toBe(false);
-  expect(isPathSafe("..")).toBe(false);
-  expect(isPathSafe("utils/..")).toBe(false);
-});
-
-Deno.test("isPathSafe rejects paths starting with ./", () => {
-  expect(isPathSafe("./hello.ts")).toBe(false);
 });
 
 Deno.test("normalizePath removes redundant slashes", () => {
@@ -303,6 +285,74 @@ Deno.test("FileService handles special characters in content", async () => {
 
     const content = await service.getFile("special.ts");
     expect(content).toBe(special);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+// ============================================================================
+// Path Traversal Security Tests
+// ============================================================================
+
+Deno.test("FileService rejects simple .. traversal", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    let errorThrown = false;
+    try {
+      await service.getFile("../etc/passwd");
+    } catch (error) {
+      errorThrown = true;
+      expect((error as Error).message).toContain("escapes base directory");
+    }
+    expect(errorThrown).toBe(true);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService rejects nested .. traversal", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    let errorThrown = false;
+    try {
+      await service.getFile("code/../../../etc/passwd");
+    } catch (error) {
+      errorThrown = true;
+      expect((error as Error).message).toContain("escapes base directory");
+    }
+    expect(errorThrown).toBe(true);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService rejects symlink escape attempts", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    // Create a symlink pointing outside base directory
+    const symlinkPath = `${basePath}/evil`;
+    await Deno.symlink("/etc", symlinkPath);
+
+    // Try to access through symlink - should be rejected
+    let errorThrown = false;
+    try {
+      await service.getFile("evil/passwd");
+    } catch (error) {
+      errorThrown = true;
+      expect((error as Error).message).toContain("escapes base directory");
+    }
+    expect(errorThrown).toBe(true);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService allows valid relative paths", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    await service.writeFile("valid/path.ts", "content");
+    const content = await service.getFile("valid/path.ts");
+    expect(content).toBe("content");
   } finally {
     await cleanup(tempDir);
   }

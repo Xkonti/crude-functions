@@ -24,3 +24,6 @@ export interface ExecuteResult {
  * A generic row object from a query result
  */
 export type Row = Record<string, unknown>;
+
+// Re-export TransactionContext for convenience
+export { TransactionContext } from "./transaction_context.ts";

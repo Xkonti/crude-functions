@@ -1,5 +1,7 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
+import type { HashService } from "../encryption/hash_service.ts";
+import { validateKeyName } from "../validation/keys.ts";
 
 /**
  * Represents an API key group
@@ -19,30 +21,12 @@ export interface ApiKeyGroup {
 export interface ApiKey {
   /** Unique identifier for the key (used for deletion) */
   id: number;
+  /** User-friendly name for the key (unique within group) */
+  name: string;
   /** The actual key value */
   value: string;
   /** Optional description of the key's purpose */
   description?: string;
-}
-
-// Key groups: lowercase a-z, 0-9, underscore, dash
-const KEY_GROUP_REGEX = /^[a-z0-9_-]+$/;
-
-// Key values: a-z, A-Z, 0-9, underscore, dash
-const KEY_VALUE_REGEX = /^[a-zA-Z0-9_-]+$/;
-
-/**
- * Validates that a key group name contains only allowed characters
- */
-export function validateKeyGroup(group: string): boolean {
-  return KEY_GROUP_REGEX.test(group);
-}
-
-/**
- * Validates that a key value contains only allowed characters
- */
-export function validateKeyValue(value: string): boolean {
-  return KEY_VALUE_REGEX.test(value);
 }
 
 export interface ApiKeyServiceOptions {
@@ -50,6 +34,8 @@ export interface ApiKeyServiceOptions {
   db: DatabaseService;
   /** Encryption service for encrypting API keys at rest */
   encryptionService: IEncryptionService;
+  /** Hash service for O(1) API key lookups */
+  hashService: HashService;
 }
 
 /**
@@ -59,10 +45,12 @@ export interface ApiKeyServiceOptions {
 export class ApiKeyService {
   private readonly db: DatabaseService;
   private readonly encryptionService: IEncryptionService;
+  private readonly hashService: HashService;
 
   constructor(options: ApiKeyServiceOptions) {
     this.db = options.db;
     this.encryptionService = options.encryptionService;
+    this.hashService = options.hashService;
   }
 
   // ============== Group Operations ==============
@@ -75,7 +63,7 @@ export class ApiKeyService {
       id: number;
       name: string;
       description: string | null;
-    }>("SELECT id, name, description FROM api_key_groups ORDER BY name");
+    }>("SELECT id, name, description FROM apiKeyGroups ORDER BY name");
 
     return rows.map((row) => ({
       id: row.id,
@@ -93,7 +81,7 @@ export class ApiKeyService {
       id: number;
       name: string;
       description: string | null;
-    }>("SELECT id, name, description FROM api_key_groups WHERE name = ?", [
+    }>("SELECT id, name, description FROM apiKeyGroups WHERE name = ?", [
       normalizedName,
     ]);
 
@@ -114,7 +102,7 @@ export class ApiKeyService {
       id: number;
       name: string;
       description: string | null;
-    }>("SELECT id, name, description FROM api_key_groups WHERE id = ?", [id]);
+    }>("SELECT id, name, description FROM apiKeyGroups WHERE id = ?", [id]);
 
     if (!row) return null;
 
@@ -132,7 +120,7 @@ export class ApiKeyService {
   async createGroup(name: string, description?: string): Promise<number> {
     const normalizedName = name.toLowerCase();
     const result = await this.db.execute(
-      "INSERT INTO api_key_groups (name, description) VALUES (?, ?)",
+      "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
       [normalizedName, description ?? null]
     );
     return Number(result.lastInsertRowId);
@@ -143,7 +131,7 @@ export class ApiKeyService {
    */
   async updateGroup(id: number, description: string): Promise<void> {
     await this.db.execute(
-      "UPDATE api_key_groups SET description = ? WHERE id = ?",
+      "UPDATE apiKeyGroups SET description = ? WHERE id = ?",
       [description, id]
     );
   }
@@ -152,7 +140,7 @@ export class ApiKeyService {
    * Delete a group by ID. Cascades to all keys in the group.
    */
   async deleteGroup(id: number): Promise<void> {
-    await this.db.execute("DELETE FROM api_key_groups WHERE id = ?", [id]);
+    await this.db.execute("DELETE FROM apiKeyGroups WHERE id = ?", [id]);
   }
 
   /**
@@ -177,13 +165,14 @@ export class ApiKeyService {
     const rows = await this.db.queryAll<{
       id: number;
       group_name: string;
+      name: string;
       value: string;
       description: string | null;
     }>(`
-      SELECT ak.id, g.name as group_name, ak.value, ak.description
-      FROM api_keys ak
-      JOIN api_key_groups g ON g.id = ak.group_id
-      ORDER BY g.name, ak.value
+      SELECT ak.id, g.name as group_name, ak.name, ak.value, ak.description
+      FROM apiKeys ak
+      JOIN apiKeyGroups g ON g.id = ak.groupId
+      ORDER BY g.name, ak.name
     `);
 
     // Decrypt all keys in parallel
@@ -200,6 +189,7 @@ export class ApiKeyService {
       const existing = result.get(row.group_name) || [];
       existing.push({
         id: row.id,
+        name: row.name,
         value: row.value,
         description: row.description ?? undefined,
       });
@@ -224,9 +214,10 @@ export class ApiKeyService {
 
     const rows = await this.db.queryAll<{
       id: number;
+      name: string;
       value: string;
       description: string | null;
-    }>("SELECT id, value, description FROM api_keys WHERE group_id = ?", [
+    }>("SELECT id, name, value, description FROM apiKeys WHERE groupId = ? ORDER BY name", [
       groupRow.id,
     ]);
 
@@ -234,6 +225,7 @@ export class ApiKeyService {
     const decryptedKeys = await Promise.all(
       rows.map(async (r) => ({
         id: r.id,
+        name: r.name,
         value: await this.decryptKey(r.value),
         description: r.description ?? undefined,
       }))
@@ -251,6 +243,7 @@ export class ApiKeyService {
   ): Promise<{ key: ApiKey; group: ApiKeyGroup } | null> {
     const row = await this.db.queryOne<{
       key_id: number;
+      key_name: string;
       key_value: string;
       key_description: string | null;
       group_id: number;
@@ -259,13 +252,14 @@ export class ApiKeyService {
     }>(
       `SELECT
          k.id as key_id,
+         k.name as key_name,
          k.value as key_value,
          k.description as key_description,
          g.id as group_id,
          g.name as group_name,
          g.description as group_description
-       FROM api_keys k
-       JOIN api_key_groups g ON k.group_id = g.id
+       FROM apiKeys k
+       JOIN apiKeyGroups g ON k.groupId = g.id
        WHERE k.id = ?`,
       [keyId]
     );
@@ -278,6 +272,7 @@ export class ApiKeyService {
     return {
       key: {
         id: row.key_id,
+        name: row.key_name,
         value: decryptedValue,
         description: row.key_description ?? undefined,
       },
@@ -291,6 +286,7 @@ export class ApiKeyService {
 
   /**
    * Check if a specific key value exists in a group.
+   * Uses hash-based O(1) lookup instead of O(n) decryption.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to check
    */
@@ -302,35 +298,28 @@ export class ApiKeyService {
       return false;
     }
 
-    // Fetch all encrypted keys for this group
-    const rows = await this.db.queryAll<{ value: string }>(
-      "SELECT value FROM api_keys WHERE group_id = ?",
-      [groupRow.id]
+    // O(1) hash-based lookup eliminates timing attack
+    const valueHash = await this.hashService.computeHash(keyValue);
+    const row = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM apiKeys WHERE groupId = ? AND valueHash = ?",
+      [groupRow.id, valueHash]
     );
 
-    // Decrypt each key and compare
-    for (const row of rows) {
-      const decryptedValue = await this.decryptKey(row.value);
-      if (decryptedValue === keyValue) {
-        return true;
-      }
-    }
-
-    return false;
+    return row !== null;
   }
 
   /**
    * Get key and group IDs for a specific key value in a group.
-   * Similar to hasKey but returns IDs instead of boolean.
+   * Uses hash-based O(1) lookup instead of O(n) decryption.
    * Used by ApiKeyValidator to obtain IDs for secret resolution.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to look up
-   * @returns Object with keyId and groupId, or null if not found
+   * @returns Object with keyId, groupId, and keyName, or null if not found
    */
   async getKeyByValue(
     group: string,
     keyValue: string
-  ): Promise<{ keyId: number; groupId: number } | null> {
+  ): Promise<{ keyId: number; groupId: number; keyName: string } | null> {
     const normalizedGroup = group.toLowerCase();
 
     const groupRow = await this.getGroupByName(normalizedGroup);
@@ -338,24 +327,22 @@ export class ApiKeyService {
       return null;
     }
 
-    // Fetch all encrypted keys for this group
-    const rows = await this.db.queryAll<{ id: number; value: string }>(
-      "SELECT id, value FROM api_keys WHERE group_id = ?",
-      [groupRow.id]
+    // O(1) hash-based lookup eliminates timing attack
+    const valueHash = await this.hashService.computeHash(keyValue);
+    const row = await this.db.queryOne<{ id: number; name: string }>(
+      "SELECT id, name FROM apiKeys WHERE groupId = ? AND valueHash = ?",
+      [groupRow.id, valueHash]
     );
 
-    // Decrypt each key and compare
-    for (const row of rows) {
-      const decryptedValue = await this.decryptKey(row.value);
-      if (decryptedValue === keyValue) {
-        return {
-          keyId: row.id,
-          groupId: groupRow.id,
-        };
-      }
+    if (!row) {
+      return null;
     }
 
-    return null;
+    return {
+      keyId: row.id,
+      groupId: groupRow.id,
+      keyName: row.name,
+    };
   }
 
   /**
@@ -363,15 +350,25 @@ export class ApiKeyService {
    * Creates the group if it doesn't exist.
    * Silently ignores if the exact (group, value) pair already exists.
    * @param group - The group name (will be normalized to lowercase)
+   * @param name - The key name (will be normalized to lowercase, must be unique within group)
    * @param value - The key value
    * @param description - Optional description
    */
   async addKey(
     group: string,
+    name: string,
     value: string,
     description?: string
   ): Promise<void> {
     const normalizedGroup = group.toLowerCase();
+    const normalizedName = name.toLowerCase();
+
+    // Validate key name format
+    if (!validateKeyName(normalizedName)) {
+      throw new Error(
+        "Invalid key name. Must contain only lowercase letters, numbers, dashes, and underscores."
+      );
+    }
 
     // Check if key already exists (silently ignore duplicates)
     // With encryption, we can't rely on DB unique constraint since each
@@ -383,18 +380,34 @@ export class ApiKeyService {
     // Get or create the group
     const groupId = await this.getOrCreateGroup(normalizedGroup);
 
+    // Check if name already exists in this group
+    const existingKeyWithName = await this.db.queryOne<{ id: number }>(
+      "SELECT id FROM apiKeys WHERE groupId = ? AND name = ?",
+      [groupId, normalizedName]
+    );
+
+    if (existingKeyWithName) {
+      throw new Error(
+        `A key with name '${normalizedName}' already exists in group '${normalizedGroup}'`
+      );
+    }
+
     // Encrypt the key value before storage
     const encryptedValue = await this.encryptKey(value);
 
-    // Insert the encrypted key
+    // Compute hash for O(1) constant-time lookup
+    const valueHash = await this.hashService.computeHash(value);
+
+    // Insert the encrypted key with hash
     await this.db.execute(
-      "INSERT INTO api_keys (group_id, value, description, created_at, modified_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-      [groupId, encryptedValue, description ?? null]
+      "INSERT INTO apiKeys (groupId, name, value, valueHash, description, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+      [groupId, normalizedName, encryptedValue, valueHash, description ?? null]
     );
   }
 
   /**
    * Remove a specific key by group and value.
+   * Uses hash-based O(1) lookup instead of O(n) decryption.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to remove
    */
@@ -406,21 +419,12 @@ export class ApiKeyService {
       return; // Group doesn't exist, nothing to remove
     }
 
-    // Fetch all encrypted keys for this group and find the matching one
-    // (can't use SQL WHERE with encrypted values)
-    const rows = await this.db.queryAll<{ id: number; value: string }>(
-      "SELECT id, value FROM api_keys WHERE group_id = ?",
-      [groupRow.id]
+    // O(1) hash-based lookup and delete
+    const valueHash = await this.hashService.computeHash(keyValue);
+    await this.db.execute(
+      "DELETE FROM apiKeys WHERE groupId = ? AND valueHash = ?",
+      [groupRow.id, valueHash]
     );
-
-    // Find and delete the key that matches when decrypted
-    for (const row of rows) {
-      const decryptedValue = await this.decryptKey(row.value);
-      if (decryptedValue === keyValue) {
-        await this.db.execute("DELETE FROM api_keys WHERE id = ?", [row.id]);
-        return;
-      }
-    }
   }
 
   /**
@@ -429,7 +433,7 @@ export class ApiKeyService {
    * @param id - The unique key ID
    */
   async removeKeyById(id: number): Promise<void> {
-    await this.db.execute("DELETE FROM api_keys WHERE id = ?", [id]);
+    await this.db.execute("DELETE FROM apiKeys WHERE id = ?", [id]);
   }
 
   /**
@@ -444,7 +448,7 @@ export class ApiKeyService {
       return;
     }
 
-    await this.db.execute("DELETE FROM api_keys WHERE group_id = ?", [
+    await this.db.execute("DELETE FROM apiKeys WHERE groupId = ?", [
       groupRow.id,
     ]);
   }
@@ -461,7 +465,7 @@ export class ApiKeyService {
     }
 
     // CASCADE will delete keys automatically
-    await this.db.execute("DELETE FROM api_key_groups WHERE id = ?", [
+    await this.db.execute("DELETE FROM apiKeyGroups WHERE id = ?", [
       groupRow.id,
     ]);
   }

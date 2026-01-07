@@ -1,4 +1,8 @@
 /**
+ * Common validation utilities shared across domains.
+ */
+
+/**
  * Maximum valid SQLite integer ID (32-bit signed integer max)
  */
 export const MAX_SQLITE_ID = 2147483647;

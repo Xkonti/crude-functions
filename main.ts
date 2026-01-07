@@ -36,10 +36,13 @@ import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 import { KeyStorageService } from "./src/encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "./src/encryption/versioned_encryption_service.ts";
 import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
+import { createRotationRoutes } from "./src/encryption/rotation_routes.ts";
+import { HashService } from "./src/encryption/hash_service.ts";
 import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
 import { SettingsService } from "./src/settings/settings_service.ts";
 import { SettingNames } from "./src/settings/types.ts";
+import { UserService } from "./src/users/user_service.ts";
 import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
 
 /**
@@ -96,6 +99,12 @@ const encryptionService = new VersionedEncryptionService({
   phasedOutKey: encryptionKeys.phased_out_key ?? undefined,
   phasedOutVersion: encryptionKeys.phased_out_version ?? undefined,
 });
+
+// Initialize hash service for API key lookups (O(1) constant-time)
+const hashService = new HashService({
+  hashKey: encryptionKeys.hash_key,
+});
+console.log("✓ Hash service initialized");
 
 const app = new Hono();
 
@@ -159,6 +168,12 @@ const auth = createAuth({
   hasUsers,
 });
 
+// Initialize user service
+const userService = new UserService({
+  db,
+  auth,
+});
+
 // Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
 // Captures both console.* methods AND direct process.stdout/stderr writes
@@ -210,6 +225,7 @@ keyRotationService.start();
 const apiKeyService = new ApiKeyService({
   db,
   encryptionService,
+  hashService,
 });
 
 // Ensure management group exists and set default access groups
@@ -269,10 +285,19 @@ app.use("/api/files/*", hybridAuth);
 app.use("/api/files", hybridAuth);
 app.route("/api/files", createFileRoutes(fileService));
 
+// Encryption key rotation API
+app.use("/api/rotation/*", hybridAuth);
+app.use("/api/rotation", hybridAuth);
+app.route("/api/rotation", createRotationRoutes({
+  keyRotationService,
+  keyStorageService,
+}));
+
 // Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({
   auth,
   db,
+  userService,
   fileService,
   routesService,
   apiKeyService,
@@ -287,7 +312,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, processIsolator };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

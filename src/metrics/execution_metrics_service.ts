@@ -1,14 +1,6 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { ExecutionMetric, NewExecutionMetric, MetricType } from "./types.ts";
-
-/**
- * Format a Date for SQLite timestamp comparison.
- * SQLite's CURRENT_TIMESTAMP uses 'YYYY-MM-DD HH:MM:SS' format,
- * so we need to match that for string comparisons to work correctly.
- */
-function formatDateForSqlite(date: Date): string {
-  return date.toISOString().replace("T", " ").replace("Z", "").slice(0, 19);
-}
+import { formatForSqlite, parseSqliteTimestamp } from "../utils/datetime.ts";
 
 export interface ExecutionMetricsServiceOptions {
   db: DatabaseService;
@@ -18,11 +10,11 @@ export interface ExecutionMetricsServiceOptions {
 interface ExecutionMetricRow {
   [key: string]: unknown;
   id: number;
-  route_id: number;
+  routeId: number;
   type: string;
-  avg_time_ms: number;
-  max_time_ms: number;
-  execution_count: number;
+  avgTimeMs: number;
+  maxTimeMs: number;
+  executionCount: number;
   timestamp: string;
 }
 
@@ -47,7 +39,7 @@ export class ExecutionMetricsService {
     try {
       if (metric.timestamp) {
         await this.db.execute(
-          `INSERT INTO execution_metrics (route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp)
+          `INSERT INTO executionMetrics (routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp)
            VALUES (?, ?, ?, ?, ?, ?)`,
           [
             metric.routeId,
@@ -55,12 +47,12 @@ export class ExecutionMetricsService {
             metric.avgTimeMs,
             metric.maxTimeMs,
             metric.executionCount,
-            formatDateForSqlite(metric.timestamp),
+            formatForSqlite(metric.timestamp),
           ]
         );
       } else {
         await this.db.execute(
-          `INSERT INTO execution_metrics (route_id, type, avg_time_ms, max_time_ms, execution_count)
+          `INSERT INTO executionMetrics (routeId, type, avgTimeMs, maxTimeMs, executionCount)
            VALUES (?, ?, ?, ?, ?)`,
           [
             metric.routeId,
@@ -95,35 +87,35 @@ export class ExecutionMetricsService {
 
     if (type && limit) {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-         FROM execution_metrics
-         WHERE route_id = ? AND type = ?
+        `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+         FROM executionMetrics
+         WHERE routeId = ? AND type = ?
          ORDER BY id DESC
          LIMIT ?`,
         [routeId, type, limit]
       );
     } else if (type) {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-         FROM execution_metrics
-         WHERE route_id = ? AND type = ?
+        `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+         FROM executionMetrics
+         WHERE routeId = ? AND type = ?
          ORDER BY id DESC`,
         [routeId, type]
       );
     } else if (limit) {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-         FROM execution_metrics
-         WHERE route_id = ?
+        `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+         FROM executionMetrics
+         WHERE routeId = ?
          ORDER BY id DESC
          LIMIT ?`,
         [routeId, limit]
       );
     } else {
       rows = await this.db.queryAll<ExecutionMetricRow>(
-        `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-         FROM execution_metrics
-         WHERE route_id = ?
+        `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+         FROM executionMetrics
+         WHERE routeId = ?
          ORDER BY id DESC`,
         [routeId]
       );
@@ -141,8 +133,8 @@ export class ExecutionMetricsService {
     }
 
     const rows = await this.db.queryAll<ExecutionMetricRow>(
-      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-       FROM execution_metrics
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
        ORDER BY id DESC
        LIMIT ?`,
       [limit]
@@ -157,8 +149,8 @@ export class ExecutionMetricsService {
    */
   async deleteOlderThan(date: Date): Promise<number> {
     const result = await this.db.execute(
-      `DELETE FROM execution_metrics WHERE timestamp < ?`,
-      [formatDateForSqlite(date)]
+      `DELETE FROM executionMetrics WHERE timestamp < ?`,
+      [formatForSqlite(date)]
     );
 
     return result.changes;
@@ -170,7 +162,7 @@ export class ExecutionMetricsService {
    */
   async deleteByRouteId(routeId: number): Promise<number> {
     const result = await this.db.execute(
-      `DELETE FROM execution_metrics WHERE route_id = ?`,
+      `DELETE FROM executionMetrics WHERE routeId = ?`,
       [routeId]
     );
 
@@ -181,21 +173,21 @@ export class ExecutionMetricsService {
    * Get all distinct route IDs that have metrics of any type.
    */
   async getDistinctRouteIds(): Promise<number[]> {
-    const rows = await this.db.queryAll<{ route_id: number }>(
-      `SELECT DISTINCT route_id FROM execution_metrics`
+    const rows = await this.db.queryAll<{ routeId: number }>(
+      `SELECT DISTINCT routeId FROM executionMetrics`
     );
-    return rows.map((row) => row.route_id);
+    return rows.map((row) => row.routeId);
   }
 
   /**
    * Get all distinct route IDs that have metrics of a specific type.
    */
   async getDistinctRouteIdsByType(type: MetricType): Promise<number[]> {
-    const rows = await this.db.queryAll<{ route_id: number }>(
-      `SELECT DISTINCT route_id FROM execution_metrics WHERE type = ?`,
+    const rows = await this.db.queryAll<{ routeId: number }>(
+      `SELECT DISTINCT routeId FROM executionMetrics WHERE type = ?`,
       [type]
     );
-    return rows.map((row) => row.route_id);
+    return rows.map((row) => row.routeId);
   }
 
   /**
@@ -209,11 +201,11 @@ export class ExecutionMetricsService {
     end: Date
   ): Promise<ExecutionMetric[]> {
     const rows = await this.db.queryAll<ExecutionMetricRow>(
-      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-       FROM execution_metrics
-       WHERE route_id = ? AND type = ? AND timestamp >= ? AND timestamp < ?
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
+       WHERE routeId = ? AND type = ? AND timestamp >= ? AND timestamp < ?
        ORDER BY timestamp ASC`,
-      [routeId, type, formatDateForSqlite(start), formatDateForSqlite(end)]
+      [routeId, type, formatForSqlite(start), formatForSqlite(end)]
     );
 
     return rows.map((row) => this.rowToMetric(row));
@@ -231,9 +223,9 @@ export class ExecutionMetricsService {
     end: Date
   ): Promise<number> {
     const result = await this.db.execute(
-      `DELETE FROM execution_metrics
-       WHERE route_id = ? AND type = ? AND timestamp >= ? AND timestamp < ?`,
-      [routeId, type, formatDateForSqlite(start), formatDateForSqlite(end)]
+      `DELETE FROM executionMetrics
+       WHERE routeId = ? AND type = ? AND timestamp >= ? AND timestamp < ?`,
+      [routeId, type, formatForSqlite(start), formatForSqlite(end)]
     );
 
     return result.changes;
@@ -245,8 +237,8 @@ export class ExecutionMetricsService {
    */
   async getMostRecentByType(type: MetricType): Promise<ExecutionMetric | null> {
     const row = await this.db.queryOne<ExecutionMetricRow>(
-      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-       FROM execution_metrics
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
        WHERE type = ?
        ORDER BY timestamp DESC
        LIMIT 1`,
@@ -262,8 +254,8 @@ export class ExecutionMetricsService {
    */
   async getOldestByType(type: MetricType): Promise<ExecutionMetric | null> {
     const row = await this.db.queryOne<ExecutionMetricRow>(
-      `SELECT id, route_id, type, avg_time_ms, max_time_ms, execution_count, timestamp
-       FROM execution_metrics
+      `SELECT id, routeId, type, avgTimeMs, maxTimeMs, executionCount, timestamp
+       FROM executionMetrics
        WHERE type = ?
        ORDER BY timestamp ASC
        LIMIT 1`,
@@ -279,33 +271,22 @@ export class ExecutionMetricsService {
    */
   async deleteByTypeOlderThan(type: MetricType, date: Date): Promise<number> {
     const result = await this.db.execute(
-      `DELETE FROM execution_metrics WHERE type = ? AND timestamp < ?`,
-      [type, formatDateForSqlite(date)]
+      `DELETE FROM executionMetrics WHERE type = ? AND timestamp < ?`,
+      [type, formatForSqlite(date)]
     );
 
     return result.changes;
   }
 
   private rowToMetric(row: ExecutionMetricRow): ExecutionMetric {
-    // Parse timestamp as UTC (SQLite stores without timezone, but we use UTC)
-    // Handle both old ISO format and new SQLite format
-    let timestamp: Date;
-    if (row.timestamp.includes("T")) {
-      // ISO format: 2026-01-02T18:08:36.000Z
-      timestamp = new Date(row.timestamp);
-    } else {
-      // SQLite format: 2026-01-02 18:08:36 - treat as UTC
-      timestamp = new Date(row.timestamp + "Z");
-    }
-
     return {
       id: row.id,
-      routeId: row.route_id,
+      routeId: row.routeId,
       type: row.type as MetricType,
-      avgTimeMs: row.avg_time_ms,
-      maxTimeMs: row.max_time_ms,
-      executionCount: row.execution_count,
-      timestamp,
+      avgTimeMs: row.avgTimeMs,
+      maxTimeMs: row.maxTimeMs,
+      executionCount: row.executionCount,
+      timestamp: parseSqliteTimestamp(row.timestamp),
     };
   }
 }

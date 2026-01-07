@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS routes (
   route TEXT NOT NULL,
   methods TEXT NOT NULL,
   keys TEXT,
-  created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
 `;

@@ -1,6 +1,6 @@
 import { expect } from "@std/expect";
 import { DatabaseService } from "./database_service.ts";
-import { DatabaseNotOpenError } from "./errors.ts";
+import { DatabaseNotOpenError, NestedTransactionError } from "./errors.ts";
 
 async function createTestDb(): Promise<{ db: DatabaseService; tempDir: string }> {
   const tempDir = await Deno.makeTempDir();
@@ -420,6 +420,169 @@ Deno.test("DatabaseService allows concurrent reads", async () => {
     for (const result of results) {
       expect(result.length).toBe(1);
     }
+
+    await db.close();
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+// ============== Transaction Tests ==============
+
+Deno.test("DatabaseService - transaction commits on success", async () => {
+  const { db, tempDir } = await createTestDb();
+
+  try {
+    await db.open();
+
+    // Create table outside transaction
+    await db.exec("CREATE TABLE test (id INTEGER, value TEXT)");
+
+    // Transaction with multiple operations
+    await db.transaction(async (tx) => {
+      await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [1, "first"]);
+      await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [2, "second"]);
+    });
+
+    // Verify both inserts committed
+    const rows = await db.queryAll<{ id: number; value: string }>(
+      "SELECT * FROM test ORDER BY id"
+    );
+    expect(rows.length).toBe(2);
+    expect(rows[0]).toEqual({ id: 1, value: "first" });
+    expect(rows[1]).toEqual({ id: 2, value: "second" });
+
+    await db.close();
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("DatabaseService - transaction rolls back on error", async () => {
+  const { db, tempDir } = await createTestDb();
+
+  try {
+    await db.open();
+    await db.exec("CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)");
+
+    // Transaction that will fail
+    try {
+      await db.transaction(async (tx) => {
+        await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [1, "first"]);
+        await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [2, "second"]);
+        // Duplicate primary key - will fail
+        await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [1, "duplicate"]);
+      });
+    } catch {
+      // Expected error
+    }
+
+    // Verify rollback - no data inserted
+    const rows = await db.queryAll("SELECT * FROM test");
+    expect(rows.length).toBe(0);
+
+    await db.close();
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("DatabaseService - nested transaction throws error", async () => {
+  const { db, tempDir } = await createTestDb();
+
+  try {
+    await db.open();
+    await db.exec("CREATE TABLE test (id INTEGER)");
+
+    await db.transaction(async (tx) => {
+      await tx.execute("INSERT INTO test (id) VALUES (?)", [1]);
+
+      // Attempt nested transaction - should throw
+      try {
+        await db.transaction(async (innerTx) => {
+          await innerTx.execute("INSERT INTO test (id) VALUES (?)", [2]);
+        });
+        throw new Error("Should have thrown NestedTransactionError");
+      } catch (error) {
+        expect(error instanceof NestedTransactionError).toBe(true);
+        expect((error as Error).message).toContain("not supported");
+      }
+    });
+
+    // Verify outer transaction committed despite inner error
+    const rows = await db.queryAll("SELECT * FROM test");
+    expect(rows.length).toBe(1);
+
+    await db.close();
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("DatabaseService - concurrent transactions serialize", async () => {
+  const { db, tempDir } = await createTestDb();
+
+  try {
+    await db.open();
+    await db.exec("CREATE TABLE test (id INTEGER, value TEXT)");
+
+    const results: number[] = [];
+
+    // Start two transactions concurrently
+    const tx1 = db.transaction(async (tx) => {
+      await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [1, "tx1-start"]);
+      await new Promise(resolve => setTimeout(resolve, 50)); // Simulate work
+      await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [2, "tx1-end"]);
+      results.push(1);
+    });
+
+    const tx2 = db.transaction(async (tx) => {
+      await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [3, "tx2-start"]);
+      await tx.execute("INSERT INTO test (id, value) VALUES (?, ?)", [4, "tx2-end"]);
+      results.push(2);
+    });
+
+    await Promise.all([tx1, tx2]);
+
+    // Verify all inserts committed
+    const rows = await db.queryAll("SELECT * FROM test ORDER BY id");
+    expect(rows.length).toBe(4);
+
+    // Verify serialization - tx1 completes before tx2 starts
+    expect(results).toEqual([1, 2]);
+
+    await db.close();
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("DatabaseService - transaction reads see uncommitted changes", async () => {
+  const { db, tempDir } = await createTestDb();
+
+  try {
+    await db.open();
+    await db.exec("CREATE TABLE test (id INTEGER, value TEXT)");
+    await db.execute("INSERT INTO test (id, value) VALUES (?, ?)", [1, "initial"]);
+
+    await db.transaction(async (tx) => {
+      // Update within transaction
+      await tx.execute("UPDATE test SET value = ? WHERE id = ?", ["updated", 1]);
+
+      // Read within same transaction - should see uncommitted change
+      const row = await tx.queryOne<{ value: string }>(
+        "SELECT value FROM test WHERE id = ?",
+        [1]
+      );
+      expect(row?.value).toBe("updated");
+    });
+
+    // Verify committed
+    const row = await db.queryOne<{ value: string }>(
+      "SELECT value FROM test WHERE id = ?",
+      [1]
+    );
+    expect(row?.value).toBe("updated");
 
     await db.close();
   } finally {

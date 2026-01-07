@@ -1,10 +1,9 @@
 import { Hono } from "@hono/hono";
+import { FileService } from "./file_service.ts";
 import {
-  FileService,
-  isPathSafe,
   normalizePath,
   validateFilePath,
-} from "./file_service.ts";
+} from "../validation/files.ts";
 
 export function createFileRoutes(service: FileService): Hono {
   const routes = new Hono();
@@ -25,10 +24,6 @@ export function createFileRoutes(service: FileService): Hono {
 
     if (!validateFilePath(path)) {
       return c.json({ error: "Invalid path format" }, 400);
-    }
-
-    if (!isPathSafe(path)) {
-      return c.json({ error: "Path traversal not allowed" }, 403);
     }
 
     const normalized = normalizePath(path);
@@ -62,10 +57,6 @@ export function createFileRoutes(service: FileService): Hono {
       return c.json({ error: "Invalid path format" }, 400);
     }
 
-    if (!isPathSafe(body.path)) {
-      return c.json({ error: "Path traversal not allowed" }, 403);
-    }
-
     const normalized = normalizePath(body.path);
     const created = await service.writeFile(normalized, body.content);
 
@@ -87,10 +78,6 @@ export function createFileRoutes(service: FileService): Hono {
 
     if (!validateFilePath(body.path)) {
       return c.json({ error: "Invalid path format" }, 400);
-    }
-
-    if (!isPathSafe(body.path)) {
-      return c.json({ error: "Path traversal not allowed" }, 403);
     }
 
     const normalized = normalizePath(body.path);

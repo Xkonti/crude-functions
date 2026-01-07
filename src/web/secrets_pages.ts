@@ -10,6 +10,9 @@ import {
   buttonLink,
   formatDate,
   getLayoutUser,
+  secretScripts,
+  parseSecretFormData,
+  parseSecretEditFormData,
 } from "./templates.ts";
 
 /**
@@ -68,24 +71,30 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
               <tr>
                 <td><code>${escapeHtml(secret.name)}</code></td>
                 <td class="secret-value">
-                  <span class="masked">••••••••</span>
-                  <span class="revealed" style="display:none;">
-                    <code>${escapeHtml(secret.value)}</code>
-                  </span>
-                  <button type="button" onclick="toggleSecret(this)"
-                          class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
-                    👁️
-                  </button>
-                  <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
-                          class="secondary" style="padding: 0.25rem 0.5rem;">
-                    📋
-                  </button>
+                  ${
+                    secret.decryptionError
+                      ? `<span style="color: #d32f2f;" title="${escapeHtml(secret.decryptionError)}">⚠️ Decryption failed</span>`
+                      : `
+                    <span class="masked">••••••••</span>
+                    <span class="revealed" style="display:none;">
+                      <code>${escapeHtml(secret.value)}</code>
+                    </span>
+                    <button type="button" onclick="toggleSecret(this)"
+                            class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                      👁️
+                    </button>
+                    <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                            class="secondary" style="padding: 0.25rem 0.5rem;">
+                      📋
+                    </button>
+                  `
+                  }
                 </td>
                 <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
                 <td>${formatDate(new Date(secret.createdAt))}</td>
-                <td>${formatDate(new Date(secret.modifiedAt))}</td>
+                <td>${formatDate(new Date(secret.updatedAt))}</td>
                 <td class="actions">
-                  <a href="/web/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+                  ${secret.decryptionError ? "" : `<a href="/web/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
                   <a href="/web/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                 </td>
               </tr>
@@ -95,34 +104,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
           </tbody>
         </table>
 
-        <script>
-        function toggleSecret(btn) {
-          const td = btn.closest('td');
-          const masked = td.querySelector('.masked');
-          const revealed = td.querySelector('.revealed');
-
-          if (masked.style.display === 'none') {
-            masked.style.display = '';
-            revealed.style.display = 'none';
-            btn.textContent = '👁️';
-          } else {
-            masked.style.display = 'none';
-            revealed.style.display = '';
-            btn.textContent = '🙈';
-          }
-        }
-
-        function copySecret(btn, value) {
-          navigator.clipboard.writeText(value).then(() => {
-            const original = btn.textContent;
-            btn.textContent = '✓';
-            setTimeout(() => btn.textContent = original, 2000);
-          }).catch(err => {
-            console.error('Failed to copy:', err);
-            alert('Failed to copy to clipboard');
-          });
-        }
-        </script>
+        ${secretScripts()}
       `
       }
     `;
@@ -152,7 +134,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
       );
     }
 
-    const { secretData, errors } = parseCreateFormData(formData);
+    const { secretData, errors } = parseSecretFormData(formData);
 
     if (errors.length > 0) {
       return c.html(
@@ -249,7 +231,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
       );
     }
 
-    const { editData, errors } = parseEditFormData(formData);
+    const { editData, errors } = parseSecretEditFormData(formData);
 
     if (errors.length > 0) {
       return c.html(
@@ -406,7 +388,7 @@ function renderCreateForm(
  */
 function renderEditForm(
   action: string,
-  secret: { name: string; value: string; comment: string | null },
+  secret: { name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string
 ): string {
   return `
@@ -439,55 +421,3 @@ function renderEditForm(
   `;
 }
 
-/**
- * Parse and validate create form data.
- */
-function parseCreateFormData(formData: FormData): {
-  secretData: { name: string; value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!name) {
-    errors.push("Secret name is required");
-  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-    errors.push(
-      "Secret name can only contain letters, numbers, underscores, and dashes"
-    );
-  }
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    secretData: { name, value, comment },
-    errors,
-  };
-}
-
-/**
- * Parse and validate edit form data.
- */
-function parseEditFormData(formData: FormData): {
-  editData: { value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    editData: { value, comment },
-    errors,
-  };
-}

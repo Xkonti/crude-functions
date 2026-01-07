@@ -22,6 +22,8 @@ export interface EncryptionKeyFile {
   last_rotation_finished_at: string;
   /** Session signing key for Better Auth */
   better_auth_secret: string;
+  /** Base64-encoded HMAC key for API key hashing (256 bits, 32 bytes) */
+  hash_key: string;
 }
 
 /**

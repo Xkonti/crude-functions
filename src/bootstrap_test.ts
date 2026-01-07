@@ -3,40 +3,46 @@ import { DatabaseService } from "./database/database_service.ts";
 import { ApiKeyService } from "./keys/api_key_service.ts";
 import { SettingsService } from "./settings/settings_service.ts";
 import { EncryptionService } from "./encryption/encryption_service.ts";
+import { HashService } from "./encryption/hash_service.ts";
 import { SettingNames } from "./settings/types.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+// Test hash key (32 bytes base64-encoded)
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_key_groups (
+  CREATE TABLE apiKeyGroups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TABLE api_keys (
+  CREATE TABLE apiKeys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     value TEXT NOT NULL,
+    valueHash TEXT,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
-  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON apiKeys(groupId, name);
+  CREATE INDEX idx_api_keys_group ON apiKeys(groupId);
+  CREATE INDEX idx_api_keys_hash ON apiKeys(groupId, valueHash);
 `;
 
 const SETTINGS_SCHEMA = `
   CREATE TABLE settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    user_id TEXT,
+    userId TEXT,
     value TEXT,
-    is_encrypted INTEGER NOT NULL DEFAULT 0,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(user_id, ''));
+  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
   CREATE INDEX idx_settings_name ON settings(name);
 `;
 
@@ -58,9 +64,14 @@ async function createTestContext(): Promise<TestContext> {
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
 
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+
   const apiKeyService = new ApiKeyService({
     db,
     encryptionService,
+    hashService,
   });
 
   const settingsService = new SettingsService({
@@ -204,7 +215,7 @@ Deno.test("Bootstrap: management group can receive keys after creation", async (
     await bootstrapApiAccess(apiKeyService, settingsService);
 
     // Add a key to management group
-    await apiKeyService.addKey("management", "test-key-123", "Test key");
+    await apiKeyService.addKey("management", "test-key", "test-key-123", "Test key");
 
     // Verify key was added successfully
     const keys = await apiKeyService.getKeys("management");
@@ -225,14 +236,14 @@ Deno.test("Bootstrap: management group in access-groups setting enables API acce
     await bootstrapApiAccess(apiKeyService, settingsService);
 
     // Add a key to management group
-    await apiKeyService.addKey("management", "test-key-456");
+    await apiKeyService.addKey("management", "test-key-456", "test-key-value-456", "Test key description");
 
     // Verify the key can be used for authentication
     const mgmtGroup = await apiKeyService.getGroupByName("management");
     expect(mgmtGroup).toBeDefined();
 
     // Check that the key exists in the management group
-    const hasKey = await apiKeyService.hasKey("management", "test-key-456");
+    const hasKey = await apiKeyService.hasKey("management", "test-key-value-456");
     expect(hasKey).toBe(true);
 
     // Verify the management group ID is in the access groups setting

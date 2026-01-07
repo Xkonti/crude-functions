@@ -30,3 +30,24 @@ export class InvalidKeyError extends Error {
     this.name = "InvalidKeyError";
   }
 }
+
+/**
+ * Thrown when plaintext exceeds the maximum allowed size
+ */
+export class OversizedPlaintextError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OversizedPlaintextError";
+  }
+}
+
+/**
+ * Thrown when the encryption keys file is corrupted or contains invalid data
+ */
+export class KeyStorageCorruptionError extends Error {
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "KeyStorageCorruptionError";
+    this.cause = cause;
+  }
+}

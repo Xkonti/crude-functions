@@ -2,20 +2,20 @@ import { expect } from "@std/expect";
 import { DatabaseService } from "../database/database_service.ts";
 import { ConsoleLogService } from "./console_log_service.ts";
 
-const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE console_logs (
+const EXECUTION_LOGS_SCHEMA = `
+  CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id TEXT NOT NULL,
-    route_id INTEGER,
+    requestId TEXT NOT NULL,
+    routeId INTEGER,
     level TEXT NOT NULL,
     message TEXT NOT NULL,
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_console_logs_request_id ON console_logs(request_id);
-  CREATE INDEX idx_console_logs_route_id ON console_logs(route_id, id);
-  CREATE INDEX idx_console_logs_route_level ON console_logs(route_id, level, id);
-  CREATE INDEX idx_console_logs_timestamp ON console_logs(timestamp);
+  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
+  CREATE INDEX idx_executionLogs_routeId ON executionLogs(routeId, id);
+  CREATE INDEX idx_executionLogs_route_level ON executionLogs(routeId, level, id);
+  CREATE INDEX idx_executionLogs_timestamp ON executionLogs(timestamp);
 `;
 
 async function createTestSetup(): Promise<{
@@ -26,7 +26,7 @@ async function createTestSetup(): Promise<{
   const tempDir = await Deno.makeTempDir();
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
-  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_LOGS_SCHEMA);
 
   const service = new ConsoleLogService({ db });
   return { service, db, tempDir };
@@ -219,6 +219,45 @@ Deno.test("ConsoleLogService deletes logs older than date", async () => {
 
     const logs = await service.getByRequestId("old-request");
     expect(logs.length).toBe(0);
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async () => {
+  const { service, db, tempDir } = await createTestSetup();
+
+  try {
+    // Manually insert logs with SQLite format timestamps (simulating old data from DB)
+    const oldDate = new Date("2020-01-01T12:00:00.000Z");
+    const sqliteFormat = oldDate.toISOString().replace("T", " ").slice(0, 19);
+
+    await db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, timestamp)
+       VALUES (?, ?, ?, ?, ?)`,
+      ["old-sqlite-format", 1, "log", "Old SQLite format log", sqliteFormat]
+    );
+
+    // Also insert a newer log using the service (will use CURRENT_TIMESTAMP)
+    await service.store({
+      requestId: "newer-request",
+      routeId: 1,
+      level: "log",
+      message: "Newer message",
+    });
+
+    // Delete logs older than a date between the two logs
+    const cutoffDate = new Date("2021-01-01T00:00:00.000Z");
+    const deleted = await service.deleteOlderThan(cutoffDate);
+
+    // Should delete the old SQLite-format log but not the newer one
+    expect(deleted).toBe(1);
+
+    const oldLogs = await service.getByRequestId("old-sqlite-format");
+    expect(oldLogs.length).toBe(0);
+
+    const newLogs = await service.getByRequestId("newer-request");
+    expect(newLogs.length).toBe(1);
   } finally {
     await cleanup(db, tempDir);
   }

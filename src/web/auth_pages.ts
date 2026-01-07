@@ -1,7 +1,7 @@
 import { Hono } from "@hono/hono";
 import { layout } from "./templates.ts";
 import type { Auth } from "../auth/auth.ts";
-import type { DatabaseService } from "../database/database_service.ts";
+import type { UserService } from "../users/user_service.ts";
 
 /**
  * Options for creating the auth pages router.
@@ -9,8 +9,8 @@ import type { DatabaseService } from "../database/database_service.ts";
 export interface AuthPagesOptions {
   /** Better Auth instance */
   auth: Auth;
-  /** Database service for user existence check */
-  db: DatabaseService;
+  /** User service for user existence check and auth operations */
+  userService: UserService;
 }
 
 /**
@@ -20,14 +20,13 @@ export interface AuthPagesOptions {
  * These routes are public (no auth middleware).
  */
 export function createAuthPages(options: AuthPagesOptions): Hono {
-  const { auth, db } = options;
+  const { userService } = options;
   const routes = new Hono();
 
   // GET /login - Login form
   routes.get("/login", async (c) => {
     // If no users exist, redirect to setup page
-    const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
-    if (!userExists) {
+    if (!(await userService.hasUsers())) {
       return c.redirect("/web/setup");
     }
 
@@ -99,10 +98,8 @@ export function createAuthPages(options: AuthPagesOptions): Hono {
   // GET /logout - Logout handler
   routes.get("/logout", async (c) => {
     try {
-      // Call Better Auth sign-out
-      await auth.api.signOut({
-        headers: c.req.raw.headers,
-      });
+      // Sign out via UserService
+      await userService.signOut(c.req.raw.headers);
     } catch {
       // Ignore errors - user might not have a valid session
     }

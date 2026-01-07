@@ -8,11 +8,15 @@ import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
+import { HashService } from "../encryption/hash_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
+import { UserService } from "../users/user_service.ts";
 import type { Auth } from "../auth/auth.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+// Test hash key (32 bytes base64-encoded)
+const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 /**
  * Creates a mock Auth object for testing.
@@ -37,22 +41,25 @@ function createMockAuth(options: { authenticated: boolean } = { authenticated: t
 }
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_key_groups (
+  CREATE TABLE apiKeyGroups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TABLE api_keys (
+  CREATE TABLE apiKeys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     value TEXT NOT NULL,
+    valueHash TEXT,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_api_keys_group_value ON api_keys(group_id, value);
-  CREATE INDEX idx_api_keys_group ON api_keys(group_id);
+  CREATE UNIQUE INDEX idx_api_keys_group_name ON apiKeys(groupId, name);
+  CREATE INDEX idx_api_keys_group ON apiKeys(groupId);
+  CREATE INDEX idx_api_keys_hash ON apiKeys(groupId, valueHash);
 `;
 
 const ROUTES_SCHEMA = `
@@ -64,50 +71,50 @@ const ROUTES_SCHEMA = `
     route TEXT NOT NULL,
     methods TEXT NOT NULL,
     keys TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX idx_routes_route ON routes(route);
 `;
 
-const CONSOLE_LOGS_SCHEMA = `
-  CREATE TABLE console_logs (
+const EXECUTION_LOGS_SCHEMA = `
+  CREATE TABLE executionLogs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id TEXT NOT NULL,
-    route_id INTEGER,
+    requestId TEXT NOT NULL,
+    routeId INTEGER,
     level TEXT NOT NULL,
     message TEXT NOT NULL,
     args TEXT,
     timestamp TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_console_logs_request_id ON console_logs(request_id);
-  CREATE INDEX idx_console_logs_route_id ON console_logs(route_id, id);
+  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
+  CREATE INDEX idx_executionLogs_routeId ON executionLogs(routeId, id);
 `;
 
 const EXECUTION_METRICS_SCHEMA = `
-  CREATE TABLE execution_metrics (
+  CREATE TABLE executionMetrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    route_id INTEGER NOT NULL,
+    routeId INTEGER NOT NULL,
     type TEXT NOT NULL CHECK(type IN ('execution', 'minute', 'hour', 'day')),
-    avg_time_ms REAL NOT NULL,
-    max_time_ms INTEGER NOT NULL,
-    execution_count INTEGER NOT NULL DEFAULT 1,
+    avgTimeMs REAL NOT NULL,
+    maxTimeMs INTEGER NOT NULL,
+    executionCount INTEGER NOT NULL DEFAULT 1,
     timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE INDEX idx_execution_metrics_route_id ON execution_metrics(route_id);
-  CREATE INDEX idx_execution_metrics_type_route_timestamp ON execution_metrics(type, route_id, timestamp);
-  CREATE INDEX idx_execution_metrics_timestamp ON execution_metrics(timestamp);
+  CREATE INDEX idx_executionMetrics_routeId ON executionMetrics(routeId);
+  CREATE INDEX idx_executionMetrics_type_route_timestamp ON executionMetrics(type, routeId, timestamp);
+  CREATE INDEX idx_executionMetrics_timestamp ON executionMetrics(timestamp);
 `;
 
 const SETTINGS_SCHEMA = `
   CREATE TABLE settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    user_id TEXT,
+    userId TEXT,
     value TEXT,
-    is_encrypted INTEGER NOT NULL DEFAULT 0,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(user_id, ''));
+  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
   CREATE INDEX idx_settings_name ON settings(name);
 `;
 
@@ -149,7 +156,7 @@ async function createTestApp(
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
   await db.exec(ROUTES_SCHEMA);
-  await db.exec(CONSOLE_LOGS_SCHEMA);
+  await db.exec(EXECUTION_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
   await db.exec(SETTINGS_SCHEMA);
 
@@ -158,10 +165,13 @@ async function createTestApp(
   const encryptionService = new EncryptionService({
     encryptionKey: TEST_ENCRYPTION_KEY,
   });
-  const apiKeyService = new ApiKeyService({ db, encryptionService });
+  const hashService = new HashService({
+    hashKey: TEST_HASH_KEY,
+  });
+  const apiKeyService = new ApiKeyService({ db, encryptionService, hashService });
 
   // Add default management key via service (which handles group creation)
-  await apiKeyService.addKey("management", "testkey123", "admin");
+  await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
   const routesService = new RoutesService({ db });
   const fileService = new FileService({ basePath: codePath });
   const consoleLogService = new ConsoleLogService({ db });
@@ -176,9 +186,10 @@ async function createTestApp(
 
   const app = new Hono();
   const auth = createMockAuth({ authenticated });
+  const userService = new UserService({ db, auth });
   app.route(
     "/web",
-    createWebRoutes({ auth, db, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService })
+    createWebRoutes({ auth, db, userService, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService })
   );
 
   return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService, settingsService };
@@ -524,7 +535,7 @@ Deno.test("GET /web/keys lists keys grouped by group", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
     // Add additional key
-    await apiKeyService.addKey("api", "key1", "user");
+    await apiKeyService.addKey("api", "key-1", "key1", "user");
 
     const res = await app.request("/web/keys");
     expect(res.status).toBe(200);
@@ -570,6 +581,7 @@ Deno.test("POST /web/keys/create creates key", async () => {
   try {
     const formData = new FormData();
     formData.append("group", "newkey");
+    formData.append("name", "newkey-name");
     formData.append("value", "newvalue123");
     formData.append("description", "test description");
 
@@ -591,8 +603,8 @@ Deno.test("POST /web/keys/create creates key", async () => {
 Deno.test("POST /web/keys/delete removes key by ID", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    await apiKeyService.addKey("mykey", "val1");
-    await apiKeyService.addKey("mykey", "val2");
+    await apiKeyService.addKey("mykey", "key-1", "val1");
+    await apiKeyService.addKey("mykey", "key-2", "val2");
 
     const keys = await apiKeyService.getKeys("mykey");
     const val1Key = keys!.find((k) => k.value === "val1")!;
@@ -615,8 +627,8 @@ Deno.test("POST /web/keys/delete removes key by ID", async () => {
 Deno.test("POST /web/keys/delete-group removes all keys for group", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    await apiKeyService.addKey("toremove", "val1");
-    await apiKeyService.addKey("toremove", "val2");
+    await apiKeyService.addKey("toremove", "key-1", "val1");
+    await apiKeyService.addKey("toremove", "key-2", "val2");
 
     const res = await app.request("/web/keys/delete-group?group=toremove", {
       method: "POST",

@@ -9,14 +9,15 @@
 export interface Secret {
   id: number;
   name: string;
-  value: string; // Decrypted value
+  value: string; // Decrypted value (empty string if decryption failed)
+  decryptionError?: string; // Set if decryption failed
   comment: string | null;
   scope: number; // 0=global, 1=function, 2=group, 3=key
   functionId: number | null;
   apiGroupId: number | null;
   apiKeyId: number | null;
   createdAt: string;
-  modifiedAt: string;
+  updatedAt: string;
 }
 
 /**
@@ -27,8 +28,8 @@ export interface SecretRow {
   id: number;
   name: string;
   comment: string | null;
-  created_at: string;
-  modified_at: string;
+  createdAt: string;
+  updatedAt: string;
   [key: string]: unknown; // Index signature for Row compatibility
 }
 
@@ -48,10 +49,11 @@ export enum SecretScope {
 export interface SecretPreviewSource {
   scope: 'global' | 'function' | 'group' | 'key';
   value: string;
+  decryptionError?: string; // Set if decryption failed
   groupId?: number;
   groupName?: string;
   keyId?: number;
-  keyValue?: string;
+  keyName?: string;
 }
 
 /**

@@ -9,7 +9,10 @@ import {
   DatabaseAccessError,
   DatabaseNotOpenError,
   QueryError,
+  NestedTransactionError,
+  TransactionError,
 } from "./errors.ts";
+import { TransactionContext } from "./transaction_context.ts";
 
 /**
  * A thread-safe SQLite database service with mutex-protected write operations.
@@ -48,6 +51,7 @@ export class DatabaseService {
   private readonly writeMutex = new Mutex();
 
   private db: Database | null = null;
+  private inTransaction = false;
 
   constructor(options: DatabaseServiceOptions) {
     this.databasePath = options.databasePath;
@@ -218,6 +222,86 @@ export class DatabaseService {
 
     using _lock = await this.writeMutex.acquire();
     return this.execSync(sql);
+  }
+
+  // ============== Transactions ==============
+
+  /**
+   * Executes a callback within a database transaction.
+   * Automatically commits on success, rolls back on error.
+   *
+   * Transactions are serialized - concurrent calls will queue via mutex.
+   *
+   * IMPORTANT: Nested transactions are not supported. This is a SQLite limitation.
+   * When adding support for other databases (PostgreSQL, MySQL, etc.), this behavior
+   * may need to be revisited as those databases support nested transactions via
+   * savepoints differently than SQLite.
+   *
+   * @param callback - Async function that receives transaction context
+   * @returns Promise resolving to callback's return value
+   * @throws NestedTransactionError if called within another transaction
+   * @throws TransactionError if BEGIN/COMMIT/ROLLBACK fails
+   * @throws Original error from callback (after rollback)
+   *
+   * @example
+   * ```typescript
+   * // All operations commit together, or roll back together
+   * await db.transaction(async (tx) => {
+   *   await tx.execute("INSERT INTO users (name) VALUES (?)", ["Alice"]);
+   *   await tx.execute("INSERT INTO posts (user_id) VALUES (?)", [1]);
+   * });
+   * ```
+   */
+  async transaction<T>(
+    callback: (tx: TransactionContext) => Promise<T>
+  ): Promise<T> {
+    // Check for nested transaction - SQLite limitation
+    // NOTE: This check is SQLite-specific. Other databases (PostgreSQL, MySQL) handle
+    // nested transactions differently via savepoints. When adding multi-DB support,
+    // this behavior will need to be database-specific.
+    if (this.inTransaction) {
+      throw new NestedTransactionError(
+        "Nested transactions are not supported. SQLite does not support true nested transactions."
+      );
+    }
+
+    this.ensureOpen();
+
+    // Acquire mutex - queues concurrent transactions
+    using _lock = await this.writeMutex.acquire();
+
+    this.inTransaction = true;
+    try {
+      // Begin transaction with IMMEDIATE lock (prevents SQLITE_BUSY)
+      this.db!.exec("BEGIN IMMEDIATE");
+
+      // Create transaction context
+      const tx = new TransactionContext(this.db!);
+
+      // Execute callback
+      const result = await callback(tx);
+
+      // Success - commit
+      this.db!.exec("COMMIT");
+      return result;
+
+    } catch (error) {
+      // Error - rollback and re-throw
+      try {
+        this.db!.exec("ROLLBACK");
+      } catch (rollbackError) {
+        // Best effort rollback - still throw original error
+        throw new TransactionError(
+          "Transaction rollback failed after error",
+          rollbackError
+        );
+      }
+      throw error;
+
+    } finally {
+      this.inTransaction = false;
+      // Mutex auto-released via 'using'
+    }
   }
 
   // ============== Prepared Statements ==============

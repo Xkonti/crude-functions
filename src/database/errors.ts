@@ -59,3 +59,26 @@ export class QueryError extends DatabaseError {
   }
 }
 
+/**
+ * Thrown when attempting to start a transaction while already in a transaction
+ */
+export class NestedTransactionError extends DatabaseError {
+  constructor(message = "Nested transactions are not supported") {
+    super(message);
+    this.name = "NestedTransactionError";
+  }
+}
+
+/**
+ * Thrown when a transaction operation fails (BEGIN, COMMIT, ROLLBACK)
+ */
+export class TransactionError extends DatabaseError {
+  public override readonly cause?: unknown;
+
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "TransactionError";
+    this.cause = cause;
+  }
+}
+

@@ -7,6 +7,7 @@ import {
   HandlerLoadError,
 } from "./errors.ts";
 import { logger } from "../utils/logger.ts";
+import { resolve, normalize } from "@std/path";
 
 export interface HandlerLoaderOptions {
   /** Base directory for resolving relative paths (e.g., "./" or project root) */
@@ -57,6 +58,9 @@ export class HandlerLoader {
       throw new HandlerNotFoundError(handlerPath);
     }
     logger.debug(`Handler file exists, mtime: ${stat.mtime}`);
+
+    // SECURITY: Verify the real path (following symlinks) is still within base directory
+    await this.validateRealPath(absolutePath, handlerPath);
 
     const cached = this.cache.get(handlerPath);
     const fileModTime = stat.mtime?.getTime() ?? 0;
@@ -133,16 +137,50 @@ export class HandlerLoader {
       );
     }
 
-    // Reject paths with traversal attempts
-    if (normalized.includes("..")) {
+    // Resolve to absolute path (handles .., symlinks, and normalization)
+    const resolvedPath = resolve(this.baseDirectory, normalized);
+    const normalizedBase = normalize(this.baseDirectory);
+
+    // CRITICAL: Verify the resolved path is within base directory
+    // This catches symlinks, .., and any other escape attempts
+    if (!resolvedPath.startsWith(normalizedBase + "/") && resolvedPath !== normalizedBase) {
       throw new HandlerError(
-        "Handler path cannot contain path traversal sequences",
+        `Handler path escapes base directory: ${handlerPath}`,
         handlerPath
       );
     }
 
-    // Combine with base directory
-    return `${this.baseDirectory}/${normalized}`;
+    return resolvedPath;
+  }
+
+  /**
+   * Validates that the real path (following symlinks) is within base directory.
+   * This prevents symlink-based directory traversal attacks.
+   */
+  private async validateRealPath(absolutePath: string, handlerPath: string): Promise<void> {
+    try {
+      // Get the real path following all symlinks
+      const realPath = await Deno.realPath(absolutePath);
+      const normalizedBase = normalize(this.baseDirectory);
+
+      // Verify the real path is still within base directory
+      if (!realPath.startsWith(normalizedBase + "/") && realPath !== normalizedBase) {
+        throw new HandlerError(
+          `Handler path escapes base directory: ${handlerPath}`,
+          handlerPath
+        );
+      }
+    } catch (error) {
+      // If realpath fails, it might be a broken symlink or permission issue
+      // Re-throw HandlerError as-is, wrap other errors
+      if (error instanceof HandlerError) {
+        throw error;
+      }
+      throw new HandlerError(
+        `Failed to validate handler path: ${handlerPath}`,
+        handlerPath
+      );
+    }
   }
 
   /**

@@ -1,0 +1,485 @@
+import type { DatabaseService } from "../database/database_service.ts";
+import type { betterAuth } from "better-auth";
+import type { User, CreateUserData, UpdateUserData, UserSession } from "./types.ts";
+
+/**
+ * Raw database row type from the user table.
+ * Internal to the service - consumers never see this.
+ */
+interface UserRow {
+  id: string;
+  email: string;
+  emailVerified: number; // SQLite boolean (0/1)
+  name: string | null;
+  image: string | null;
+  role: string | null; // Comma-separated string
+  banned: number; // SQLite boolean (0/1)
+  banReason: string | null;
+  banExpires: string | null; // ISO 8601 timestamp
+  createdAt: string; // ISO 8601 timestamp
+  updatedAt: string; // ISO 8601 timestamp
+  [key: string]: unknown; // Index signature for Row compatibility
+}
+
+export interface UserServiceOptions {
+  /** Database service for querying user table */
+  db: DatabaseService;
+  /** Better Auth instance for Admin API calls */
+  auth: ReturnType<typeof betterAuth>;
+}
+
+/**
+ * Service for managing users stored in the database.
+ *
+ * Abstracts all direct user table queries and Better Auth Admin API calls,
+ * providing a single source of truth for user management operations.
+ *
+ * No caching - always reads from database for simplicity and consistency.
+ */
+export class UserService {
+  private readonly db: DatabaseService;
+  private readonly auth: ReturnType<typeof betterAuth>;
+
+  constructor(options: UserServiceOptions) {
+    this.db = options.db;
+    this.auth = options.auth;
+  }
+
+  // ============== Read Operations ==============
+
+  /**
+   * Get all users from the database.
+   * @returns Array of users, ordered by creation date (newest first)
+   */
+  async getAll(): Promise<User[]> {
+    const rows = await this.db.queryAll<UserRow>(
+      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
+       FROM user
+       ORDER BY createdAt DESC`
+    );
+
+    return rows.map((row) => this.rowToUser(row));
+  }
+
+  /**
+   * Get a single user by ID.
+   * @param id - User ID
+   * @returns User object or null if not found
+   */
+  async getById(id: string): Promise<User | null> {
+    const row = await this.db.queryOne<UserRow>(
+      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
+       FROM user
+       WHERE id = ?`,
+      [id]
+    );
+
+    return row ? this.rowToUser(row) : null;
+  }
+
+  /**
+   * Get a single user by email.
+   * @param email - User email (case-insensitive lookup)
+   * @returns User object or null if not found
+   */
+  async getByEmail(email: string): Promise<User | null> {
+    const row = await this.db.queryOne<UserRow>(
+      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
+       FROM user
+       WHERE email = ? COLLATE NOCASE`,
+      [email]
+    );
+
+    return row ? this.rowToUser(row) : null;
+  }
+
+  /**
+   * Get all users with a specific role.
+   * @param role - Role to filter by (e.g., "userMgmt")
+   * @returns Array of users with that role
+   */
+  async getUsersByRole(role: string): Promise<User[]> {
+    const rows = await this.db.queryAll<UserRow>(
+      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
+       FROM user
+       WHERE role LIKE ?
+       ORDER BY createdAt DESC`,
+      [`%${role}%`]
+    );
+
+    // Filter in-memory to ensure exact role match (not substring)
+    const users = rows.map((row) => this.rowToUser(row));
+    return users.filter((user) => user.roles.includes(role));
+  }
+
+  // ============== Existence Checks & Counts ==============
+
+  /**
+   * Check if any users exist in the database.
+   * Used to determine if sign-up should be enabled.
+   * @returns True if at least one user exists
+   */
+  async hasUsers(): Promise<boolean> {
+    const row = await this.db.queryOne<{ id: string }>(
+      "SELECT id FROM user LIMIT 1"
+    );
+    return row !== null;
+  }
+
+  /**
+   * Get total user count.
+   * @returns Number of users in the database
+   */
+  async getUserCount(): Promise<number> {
+    const result = await this.db.queryOne<{ count: number }>(
+      "SELECT COUNT(*) as count FROM user"
+    );
+    return result?.count ?? 0;
+  }
+
+  /**
+   * Check if a user with the given email exists.
+   * @param email - Email to check
+   * @returns True if user exists
+   */
+  async userExistsByEmail(email: string): Promise<boolean> {
+    const row = await this.db.queryOne<{ id: string }>(
+      "SELECT id FROM user WHERE email = ? COLLATE NOCASE LIMIT 1",
+      [email]
+    );
+    return row !== null;
+  }
+
+  /**
+   * Check if a user with the given ID exists.
+   * @param id - User ID to check
+   * @returns True if user exists
+   */
+  async userExists(id: string): Promise<boolean> {
+    const row = await this.db.queryOne<{ id: string }>(
+      "SELECT id FROM user WHERE id = ? LIMIT 1",
+      [id]
+    );
+    return row !== null;
+  }
+
+  // ============== Write Operations (Better Auth Admin API) ==============
+
+  /**
+   * Create a new user.
+   * Uses Better Auth Admin API to handle password hashing and account creation.
+   * @param data - User creation data
+   * @param headers - Request headers (required by Better Auth for session context)
+   * @returns The created user's ID
+   * @throws Error if email already exists or validation fails
+   */
+  async createUser(data: CreateUserData, headers: Headers): Promise<string> {
+    this.validateEmail(data.email);
+    this.validatePassword(data.password);
+
+    const createBody = {
+      email: data.email,
+      password: data.password,
+      name: data.name,
+      role: data.role,
+    };
+
+    try {
+      // @ts-expect-error - Better Auth admin plugin API not fully typed
+      const result = await this.auth.api.createUser({
+        body: createBody,
+        headers,
+      });
+      return result.data?.id ?? "";
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      throw new Error(`Failed to create user: ${message}`);
+    }
+  }
+
+  /**
+   * Update an existing user.
+   * Can update password, role, and/or name.
+   * @param id - User ID to update
+   * @param data - Fields to update (only provided fields are updated)
+   * @param headers - Request headers (required by Better Auth)
+   * @throws Error if user not found or validation fails
+   */
+  async updateUser(
+    id: string,
+    data: UpdateUserData,
+    headers: Headers
+  ): Promise<void> {
+    // Verify user exists
+    const user = await this.getById(id);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    // Update password if provided
+    if (data.password) {
+      await this.updatePassword(id, data.password, headers);
+    }
+
+    // Update role if provided
+    if (data.role !== undefined) {
+      await this.updateRole(id, data.role, headers);
+    }
+
+    // Note: Better Auth doesn't have a direct API to update name or email
+    // These would need to be updated via direct database access or other Better Auth APIs
+    // For now, we'll focus on password and role which are most commonly used
+  }
+
+  /**
+   * Update a user's password.
+   * Uses Better Auth Admin API for secure password hashing.
+   * @param id - User ID
+   * @param newPassword - New password (minimum 8 characters)
+   * @param headers - Request headers
+   * @throws Error if user not found or password too weak
+   */
+  async updatePassword(
+    id: string,
+    newPassword: string,
+    headers: Headers
+  ): Promise<void> {
+    this.validatePassword(newPassword);
+
+    try {
+      // @ts-expect-error - Better Auth admin plugin API not fully typed
+      await this.auth.api.setUserPassword({
+        body: {
+          userId: id,
+          newPassword: newPassword,
+        },
+        headers,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      throw new Error(`Failed to update password: ${message}`);
+    }
+  }
+
+  /**
+   * Update a user's role.
+   * Handles comma-separated role strings.
+   * @param id - User ID
+   * @param role - New role string (e.g., "permanent,userMgmt")
+   * @param headers - Request headers
+   * @throws Error if user not found
+   */
+  async updateRole(id: string, role: string, headers: Headers): Promise<void> {
+    try {
+      // @ts-expect-error - Better Auth admin plugin API not fully typed
+      await this.auth.api.setRole({
+        body: {
+          userId: id,
+          role: role,
+        },
+        headers,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      throw new Error(`Failed to update role: ${message}`);
+    }
+  }
+
+  /**
+   * Delete a user by ID.
+   * Prevents deletion of users with "permanent" role.
+   * @param id - User ID to delete
+   * @param headers - Request headers
+   * @throws Error if user not found or has permanent role
+   */
+  async deleteUser(id: string, headers: Headers): Promise<void> {
+    const user = await this.getById(id);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    if (user.roles.includes("permanent")) {
+      throw new Error("Cannot delete permanent admin user");
+    }
+
+    try {
+      // @ts-expect-error - Better Auth admin plugin API not fully typed
+      await this.auth.api.removeUser({
+        body: { userId: id },
+        headers,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      throw new Error(`Failed to delete user: ${message}`);
+    }
+  }
+
+  // ============== Authentication Operations ==============
+
+  /**
+   * Get the current session from request headers.
+   * Wraps Better Auth's getSession API.
+   * @param headers - Request headers containing session cookie
+   * @returns Session object or null if not authenticated
+   */
+  async getSession(headers: Headers): Promise<UserSession | null> {
+    try {
+      const session = await this.auth.api.getSession({ headers });
+
+      if (!session || !session.user || !session.session) {
+        return null;
+      }
+
+      return {
+        user: {
+          id: session.user.id,
+          email: session.user.email,
+          name: session.user.name,
+          emailVerified: session.user.emailVerified,
+        },
+        session: {
+          id: session.session.id,
+          userId: session.session.userId,
+          expiresAt: new Date(session.session.expiresAt),
+          token: session.session.token,
+          ipAddress: session.session.ipAddress ?? undefined,
+          userAgent: session.session.userAgent ?? undefined,
+        },
+      };
+    } catch (_err) {
+      return null;
+    }
+  }
+
+  /**
+   * Sign out the current session.
+   * Wraps Better Auth's signOut API.
+   * @param headers - Request headers containing session cookie
+   */
+  async signOut(headers: Headers): Promise<void> {
+    try {
+      await this.auth.api.signOut({ headers });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      throw new Error(`Failed to sign out: ${message}`);
+    }
+  }
+
+  // ============== Role Management Utilities ==============
+
+  /**
+   * Check if a user has a specific role.
+   * @param userId - User ID
+   * @param role - Role to check for
+   * @returns True if user has the role
+   */
+  async hasRole(userId: string, role: string): Promise<boolean> {
+    const user = await this.getById(userId);
+    if (!user) {
+      return false;
+    }
+    return user.roles.includes(role);
+  }
+
+  /**
+   * Add a role to a user.
+   * Does nothing if user already has the role (idempotent).
+   * @param userId - User ID
+   * @param role - Role to add
+   * @param headers - Request headers
+   */
+  async addRole(
+    userId: string,
+    role: string,
+    headers: Headers
+  ): Promise<void> {
+    const user = await this.getById(userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    if (user.roles.includes(role)) {
+      return; // Already has role, nothing to do
+    }
+
+    const newRoles = [...user.roles, role];
+    await this.updateRole(userId, newRoles.join(","), headers);
+  }
+
+  /**
+   * Remove a role from a user.
+   * Does nothing if user doesn't have the role (idempotent).
+   * Cannot remove "permanent" role.
+   * @param userId - User ID
+   * @param role - Role to remove
+   * @param headers - Request headers
+   * @throws Error if attempting to remove permanent role
+   */
+  async removeRole(
+    userId: string,
+    role: string,
+    headers: Headers
+  ): Promise<void> {
+    if (role === "permanent") {
+      throw new Error("Cannot remove permanent role");
+    }
+
+    const user = await this.getById(userId);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    if (!user.roles.includes(role)) {
+      return; // Doesn't have role, nothing to do
+    }
+
+    const newRoles = user.roles.filter((r) => r !== role);
+    await this.updateRole(userId, newRoles.join(","), headers);
+  }
+
+  // ============== Private Helper Methods ==============
+
+  /**
+   * Convert database row to public User type.
+   * Handles role parsing, boolean conversion, and date parsing.
+   * @param row - Raw database row
+   * @returns Typed User object
+   */
+  private rowToUser(row: UserRow): User {
+    return {
+      id: row.id,
+      email: row.email,
+      emailVerified: row.emailVerified === 1,
+      name: row.name ?? undefined,
+      image: row.image ?? undefined,
+      roles: row.role ? row.role.split(",").map((r) => r.trim()) : [],
+      banned: row.banned === 1,
+      banReason: row.banReason ?? undefined,
+      banExpires: row.banExpires ? new Date(row.banExpires) : undefined,
+      createdAt: new Date(row.createdAt),
+      updatedAt: new Date(row.updatedAt),
+    };
+  }
+
+  /**
+   * Validate email format.
+   * @param email - Email to validate
+   * @throws Error if email is invalid
+   */
+  private validateEmail(email: string): void {
+    if (!email || !email.includes("@")) {
+      throw new Error("Invalid email format");
+    }
+  }
+
+  /**
+   * Validate password strength.
+   * @param password - Password to validate
+   * @throws Error if password is too weak
+   */
+  private validatePassword(password: string): void {
+    if (!password || password.length < 8) {
+      throw new Error("Password must be at least 8 characters");
+    }
+  }
+}

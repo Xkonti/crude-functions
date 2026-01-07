@@ -1,12 +1,15 @@
 import { Hono } from "@hono/hono";
-import type { DatabaseService } from "../database/database_service.ts";
+import type { Auth } from "../auth/auth.ts";
+import type { UserService } from "../users/user_service.ts";
 
 /**
  * Options for creating the setup pages router.
  */
 export interface SetupPagesOptions {
-  /** Database service for user existence check and role update */
-  db: DatabaseService;
+  /** Better Auth instance */
+  auth: Auth;
+  /** User service for user existence check and role update */
+  userService: UserService;
 }
 
 /**
@@ -16,14 +19,13 @@ export interface SetupPagesOptions {
  * Only accessible when no users exist in the database.
  */
 export function createSetupPages(options: SetupPagesOptions): Hono {
-  const { db } = options;
+  const { userService } = options;
   const routes = new Hono();
 
   // GET /setup - Setup form (only accessible when no users exist)
   routes.get("/", async (c) => {
     // Guard: If users already exist, redirect to login
-    const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
-    if (userExists) {
+    if (await userService.hasUsers()) {
       return c.redirect("/web/login");
     }
 
@@ -144,10 +146,8 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
   // POST /setup/finalize - Set admin role after account creation
   routes.post("/finalize", async (c) => {
     // Guard: If more than one user exists, this is not a first-run setup
-    const userCount = await db.queryOne<{ count: number }>(
-      "SELECT COUNT(*) as count FROM user"
-    );
-    if (userCount && userCount.count > 1) {
+    const userCount = await userService.getUserCount();
+    if (userCount > 1) {
       return c.json({ error: "Setup already complete" }, 403);
     }
 
@@ -159,11 +159,8 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
         return c.json({ error: "Missing user ID" }, 400);
       }
 
-      // Set permanent userMgmt role for the first user
-      await db.execute(
-        "UPDATE user SET role = ? WHERE id = ?",
-        ["permanent,userMgmt", userId]
-      );
+      // Set permanent userMgmt role for the first user via UserService
+      await userService.updateRole(userId, "permanent,userMgmt", c.req.raw.headers);
 
       return c.json({ success: true });
     } catch {

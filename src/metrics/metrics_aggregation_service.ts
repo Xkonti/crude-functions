@@ -95,18 +95,21 @@ export class MetricsAggregationService {
       this.timerId = null;
     }
 
-    this.stopRequested = true;
-
-    // Wait for any in-progress processing to complete with timeout
+    // Wait for any in-progress processing to complete with timeout.
+    // IMPORTANT: Don't set stopRequested until AFTER waiting, otherwise
+    // runAggregation() will see the flag and abort early, causing race
+    // conditions in tests and potential data loss.
     const startTime = Date.now();
     while (this.isProcessing) {
       if (Date.now() - startTime > MetricsAggregationService.STOP_TIMEOUT_MS) {
-        logger.warn("[MetricsAggregation] Stop timeout exceeded, processing may still be running");
+        logger.warn("[MetricsAggregation] Stop timeout exceeded, signaling stop request");
+        this.stopRequested = true;
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
+    // Reset for potential future restart
     this.stopRequested = false;
     logger.info("[MetricsAggregation] Stopped");
   }

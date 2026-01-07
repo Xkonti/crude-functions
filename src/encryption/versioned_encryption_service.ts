@@ -14,8 +14,17 @@
 import { Mutex } from "@core/asyncutil/mutex";
 import type { VersionedEncryptionServiceOptions } from "./types.ts";
 import { base64ToBytes, bytesToBase64 } from "./utils.ts";
-import { EncryptionError, DecryptionError, InvalidKeyError } from "./errors.ts";
+import { EncryptionError, DecryptionError, InvalidKeyError, OversizedPlaintextError } from "./errors.ts";
 import { logger } from "../utils/logger.ts";
+
+/**
+ * Maximum allowed plaintext size in bytes (16KB).
+ * This limit prevents:
+ * - Database performance degradation from large encrypted values
+ * - Abuse of secrets storage for file storage
+ * - Excessive encryption overhead (16KB → ~21.4KB encrypted)
+ */
+const MAX_PLAINTEXT_BYTES = 16 * 1024; // 16KB
 
 /**
  * Versioned encryption service supporting key rotation.
@@ -32,9 +41,16 @@ export class VersionedEncryptionService {
   private currentVersion!: string;
   private phasedOutVersion!: string | null;
 
+  /**
+   * LOCK ORDERING HIERARCHY (to prevent deadlocks):
+   * 1. rotationLock - must be acquired first
+   * 2. keyMutex - must be acquired second
+   *
+   * Never acquire keyMutex before rotationLock.
+   * Never call updateKeys() while holding rotationLock externally.
+   */
   // Mutex for thread-safe key updates
   private readonly keyMutex = new Mutex();
-
   // Rotation lock - when acquired, blocks all encrypt/decrypt operations
   private readonly rotationLock = new Mutex();
 
@@ -75,6 +91,15 @@ export class VersionedEncryptionService {
     }
     this.currentVersion = options.currentVersion;
 
+    // Reject partial phased out configuration
+    const hasPhasedOutKey = options.phasedOutKey !== undefined;
+    const hasPhasedOutVersion = options.phasedOutVersion !== undefined;
+    if (hasPhasedOutKey !== hasPhasedOutVersion) {
+      throw new InvalidKeyError(
+        "Partial phased out configuration: both phasedOutKey and phasedOutVersion must be provided together, or neither"
+      );
+    }
+
     // Validate phased out key if present
     if (options.phasedOutKey && options.phasedOutVersion) {
       try {
@@ -102,6 +127,14 @@ export class VersionedEncryptionService {
           `Invalid phased out version: must be A-Z, got "${options.phasedOutVersion}"`
         );
       }
+
+      // Reject duplicate versions
+      if (options.phasedOutVersion === options.currentVersion) {
+        throw new InvalidKeyError(
+          `Current and phased out versions cannot be the same: "${options.currentVersion}"`
+        );
+      }
+
       this.phasedOutVersion = options.phasedOutVersion;
     } else {
       this.rawPhasedOutKey = null;
@@ -119,6 +152,7 @@ export class VersionedEncryptionService {
    *
    * @param plaintext - String to encrypt
    * @returns Versioned encrypted string
+   * @throws OversizedPlaintextError if plaintext exceeds MAX_PLAINTEXT_BYTES (16KB)
    * @throws EncryptionError if encryption fails
    */
   async encrypt(plaintext: string): Promise<string> {
@@ -133,17 +167,25 @@ export class VersionedEncryptionService {
    *
    * @param plaintext - String to encrypt
    * @returns Versioned encrypted string
+   * @throws OversizedPlaintextError if plaintext exceeds MAX_PLAINTEXT_BYTES
    * @throws EncryptionError if encryption fails
    */
   async encryptUnlocked(plaintext: string): Promise<string> {
     try {
+      // Encode plaintext to bytes for size validation
+      const encoded = new TextEncoder().encode(plaintext);
+
+      // Validate size before encryption
+      if (encoded.byteLength > MAX_PLAINTEXT_BYTES) {
+        throw new OversizedPlaintextError(
+          `Plaintext size (${encoded.byteLength} bytes) exceeds maximum allowed size (${MAX_PLAINTEXT_BYTES} bytes / ${MAX_PLAINTEXT_BYTES / 1024}KB)`
+        );
+      }
+
       const key = await this.getCurrentKey();
 
       // Generate random 12-byte IV
       const iv = crypto.getRandomValues(new Uint8Array(12));
-
-      // Encode plaintext to bytes
-      const encoded = new TextEncoder().encode(plaintext);
 
       // Encrypt with AES-GCM (auth tag automatically appended)
       const ciphertext = await crypto.subtle.encrypt(
@@ -160,7 +202,7 @@ export class VersionedEncryptionService {
       // Prepend version character
       return this.currentVersion + bytesToBase64(combined);
     } catch (error) {
-      if (error instanceof EncryptionError) {
+      if (error instanceof OversizedPlaintextError || error instanceof EncryptionError) {
         throw error;
       }
       throw new EncryptionError("Failed to encrypt data", error);
@@ -204,9 +246,25 @@ export class VersionedEncryptionService {
       // Decode base64 to bytes
       const combined = base64ToBytes(data);
 
+      // AES-GCM minimum: 12-byte IV + 16-byte auth tag = 28 bytes
+      const MIN_ENCRYPTED_LENGTH = 28;
+      if (combined.length < MIN_ENCRYPTED_LENGTH) {
+        throw new DecryptionError(
+          `Corrupted encrypted data: expected at least ${MIN_ENCRYPTED_LENGTH} bytes, got ${combined.length}`
+        );
+      }
+
       // Extract IV (first 12 bytes) and ciphertext (rest)
       const iv = combined.slice(0, 12);
       const ciphertext = combined.slice(12);
+
+      // Defensive check: verify IV is exactly 12 bytes
+      // (Should be guaranteed by MIN_ENCRYPTED_LENGTH check, but verify explicitly)
+      if (iv.length !== 12) {
+        throw new DecryptionError(
+          `Corrupted encrypted data: IV must be exactly 12 bytes, got ${iv.length}`
+        );
+      }
 
       // Decrypt with AES-GCM (verifies auth tag automatically)
       const decrypted = await crypto.subtle.decrypt(
@@ -229,12 +287,16 @@ export class VersionedEncryptionService {
 
   /**
    * Update keys (called when rotation starts or completes).
-   * Thread-safe via mutex.
+   * Thread-safe via mutex. Also acquires rotation lock to ensure no
+   * encrypt/decrypt operations are in-flight during key updates.
    *
    * @param options - New key configuration
    */
   async updateKeys(options: VersionedEncryptionServiceOptions): Promise<void> {
-    using _lock = await this.keyMutex.acquire();
+    // Acquire rotation lock first to block new encrypt/decrypt operations
+    using _rotationLock = await this.rotationLock.acquire();
+    // Then acquire key mutex to serialize key updates
+    using _keyLock = await this.keyMutex.acquire();
     this.validateAndSetKeys(options);
     logger.info(
       `[VersionedEncryption] Keys updated (current: ${this.currentVersion}, phased_out: ${this.phasedOutVersion ?? "none"})`

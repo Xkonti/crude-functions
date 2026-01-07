@@ -4,7 +4,7 @@ import {
   validateRouteName,
   validateRoutePath,
   validateMethods,
-} from "../routes/routes_service.ts";
+} from "../validation/routes.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ConsoleLog } from "../logs/types.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
@@ -14,6 +14,7 @@ import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret, SecretPreview } from "../secrets/types.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
+import { formatForDisplay } from "../utils/datetime.ts";
 import {
   layout,
   escapeHtml,
@@ -23,8 +24,11 @@ import {
   buttonLink,
   getLayoutUser,
   formatDate,
+  secretScripts,
+  parseSecretFormData,
+  parseSecretEditFormData,
 } from "./templates.ts";
-import { validateId } from "../utils/validation.ts";
+import { validateId } from "../validation/common.ts";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
@@ -124,7 +128,7 @@ function renderSecretsPreview(previews: SecretPreview[]): string {
                 <div id="keys-${previewIdx}-${escapeHtml(groupName)}" style="display: none; margin-left: 1rem; margin-top: 0.5rem;">
                   ${keys.map(keySource => `
                     <div class="secret-value" style="margin-bottom: 0.25rem;">
-                      <span style="color: #6c757d;">• ${escapeHtml(groupName)}/${escapeHtml(keySource.keyValue || '')}:</span>
+                      <span style="color: #6c757d;">• ${escapeHtml(groupName)}/${escapeHtml(keySource.keyName || '')}:</span>
                       <span class="masked">••••••••</span>
                       <span class="revealed" style="display:none;">
                         <code>${escapeHtml(keySource.value)}</code>
@@ -147,47 +151,6 @@ function renderSecretsPreview(previews: SecretPreview[]): string {
         }).join('')}
       </div>
     </article>
-
-    <script>
-    function toggleSecret(btn) {
-      const container = btn.closest('.secret-value');
-      const masked = container.querySelector('.masked');
-      const revealed = container.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-
-    function toggleKeyExpansion(id) {
-      const container = document.getElementById(id);
-      const btn = event.target;
-      if (container.style.display === 'none') {
-        container.style.display = 'block';
-        btn.textContent = '▲';
-      } else {
-        container.style.display = 'none';
-        btn.textContent = '▼';
-      }
-    }
-    </script>
   `;
 }
 
@@ -213,10 +176,6 @@ function formatTimeShort(date: Date): string {
   const s = date.getSeconds().toString().padStart(2, "0");
   const ms = date.getMilliseconds().toString().padStart(3, "0");
   return `${h}:${m}:${s}.${ms}`;
-}
-
-function formatTimestampFull(date: Date): string {
-  return date.toISOString().replace("T", " ").substring(0, 23);
 }
 
 // Time flooring utilities for metrics
@@ -671,7 +630,7 @@ function renderLogsPage(
         : `
       <p style="color: #6c757d;">
         Showing ${logs.length} log${logs.length === 1 ? "" : "s"}${isViewingOlder ? " (viewing older)" : " (newest)"}:
-        <strong>${formatTimestampFull(logs[logs.length - 1].timestamp)}</strong> to <strong>${formatTimestampFull(logs[0].timestamp)}</strong>.
+        <strong>${formatForDisplay(logs[logs.length - 1].timestamp)}</strong> to <strong>${formatForDisplay(logs[0].timestamp)}</strong>.
         Click a row to expand.
       </p>
       <table class="logs-table">
@@ -698,7 +657,7 @@ function renderLogsPage(
                 const fullBase64 = toBase64(fullMessage);
                 return `
             <tr class="log-row" onclick="toggleLogDetail(${i})">
-              <td><code title="${escapeHtml(formatTimestampFull(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
+              <td><code title="${escapeHtml(formatForDisplay(log.timestamp))}">${formatTimeShort(log.timestamp)}</code></td>
               <td>${renderLogLevelBadge(log.level)}</td>
               <td><code class="request-id-copy" title="Click to copy: ${escapeHtml(log.requestId)}" onclick="copyRequestId(event, '${escapeHtml(log.requestId)}')">${escapeHtml(requestIdShort)}</code></td>
               <td class="log-message" data-raw="${truncatedBase64}"></td>
@@ -1076,7 +1035,21 @@ function renderFunctionForm(
     </form>
 
     ${isEdit ? `
+    ${secretScripts()}
     <script>
+    // Key group expansion toggle (used by dynamically loaded secrets preview)
+    function toggleKeyExpansion(id) {
+      const container = document.getElementById(id);
+      const btn = event.target;
+      if (container.style.display === 'none') {
+        container.style.display = 'block';
+        btn.textContent = '▲';
+      } else {
+        container.style.display = 'none';
+        btn.textContent = '▼';
+      }
+    }
+
     async function loadSecretsPreview(functionId) {
       const btn = document.getElementById('secrets-preview-btn');
       const container = document.getElementById('secrets-preview-container');
@@ -1184,24 +1157,30 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
           <tr>
             <td><code>${escapeHtml(secret.name)}</code></td>
             <td class="secret-value">
-              <span class="masked">••••••••</span>
-              <span class="revealed" style="display:none;">
-                <code>${escapeHtml(secret.value)}</code>
-              </span>
-              <button type="button" onclick="toggleSecret(this)"
-                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
-                👁️
-              </button>
-              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
-                      class="secondary" style="padding: 0.25rem 0.5rem;">
-                📋
-              </button>
+              ${
+                secret.decryptionError
+                  ? `<span style="color: #d32f2f;" title="${escapeHtml(secret.decryptionError)}">⚠️ Decryption failed</span>`
+                  : `
+                <span class="masked">••••••••</span>
+                <span class="revealed" style="display:none;">
+                  <code>${escapeHtml(secret.value)}</code>
+                </span>
+                <button type="button" onclick="toggleSecret(this)"
+                        class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                  👁️
+                </button>
+                <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                        class="secondary" style="padding: 0.25rem 0.5rem;">
+                  📋
+                </button>
+              `
+              }
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
-            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              <a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              ${secret.decryptionError ? "" : `<a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
               <a href="/web/functions/secrets/${functionId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
@@ -1211,34 +1190,7 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
       </tbody>
     </table>
 
-    <script>
-    function toggleSecret(btn) {
-      const td = btn.closest('td');
-      const masked = td.querySelector('.masked');
-      const revealed = td.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-    </script>
+    ${secretScripts()}
   `;
 }
 
@@ -1286,7 +1238,7 @@ function renderFunctionSecretCreateForm(
  */
 function renderFunctionSecretEditForm(
   functionId: number,
-  secret: { id: number; name: string; value: string; comment: string | null },
+  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string
 ): string {
   return `
@@ -1316,59 +1268,6 @@ function renderFunctionSecretEditForm(
       </div>
     </form>
   `;
-}
-
-/**
- * Parse and validate secret create form data
- */
-function parseSecretFormData(formData: FormData): {
-  secretData: { name: string; value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!name) {
-    errors.push("Secret name is required");
-  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-    errors.push(
-      "Secret name can only contain letters, numbers, underscores, and dashes"
-    );
-  }
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    secretData: { name, value, comment },
-    errors,
-  };
-}
-
-/**
- * Parse and validate secret edit form data
- */
-function parseSecretEditFormData(formData: FormData): {
-  editData: { value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    editData: { value, comment },
-    errors,
-  };
 }
 
 export function createFunctionsPages(

@@ -1,6 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
-import { validateKeyGroup, validateKeyValue } from "../keys/api_key_service.ts";
+import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
 import {
@@ -11,6 +11,9 @@ import {
   buttonLink,
   getLayoutUser,
   formatDate,
+  secretScripts,
+  parseSecretFormData,
+  parseSecretEditFormData,
 } from "./templates.ts";
 
 export function createKeysPages(
@@ -79,6 +82,7 @@ export function createKeysPages(
                   <thead>
                     <tr>
                       <th>ID</th>
+                      <th>Name</th>
                       <th>Value</th>
                       <th>Description</th>
                       <th class="actions">Actions</th>
@@ -90,6 +94,7 @@ export function createKeysPages(
                         (key) => `
                       <tr>
                         <td><code>${key.id}</code></td>
+                        <td><strong>${escapeHtml(key.name)}</strong></td>
                         <td class="secret-value">
                           <span class="masked">••••••••</span>
                           <span class="revealed" style="display:none;">
@@ -121,34 +126,7 @@ export function createKeysPages(
               .join("")
       }
 
-      <script>
-      function toggleSecret(btn) {
-        const td = btn.closest('td');
-        const masked = td.querySelector('.masked');
-        const revealed = td.querySelector('.revealed');
-
-        if (masked.style.display === 'none') {
-          masked.style.display = '';
-          revealed.style.display = 'none';
-          btn.textContent = '👁️';
-        } else {
-          masked.style.display = 'none';
-          revealed.style.display = '';
-          btn.textContent = '🙈';
-        }
-      }
-
-      function copySecret(btn, value) {
-        navigator.clipboard.writeText(value).then(() => {
-          const original = btn.textContent;
-          btn.textContent = '✓';
-          setTimeout(() => btn.textContent = original, 2000);
-        }).catch(err => {
-          console.error('Failed to copy:', err);
-          alert('Failed to copy to clipboard');
-        });
-      }
-      </script>
+      ${secretScripts()}
     `;
     return c.html(layout("API Keys", content, getLayoutUser(c)));
   });
@@ -320,6 +298,11 @@ export function createKeysPages(
           </label>
         </div>
         <label>
+          Key Name *
+          <input type="text" name="name" required placeholder="my-api-key">
+          <small>Lowercase letters, numbers, dashes, and underscores only. Must be unique within the group.</small>
+        </label>
+        <label>
           Key Value
           <input type="text" name="value" required placeholder="your-secret-key-value">
           <small>Letters, numbers, dashes, and underscores only</small>
@@ -355,7 +338,7 @@ export function createKeysPages(
 
   // Handle create
   routes.post("/create", async (c) => {
-    let body: { group?: string; newGroupName?: string; value?: string; description?: string };
+    let body: { group?: string; newGroupName?: string; name?: string; value?: string; description?: string };
     try {
       body = (await c.req.parseBody()) as typeof body;
     } catch {
@@ -364,6 +347,7 @@ export function createKeysPages(
 
     let group = (body.group as string | undefined)?.trim().toLowerCase() ?? "";
     const newGroupName = (body.newGroupName as string | undefined)?.trim().toLowerCase() ?? "";
+    const name = (body.name as string | undefined)?.trim().toLowerCase() ?? "";
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
 
@@ -392,6 +376,20 @@ export function createKeysPages(
       );
     }
 
+    if (!name) {
+      return c.redirect(
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+          encodeURIComponent("Key name is required")
+      );
+    }
+
+    if (!validateKeyName(name)) {
+      return c.redirect(
+        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+          encodeURIComponent("Invalid key name format (use lowercase a-z, 0-9, -, _)")
+      );
+    }
+
     if (!value) {
       return c.redirect(
         `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
@@ -407,8 +405,8 @@ export function createKeysPages(
     }
 
     try {
-      await apiKeyService.addKey(group, value, description);
-      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key created for group: ${group}`));
+      await apiKeyService.addKey(group, name, value, description);
+      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key '${name}' created for group: ${group}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create key";
       return c.redirect(
@@ -950,7 +948,7 @@ export function createKeysPages(
     // Load secrets for this key
     const secrets = await secretsService.getKeySecrets(keyId);
 
-    const keyDisplay = key.description || key.value;
+    const keyDisplay = key.name;
 
     const content = `
       <h1>Secrets for Key: ${escapeHtml(keyDisplay)}</h1>
@@ -998,7 +996,7 @@ export function createKeysPages(
     }
 
     const { key } = result;
-    const keyDisplay = key.description || key.value;
+    const keyDisplay = key.name;
 
     const content = `
       <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
@@ -1035,7 +1033,7 @@ export function createKeysPages(
     }
 
     const { key } = result;
-    const keyDisplay = key.description || key.value;
+    const keyDisplay = key.name;
 
     const formData = await c.req.formData();
     const { secretData, errors } = parseSecretFormData(formData);
@@ -1323,24 +1321,30 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
           <tr>
             <td><code>${escapeHtml(secret.name)}</code></td>
             <td class="secret-value">
-              <span class="masked">••••••••</span>
-              <span class="revealed" style="display:none;">
-                <code>${escapeHtml(secret.value)}</code>
-              </span>
-              <button type="button" onclick="toggleSecret(this)"
-                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
-                👁️
-              </button>
-              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
-                      class="secondary" style="padding: 0.25rem 0.5rem;">
-                📋
-              </button>
+              ${
+                secret.decryptionError
+                  ? `<span style="color: #d32f2f;" title="${escapeHtml(secret.decryptionError)}">⚠️ Decryption failed</span>`
+                  : `
+                <span class="masked">••••••••</span>
+                <span class="revealed" style="display:none;">
+                  <code>${escapeHtml(secret.value)}</code>
+                </span>
+                <button type="button" onclick="toggleSecret(this)"
+                        class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                  👁️
+                </button>
+                <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                        class="secondary" style="padding: 0.25rem 0.5rem;">
+                  📋
+                </button>
+              `
+              }
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
-            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              <a href="/web/keys/secrets/${groupId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              ${secret.decryptionError ? "" : `<a href="/web/keys/secrets/${groupId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
               <a href="/web/keys/secrets/${groupId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
@@ -1350,34 +1354,7 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
       </tbody>
     </table>
 
-    <script>
-    function toggleSecret(btn) {
-      const td = btn.closest('td');
-      const masked = td.querySelector('.masked');
-      const revealed = td.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-    </script>
+    ${secretScripts()}
   `;
 }
 
@@ -1425,7 +1402,7 @@ function renderGroupSecretCreateForm(
  */
 function renderGroupSecretEditForm(
   groupId: number,
-  secret: { id: number; name: string; value: string; comment: string | null },
+  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string
 ): string {
   return `
@@ -1457,59 +1434,6 @@ function renderGroupSecretEditForm(
   `;
 }
 
-/**
- * Parse and validate secret create form data
- */
-function parseSecretFormData(formData: FormData): {
-  secretData: { name: string; value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const name = formData.get("name")?.toString().trim() ?? "";
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!name) {
-    errors.push("Secret name is required");
-  } else if (!/^[a-zA-Z0-9_-]+$/.test(name)) {
-    errors.push(
-      "Secret name can only contain letters, numbers, underscores, and dashes"
-    );
-  }
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    secretData: { name, value, comment },
-    errors,
-  };
-}
-
-/**
- * Parse and validate secret edit form data
- */
-function parseSecretEditFormData(formData: FormData): {
-  editData: { value: string; comment: string };
-  errors: string[];
-} {
-  const errors: string[] = [];
-
-  const value = formData.get("value")?.toString() ?? "";
-  const comment = formData.get("comment")?.toString().trim() ?? "";
-
-  if (!value) {
-    errors.push("Secret value is required");
-  }
-
-  return {
-    editData: { value, comment },
-    errors,
-  };
-}
-
 // ============== Helper Functions for Key Secrets ==============
 
 /**
@@ -1535,24 +1459,30 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
           <tr>
             <td><code>${escapeHtml(secret.name)}</code></td>
             <td class="secret-value">
-              <span class="masked">••••••••</span>
-              <span class="revealed" style="display:none;">
-                <code>${escapeHtml(secret.value)}</code>
-              </span>
-              <button type="button" onclick="toggleSecret(this)"
-                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
-                👁️
-              </button>
-              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
-                      class="secondary" style="padding: 0.25rem 0.5rem;">
-                📋
-              </button>
+              ${
+                secret.decryptionError
+                  ? `<span style="color: #d32f2f;" title="${escapeHtml(secret.decryptionError)}">⚠️ Decryption failed</span>`
+                  : `
+                <span class="masked">••••••••</span>
+                <span class="revealed" style="display:none;">
+                  <code>${escapeHtml(secret.value)}</code>
+                </span>
+                <button type="button" onclick="toggleSecret(this)"
+                        class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                  👁️
+                </button>
+                <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                        class="secondary" style="padding: 0.25rem 0.5rem;">
+                  📋
+                </button>
+              `
+              }
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
-            <td>${formatDate(new Date(secret.modifiedAt))}</td>
+            <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              <a href="/web/keys/${keyId}/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              ${secret.decryptionError ? "" : `<a href="/web/keys/${keyId}/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
               <a href="/web/keys/${keyId}/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
@@ -1562,34 +1492,7 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
       </tbody>
     </table>
 
-    <script>
-    function toggleSecret(btn) {
-      const td = btn.closest('td');
-      const masked = td.querySelector('.masked');
-      const revealed = td.querySelector('.revealed');
-
-      if (masked.style.display === 'none') {
-        masked.style.display = '';
-        revealed.style.display = 'none';
-        btn.textContent = '👁️';
-      } else {
-        masked.style.display = 'none';
-        revealed.style.display = '';
-        btn.textContent = '🙈';
-      }
-    }
-
-    function copySecret(btn, value) {
-      navigator.clipboard.writeText(value).then(() => {
-        const original = btn.textContent;
-        btn.textContent = '✓';
-        setTimeout(() => btn.textContent = original, 2000);
-      }).catch(err => {
-        console.error('Failed to copy:', err);
-        alert('Failed to copy to clipboard');
-      });
-    }
-    </script>
+    ${secretScripts()}
   `;
 }
 
@@ -1637,7 +1540,7 @@ function renderKeySecretCreateForm(
  */
 function renderKeySecretEditForm(
   keyId: number,
-  secret: { id: number; name: string; value: string; comment: string | null },
+  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string
 ): string {
   return `

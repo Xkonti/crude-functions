@@ -9,10 +9,10 @@ import {
 interface SettingRow {
   id: number;
   name: string;
-  user_id: string | null;
+  userId: string | null;
   value: string | null;
-  is_encrypted: number;
-  modified_at: string;
+  isEncrypted: number;
+  updatedAt: string;
   [key: string]: unknown; // Index signature for Row compatibility
 }
 
@@ -28,10 +28,10 @@ export interface SettingsServiceOptions {
 /**
  * Service for managing application settings stored in the database.
  *
- * Settings can be global (user_id is NULL) or user-specific.
+ * Settings can be global (userId is NULL) or user-specific.
  * Values are stored as strings and parsed by consumers as needed.
  *
- * Supports optional encryption for sensitive settings (via is_encrypted flag).
+ * Supports optional encryption for sensitive settings (via isEncrypted flag).
  */
 export class SettingsService {
   private readonly db: DatabaseService;
@@ -51,14 +51,14 @@ export class SettingsService {
    */
   async getGlobalSetting(name: SettingName): Promise<string | null> {
     const row = await this.db.queryOne<SettingRow>(
-      `SELECT * FROM settings WHERE name = ? AND user_id IS NULL`,
+      `SELECT * FROM settings WHERE name = ? AND userId IS NULL`,
       [name]
     );
 
     if (!row) return null;
 
     // Handle encrypted values
-    if (row.is_encrypted && this.encryptionService && row.value) {
+    if (row.isEncrypted && this.encryptionService && row.value) {
       return await this.encryptionService.decrypt(row.value);
     }
 
@@ -73,14 +73,14 @@ export class SettingsService {
    */
   async getUserSetting(name: SettingName, userId: string): Promise<string | null> {
     const row = await this.db.queryOne<SettingRow>(
-      `SELECT * FROM settings WHERE name = ? AND user_id = ?`,
+      `SELECT * FROM settings WHERE name = ? AND userId = ?`,
       [name, userId]
     );
 
     if (!row) return null;
 
     // Handle encrypted values
-    if (row.is_encrypted && this.encryptionService && row.value) {
+    if (row.isEncrypted && this.encryptionService && row.value) {
       return await this.encryptionService.decrypt(row.value);
     }
 
@@ -106,10 +106,10 @@ export class SettingsService {
         : value;
 
     await this.db.execute(
-      `INSERT INTO settings (name, user_id, value, is_encrypted, modified_at)
+      `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
        VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (name, COALESCE(user_id, ''))
-       DO UPDATE SET value = ?, is_encrypted = ?, modified_at = CURRENT_TIMESTAMP`,
+       ON CONFLICT (name, COALESCE(userId, ''))
+       DO UPDATE SET value = ?, isEncrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
       [name, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
     );
   }
@@ -133,10 +133,10 @@ export class SettingsService {
         : value;
 
     await this.db.execute(
-      `INSERT INTO settings (name, user_id, value, is_encrypted, modified_at)
+      `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (name, COALESCE(user_id, ''))
-       DO UPDATE SET value = ?, is_encrypted = ?, modified_at = CURRENT_TIMESTAMP`,
+       ON CONFLICT (name, COALESCE(userId, ''))
+       DO UPDATE SET value = ?, isEncrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
       [name, userId, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
     );
   }
@@ -150,13 +150,13 @@ export class SettingsService {
   async bootstrapGlobalSettings(): Promise<void> {
     for (const [name, defaultValue] of Object.entries(GlobalSettingDefaults)) {
       const existing = await this.db.queryOne<{ id: number }>(
-        `SELECT id FROM settings WHERE name = ? AND user_id IS NULL`,
+        `SELECT id FROM settings WHERE name = ? AND userId IS NULL`,
         [name]
       );
 
       if (!existing) {
         await this.db.execute(
-          `INSERT INTO settings (name, user_id, value, is_encrypted, modified_at)
+          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
            VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)`,
           [name, defaultValue]
         );

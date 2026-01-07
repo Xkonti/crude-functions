@@ -30,28 +30,39 @@ const SECRETS_SCHEMA = `
     value TEXT NOT NULL,
     comment TEXT,
     scope INTEGER NOT NULL DEFAULT 0,
-    function_id INTEGER,
-    api_group_id INTEGER,
-    api_key_id INTEGER,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    functionId INTEGER,
+    apiGroupId INTEGER,
+    apiKeyId INTEGER,
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `;
 
 const API_KEYS_SCHEMA = `
-  CREATE TABLE api_key_groups (
+  CREATE TABLE apiKeyGroups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
-  CREATE TABLE api_keys (
+  CREATE TABLE apiKeys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES api_key_groups(id) ON DELETE CASCADE,
+    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
     value TEXT NOT NULL,
     description TEXT,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-    modified_at TEXT DEFAULT CURRENT_TIMESTAMP
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+`;
+
+const SETTINGS_SCHEMA = `
+  CREATE TABLE settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    value TEXT NOT NULL,
+    isEncrypted INTEGER NOT NULL DEFAULT 0,
+    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
 `;
 
@@ -81,6 +92,7 @@ async function createTestContext(
     phased_out_version: null,
     last_rotation_finished_at: new Date().toISOString(),
     better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
     ...keysOverride,
   };
   await keyStorage.saveKeys(keys);
@@ -90,6 +102,7 @@ async function createTestContext(
   await db.open();
   await db.exec(SECRETS_SCHEMA);
   await db.exec(API_KEYS_SCHEMA);
+  await db.exec(SETTINGS_SCHEMA);
 
   // Create encryption service
   const encryptionService = new VersionedEncryptionService({
@@ -137,7 +150,7 @@ async function insertApiKey(
 ): Promise<number> {
   const encrypted = await ctx.encryptionService.encrypt(plaintext);
   const result = await ctx.db.execute(
-    "INSERT INTO api_keys (group_id, value, description) VALUES (?, ?, 'test')",
+    "INSERT INTO apiKeys (groupId, value, description) VALUES (?, ?, 'test')",
     [groupId, encrypted]
   );
   return result.lastInsertRowId;
@@ -380,7 +393,7 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
 // API keys rotation tests
 // =====================
 
-Deno.test("KeyRotationService - rotates api_keys table", async () => {
+Deno.test("KeyRotationService - rotates apiKeys table", async () => {
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 100);
 
@@ -391,7 +404,7 @@ Deno.test("KeyRotationService - rotates api_keys table", async () => {
   try {
     // Create a group and add API keys
     await ctx.db.execute(
-      "INSERT INTO api_key_groups (name, description) VALUES (?, ?)",
+      "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
       ["test-group", "Test"]
     );
     await insertApiKey(ctx, 1, "api-key-value-1");
@@ -410,7 +423,7 @@ Deno.test("KeyRotationService - rotates api_keys table", async () => {
 
     // All API keys should be version B
     const rows = await ctx.db.queryAll<{ value: string }>(
-      "SELECT value FROM api_keys"
+      "SELECT value FROM apiKeys"
     );
 
     expect(rows.length).toBe(2);

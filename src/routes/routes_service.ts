@@ -18,31 +18,6 @@ export interface RoutesServiceOptions {
   db: DatabaseService;
 }
 
-const VALID_METHODS = [
-  "GET",
-  "POST",
-  "PUT",
-  "DELETE",
-  "PATCH",
-  "HEAD",
-  "OPTIONS",
-];
-
-export function validateRouteName(name: string): boolean {
-  return name.trim().length > 0;
-}
-
-export function validateRoutePath(path: string): boolean {
-  if (!path || !path.startsWith("/")) return false;
-  if (path !== "/" && path.includes("//")) return false;
-  return true;
-}
-
-export function validateMethods(methods: string[]): boolean {
-  if (!methods || methods.length === 0) return false;
-  return methods.every((m) => VALID_METHODS.includes(m));
-}
-
 // Row type for database queries
 interface RouteRow {
   [key: string]: unknown; // Index signature for Row compatibility
