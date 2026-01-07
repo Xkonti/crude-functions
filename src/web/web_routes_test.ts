@@ -71,6 +71,7 @@ const ROUTES_SCHEMA = `
     route TEXT NOT NULL,
     methods TEXT NOT NULL,
     keys TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
     createdAt TEXT DEFAULT CURRENT_TIMESTAMP
   );
   CREATE INDEX idx_routes_route ON routes(route);

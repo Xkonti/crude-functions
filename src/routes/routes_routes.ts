@@ -154,5 +154,34 @@ export function createRoutesRoutes(service: RoutesService): Hono {
     return c.json({ success: true });
   });
 
+  // PUT /api/routes/:id/enabled - Set route enabled/disabled state
+  routes.put("/:id/enabled", async (c) => {
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
+      return c.json({ error: "Invalid route ID" }, 400);
+    }
+
+    let body: { enabled?: boolean };
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    if (typeof body.enabled !== "boolean") {
+      return c.json({ error: "Missing or invalid 'enabled' field (must be boolean)" }, 400);
+    }
+
+    try {
+      await service.setRouteEnabled(id, body.enabled);
+      return c.json({ success: true, enabled: body.enabled });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("not found")) {
+        return c.json({ error: error.message }, 404);
+      }
+      throw error;
+    }
+  });
+
   return routes;
 }

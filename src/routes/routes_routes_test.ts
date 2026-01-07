@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS routes (
   route TEXT NOT NULL,
   methods TEXT NOT NULL,
   keys TEXT,
+  enabled INTEGER NOT NULL DEFAULT 1,
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
@@ -479,6 +480,249 @@ Deno.test("DELETE /api/routes/:id returns 404 for non-existent ID", async () => 
     });
 
     expect(res.status).toBe(404);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+// PUT /api/routes/:id/enabled tests
+Deno.test("PUT /api/routes/:id/enabled sets route to enabled", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    // Set to enabled (should already be enabled by default)
+    const res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.enabled).toBe(true);
+
+    // Verify in database
+    const updated = await service.getById(route!.id);
+    expect(updated!.enabled).toBe(true);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled sets route to disabled", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    // Disable the route
+    const res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.enabled).toBe(false);
+
+    // Verify in database
+    const updated = await service.getById(route!.id);
+    expect(updated!.enabled).toBe(false);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled toggles route state", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    // Initially enabled
+    expect((await service.getById(route!.id))!.enabled).toBe(true);
+
+    // Disable
+    await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect((await service.getById(route!.id))!.enabled).toBe(false);
+
+    // Re-enable
+    await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect((await service.getById(route!.id))!.enabled).toBe(true);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled is idempotent", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    // Disable multiple times
+    for (let i = 0; i < 3; i++) {
+      const res = await app.request(`/api/routes/${route!.id}/enabled`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      });
+      expect(res.status).toBe(200);
+      expect((await service.getById(route!.id))!.enabled).toBe(false);
+    }
+
+    // Enable multiple times
+    for (let i = 0; i < 3; i++) {
+      const res = await app.request(`/api/routes/${route!.id}/enabled`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      });
+      expect(res.status).toBe(200);
+      expect((await service.getById(route!.id))!.enabled).toBe(true);
+    }
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled returns 400 for invalid ID", async () => {
+  const { app, db } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/routes/invalid/enabled", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+
+    expect(res.status).toBe(400);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled returns 404 for non-existent route", async () => {
+  const { app, db } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/routes/999/enabled", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+
+    expect(res.status).toBe(404);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled returns 400 for missing enabled field", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    const res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("enabled");
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled returns 400 for non-boolean enabled field", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    // Test with string
+    let res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: "true" }),
+    });
+    expect(res.status).toBe(400);
+
+    // Test with number
+    res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: 1 }),
+    });
+    expect(res.status).toBe(400);
+
+    // Test with null
+    res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: null }),
+    });
+    expect(res.status).toBe(400);
+  } finally {
+    await cleanup(db);
+  }
+});
+
+Deno.test("PUT /api/routes/:id/enabled returns 400 for invalid JSON", async () => {
+  const routes = [
+    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+  ];
+  const { app, db, service } = await createTestApp(routes);
+
+  try {
+    const route = await service.getByName("test");
+
+    const res = await app.request(`/api/routes/${route!.id}/enabled`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: "invalid json{",
+    });
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toContain("JSON");
   } finally {
     await cleanup(db);
   }
