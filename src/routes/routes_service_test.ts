@@ -1,14 +1,11 @@
 import { expect } from "@std/expect";
-import {
-  RoutesService,
-  type FunctionRoute,
-} from "./routes_service.ts";
+import type { FunctionRoute } from "./routes_service.ts";
 import {
   validateRouteName,
   validateRoutePath,
   validateMethods,
 } from "../validation/routes.ts";
-import { DatabaseService } from "../database/database_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 
 // ============== Validation Function Tests ==============
 
@@ -66,53 +63,28 @@ Deno.test("validateMethods rejects invalid methods", () => {
 
 // ============== RoutesService Tests ==============
 
-const ROUTES_SCHEMA = `
-CREATE TABLE IF NOT EXISTS routes (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,
-  description TEXT,
-  handler TEXT NOT NULL,
-  route TEXT NOT NULL,
-  methods TEXT NOT NULL,
-  keys TEXT,
-  createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX IF NOT EXISTS idx_routes_route ON routes(route);
-`;
-
-async function createTestService(): Promise<{
-  service: RoutesService;
-  db: DatabaseService;
-}> {
-  const db = new DatabaseService({ databasePath: ":memory:" });
-  await db.open();
-  await db.exec(ROUTES_SCHEMA);
-  const service = new RoutesService({ db });
-  return { service, db };
-}
-
 // Basic CRUD tests
 Deno.test("RoutesService.getAll returns empty array initially", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    const routes = await service.getAll();
+    const routes = await ctx.routesService.getAll();
     expect(routes).toEqual([]);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.addRoute creates route with required fields", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
       route: "/hello",
       methods: ["GET"],
     });
 
-    const routes = await service.getAll();
+    const routes = await ctx.routesService.getAll();
     expect(routes.length).toBe(1);
     expect(routes[0].name).toBe("hello");
     expect(routes[0].handler).toBe("hello.ts");
@@ -121,14 +93,14 @@ Deno.test("RoutesService.addRoute creates route with required fields", async () 
     expect(routes[0].description).toBeUndefined();
     expect(routes[0].keys).toBeUndefined();
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.addRoute creates route with all fields", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       description: "Test route",
       handler: "test.ts",
@@ -137,41 +109,41 @@ Deno.test("RoutesService.addRoute creates route with all fields", async () => {
       keys: ["api-key"],
     });
 
-    const route = await service.getByName("test");
+    const route = await ctx.routesService.getByName("test");
     expect(route?.name).toBe("test");
     expect(route?.description).toBe("Test route");
     expect(route?.methods).toContain("GET");
     expect(route?.methods).toContain("POST");
     expect(route?.keys).toContain("api-key");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.getByName returns route or null", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
       route: "/hello",
       methods: ["GET"],
     });
 
-    const hello = await service.getByName("hello");
+    const hello = await ctx.routesService.getByName("hello");
     expect(hello?.name).toBe("hello");
 
-    const notFound = await service.getByName("nonexistent");
+    const notFound = await ctx.routesService.getByName("nonexistent");
     expect(notFound).toBe(null);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
       route: "/hello",
@@ -179,7 +151,7 @@ Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
     });
 
     await expect(
-      service.addRoute({
+      ctx.routesService.addRoute({
         name: "hello", // duplicate name
         handler: "other.ts",
         route: "/other",
@@ -187,14 +159,14 @@ Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
       })
     ).rejects.toThrow("already exists");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.addRoute throws on duplicate route+method", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
       route: "/users",
@@ -202,7 +174,7 @@ Deno.test("RoutesService.addRoute throws on duplicate route+method", async () =>
     });
 
     await expect(
-      service.addRoute({
+      ctx.routesService.addRoute({
         name: "different-name",
         handler: "other.ts",
         route: "/users", // same route
@@ -210,14 +182,14 @@ Deno.test("RoutesService.addRoute throws on duplicate route+method", async () =>
       })
     ).rejects.toThrow("already exists");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.addRoute allows same route with different methods", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "users-get",
       handler: "users-get.ts",
       route: "/users",
@@ -225,71 +197,71 @@ Deno.test("RoutesService.addRoute allows same route with different methods", asy
     });
 
     // Should succeed - same route but different method
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "users-post",
       handler: "users-post.ts",
       route: "/users",
       methods: ["POST"],
     });
 
-    const routes = await service.getAll();
+    const routes = await ctx.routesService.getAll();
     expect(routes.length).toBe(2);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.removeRoute removes by name", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
       route: "/hello",
       methods: ["GET"],
     });
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "users",
       handler: "users.ts",
       route: "/users",
       methods: ["GET"],
     });
 
-    await service.removeRoute("hello");
+    await ctx.routesService.removeRoute("hello");
 
-    const result = await service.getAll();
+    const result = await ctx.routesService.getAll();
     expect(result.length).toBe(1);
     expect(result[0].name).toBe("users");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.removeRoute is no-op for non-existent name", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
       route: "/hello",
       methods: ["GET"],
     });
 
-    await service.removeRoute("nonexistent");
+    await ctx.routesService.removeRoute("nonexistent");
 
-    const result = await service.getAll();
+    const result = await ctx.routesService.getAll();
     expect(result.length).toBe(1);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 // ============== Dirty Flag & Rebuild Tests ==============
 
 Deno.test("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
@@ -299,7 +271,7 @@ Deno.test("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async
     let rebuildCount = 0;
     let receivedRoutes: FunctionRoute[] = [];
 
-    await service.rebuildIfNeeded((routes) => {
+    await ctx.routesService.rebuildIfNeeded((routes) => {
       rebuildCount++;
       receivedRoutes = routes;
     });
@@ -308,38 +280,38 @@ Deno.test("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async
     expect(receivedRoutes.length).toBe(1);
     expect(receivedRoutes[0].name).toBe("test");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("rebuildIfNeeded skips rebuild when not dirty", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     let rebuildCount = 0;
 
     // First call - should rebuild (starts dirty)
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1);
 
     // Second call - should NOT rebuild (not dirty)
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1); // Still 1
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("rebuildIfNeeded rebuilds after addRoute", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     let rebuildCount = 0;
 
     // Initial rebuild
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1);
 
     // Add a route (marks dirty)
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "new",
       handler: "new.ts",
       route: "/new",
@@ -347,17 +319,17 @@ Deno.test("rebuildIfNeeded rebuilds after addRoute", async () => {
     });
 
     // Should rebuild again
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(2);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("rebuildIfNeeded rebuilds after removeRoute", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
@@ -367,15 +339,15 @@ Deno.test("rebuildIfNeeded rebuilds after removeRoute", async () => {
     let rebuildCount = 0;
 
     // Initial rebuild
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1);
 
     // Remove route (marks dirty)
-    await service.removeRoute("test");
+    await ctx.routesService.removeRoute("test");
 
     // Should rebuild again
     let receivedRoutes: FunctionRoute[] = [];
-    await service.rebuildIfNeeded((routes) => {
+    await ctx.routesService.rebuildIfNeeded((routes) => {
       rebuildCount++;
       receivedRoutes = routes;
     });
@@ -383,36 +355,36 @@ Deno.test("rebuildIfNeeded rebuilds after removeRoute", async () => {
     expect(rebuildCount).toBe(2);
     expect(receivedRoutes.length).toBe(0);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("removeRoute does not mark dirty if nothing deleted", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     let rebuildCount = 0;
 
     // Initial rebuild (clears dirty flag)
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1);
 
     // Remove non-existent route (should NOT mark dirty)
-    await service.removeRoute("nonexistent");
+    await ctx.routesService.removeRoute("nonexistent");
 
     // Should NOT rebuild
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1); // Still 1
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 // ============== Concurrency Tests ==============
 
 Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
@@ -425,7 +397,7 @@ Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
     const promises = Array(5)
       .fill(null)
       .map(() =>
-        service.rebuildIfNeeded(() => {
+        ctx.routesService.rebuildIfNeeded(() => {
           rebuildCount++;
         })
       );
@@ -435,17 +407,17 @@ Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
     // Should only rebuild once
     expect(rebuildCount).toBe(1);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("addRoute waits for in-progress rebuild", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     const events: string[] = [];
 
     // Start a slow rebuild
-    const rebuildPromise = service.rebuildIfNeeded(() => {
+    const rebuildPromise = ctx.routesService.rebuildIfNeeded(() => {
       events.push("rebuild-start");
       // Simulate some work (synchronous for test simplicity)
       const start = Date.now();
@@ -461,7 +433,7 @@ Deno.test("addRoute waits for in-progress rebuild", async () => {
     // Try to add a route while rebuild is in progress
     const addPromise = (async () => {
       events.push("add-waiting");
-      await service.addRoute({
+      await ctx.routesService.addRoute({
         name: "new",
         handler: "new.ts",
         route: "/new",
@@ -476,21 +448,21 @@ Deno.test("addRoute waits for in-progress rebuild", async () => {
     expect(events[0]).toBe("rebuild-start");
     expect(events.indexOf("rebuild-end")).toBeLessThan(events.indexOf("add-done"));
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("multiple writes are serialized", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     // Clear initial dirty flag
-    await service.rebuildIfNeeded(() => {});
+    await ctx.routesService.rebuildIfNeeded(() => {});
 
     // Fire multiple concurrent adds
     const promises = Array(5)
       .fill(null)
       .map((_, i) =>
-        service.addRoute({
+        ctx.routesService.addRoute({
           name: `route-${i}`,
           handler: `route-${i}.ts`,
           route: `/route-${i}`,
@@ -501,29 +473,29 @@ Deno.test("multiple writes are serialized", async () => {
     await Promise.all(promises);
 
     // All routes should be added
-    const routes = await service.getAll();
+    const routes = await ctx.routesService.getAll();
     expect(routes.length).toBe(5);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 // ============== updateRoute Tests ==============
 
 Deno.test("RoutesService.updateRoute updates route in place", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "original",
       handler: "original.ts",
       route: "/original",
       methods: ["GET"],
     });
 
-    const originalRoute = await service.getByName("original");
+    const originalRoute = await ctx.routesService.getByName("original");
     const originalId = originalRoute!.id;
 
-    await service.updateRoute(originalId, {
+    await ctx.routesService.updateRoute(originalId, {
       name: "updated",
       handler: "updated.ts",
       route: "/updated",
@@ -532,26 +504,26 @@ Deno.test("RoutesService.updateRoute updates route in place", async () => {
     });
 
     // Original name should not exist
-    const byOldName = await service.getByName("original");
+    const byOldName = await ctx.routesService.getByName("original");
     expect(byOldName).toBe(null);
 
     // New name should exist with same ID
-    const byNewName = await service.getByName("updated");
+    const byNewName = await ctx.routesService.getByName("updated");
     expect(byNewName?.id).toBe(originalId);
     expect(byNewName?.handler).toBe("updated.ts");
     expect(byNewName?.route).toBe("/updated");
     expect(byNewName?.methods).toEqual(["POST"]);
     expect(byNewName?.description).toBe("Updated description");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.updateRoute throws on non-existent ID", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     await expect(
-      service.updateRoute(999, {
+      ctx.routesService.updateRoute(999, {
         name: "test",
         handler: "test.ts",
         route: "/test",
@@ -559,30 +531,30 @@ Deno.test("RoutesService.updateRoute throws on non-existent ID", async () => {
       })
     ).rejects.toThrow("not found");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.updateRoute throws on duplicate name", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "first",
       handler: "first.ts",
       route: "/first",
       methods: ["GET"],
     });
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "second",
       handler: "second.ts",
       route: "/second",
       methods: ["POST"],
     });
 
-    const secondRoute = await service.getByName("second");
+    const secondRoute = await ctx.routesService.getByName("second");
 
     await expect(
-      service.updateRoute(secondRoute!.id, {
+      ctx.routesService.updateRoute(secondRoute!.id, {
         name: "first", // duplicate
         handler: "second.ts",
         route: "/second",
@@ -590,58 +562,58 @@ Deno.test("RoutesService.updateRoute throws on duplicate name", async () => {
       })
     ).rejects.toThrow("already exists");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.updateRoute allows keeping same name", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
       methods: ["GET"],
     });
 
-    const route = await service.getByName("test");
+    const route = await ctx.routesService.getByName("test");
 
     // Should not throw - keeping same name
-    await service.updateRoute(route!.id, {
+    await ctx.routesService.updateRoute(route!.id, {
       name: "test",
       handler: "updated.ts",
       route: "/test",
       methods: ["GET", "POST"],
     });
 
-    const updated = await service.getByName("test");
+    const updated = await ctx.routesService.getByName("test");
     expect(updated?.handler).toBe("updated.ts");
     expect(updated?.methods).toContain("POST");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.updateRoute throws on duplicate route+method", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "first",
       handler: "first.ts",
       route: "/users",
       methods: ["GET"],
     });
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "second",
       handler: "second.ts",
       route: "/other",
       methods: ["POST"],
     });
 
-    const secondRoute = await service.getByName("second");
+    const secondRoute = await ctx.routesService.getByName("second");
 
     await expect(
-      service.updateRoute(secondRoute!.id, {
+      ctx.routesService.updateRoute(secondRoute!.id, {
         name: "second",
         handler: "second.ts",
         route: "/users", // same route as first
@@ -649,41 +621,41 @@ Deno.test("RoutesService.updateRoute throws on duplicate route+method", async ()
       })
     ).rejects.toThrow("already exists");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.updateRoute allows keeping same route+method", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
       methods: ["GET", "POST"],
     });
 
-    const route = await service.getByName("test");
+    const route = await ctx.routesService.getByName("test");
 
     // Should not throw - same route/methods
-    await service.updateRoute(route!.id, {
+    await ctx.routesService.updateRoute(route!.id, {
       name: "test-renamed",
       handler: "test.ts",
       route: "/test",
       methods: ["GET", "POST"],
     });
 
-    const updated = await service.getByName("test-renamed");
+    const updated = await ctx.routesService.getByName("test-renamed");
     expect(updated?.route).toBe("/test");
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.updateRoute marks dirty flag", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
@@ -691,11 +663,11 @@ Deno.test("RoutesService.updateRoute marks dirty flag", async () => {
     });
 
     let rebuildCount = 0;
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1);
 
-    const route = await service.getByName("test");
-    await service.updateRoute(route!.id, {
+    const route = await ctx.routesService.getByName("test");
+    await ctx.routesService.updateRoute(route!.id, {
       name: "test",
       handler: "updated.ts",
       route: "/test",
@@ -703,47 +675,47 @@ Deno.test("RoutesService.updateRoute marks dirty flag", async () => {
     });
 
     // Should rebuild after update
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(2);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 // ============== removeRouteById Tests ==============
 
 Deno.test("RoutesService.removeRouteById removes by ID", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
-    await service.addRoute({
+    await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
       route: "/test",
       methods: ["GET"],
     });
 
-    const route = await service.getByName("test");
-    await service.removeRouteById(route!.id);
+    const route = await ctx.routesService.getByName("test");
+    await ctx.routesService.removeRouteById(route!.id);
 
-    const result = await service.getByName("test");
+    const result = await ctx.routesService.getByName("test");
     expect(result).toBe(null);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
 
 Deno.test("RoutesService.removeRouteById is no-op for non-existent ID", async () => {
-  const { service, db } = await createTestService();
+  const ctx = await TestSetupBuilder.create().build();
   try {
     let rebuildCount = 0;
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
 
-    await service.removeRouteById(999);
+    await ctx.routesService.removeRouteById(999);
 
     // Should NOT mark dirty
-    await service.rebuildIfNeeded(() => rebuildCount++);
+    await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
     expect(rebuildCount).toBe(1);
   } finally {
-    await db.close();
+    await ctx.cleanup();
   }
 });
