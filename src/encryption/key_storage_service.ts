@@ -308,9 +308,6 @@ export class KeyStorageService {
 
     // Validate base64 format (basic check - should decode without error)
     try {
-      const decoder = new TextDecoder();
-      const encoder = new TextEncoder();
-
       // Validate current_key is valid base64
       atob(keys.current_key);
 
