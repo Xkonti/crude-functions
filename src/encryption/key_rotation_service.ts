@@ -137,9 +137,36 @@ export class KeyRotationService {
 
               // Auto-shutdown after max failures
               if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                logger.error(
-                  "[KeyRotation] Max consecutive failures reached, stopping service"
-                );
+                // Check if we're stopping mid-rotation
+                this.keyStorage
+                  .loadKeys()
+                  .then((keys) => {
+                    const midRotation =
+                      keys !== null && this.keyStorage.isRotationInProgress(keys);
+                    if (midRotation) {
+                      logger.error(
+                        "[KeyRotation] CRITICAL: Max consecutive failures reached while rotation in progress!"
+                      );
+                      logger.error(
+                        "[KeyRotation] The system has both current and phased_out keys. " +
+                          "Some records may be encrypted with the old key."
+                      );
+                      logger.error(
+                        "[KeyRotation] Recovery: Restart the service to automatically resume rotation, " +
+                          "or manually trigger rotation via the API."
+                      );
+                    } else {
+                      logger.error(
+                        "[KeyRotation] Max consecutive failures reached, stopping service"
+                      );
+                    }
+                  })
+                  .catch(() => {
+                    logger.error(
+                      "[KeyRotation] Max consecutive failures reached, stopping service (could not check rotation state)"
+                    );
+                  });
+
                 if (this.timerId !== null) {
                   clearInterval(this.timerId);
                   this.timerId = null;
@@ -187,6 +214,37 @@ export class KeyRotationService {
 
     this.stopRequested = false;
     logger.info("[KeyRotation] Stopped");
+  }
+
+  /**
+   * Get current rotation status for monitoring/alerting.
+   * Returns information about the rotation service state.
+   */
+  async getRotationStatus(): Promise<{
+    isRunning: boolean;
+    isRotating: boolean;
+    hasIncompleteRotation: boolean;
+    consecutiveFailures: number;
+    maxConsecutiveFailures: number;
+  }> {
+    let hasIncompleteRotation = false;
+
+    try {
+      const keys = await this.keyStorage.loadKeys();
+      if (keys) {
+        hasIncompleteRotation = this.keyStorage.isRotationInProgress(keys);
+      }
+    } catch {
+      // Ignore errors loading keys for status check
+    }
+
+    return {
+      isRunning: this.timerId !== null,
+      isRotating: this.isRotating,
+      hasIncompleteRotation,
+      consecutiveFailures: this.consecutiveFailures,
+      maxConsecutiveFailures: MAX_CONSECUTIVE_FAILURES,
+    };
   }
 
   /**
@@ -246,7 +304,12 @@ export class KeyRotationService {
 
     // 4. Check if previous rotation incomplete (2 keys exist)
     if (this.keyStorage.isRotationInProgress(keys)) {
-      logger.info("[KeyRotation] Resuming incomplete rotation");
+      logger.warn(
+        "[KeyRotation] Detected incomplete rotation from previous run. " +
+          "Both current and phased_out keys exist. Resuming rotation..."
+      );
+      // Reset failure counter - this is a fresh attempt after restart
+      this.consecutiveFailures = 0;
       await this.performRotation(keys);
       return;
     }
@@ -489,7 +552,7 @@ export class KeyRotationService {
 
         if (result.changes === 0) {
           logger.warn(
-            `[KeyRotation] Optimistic concurrency conflict for ${table} id=${record.id}, will retry`
+            `[KeyRotation] Optimistic concurrency conflict for ${table} id=${record.id}, will be picked up in next batch`
           );
         } else {
           successCount++;

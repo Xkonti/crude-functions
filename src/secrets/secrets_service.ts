@@ -70,11 +70,19 @@ export class SecretsService {
     // Decrypt all values
     const secrets: Secret[] = [];
     for (const row of rows) {
-      const decryptedValue = await this.encryptionService.decrypt(row.value);
+      let decryptedValue = "";
+      let decryptionError: string | undefined;
+      try {
+        decryptedValue = await this.encryptionService.decrypt(row.value);
+      } catch (error) {
+        decryptionError =
+          error instanceof Error ? error.message : "Decryption failed";
+      }
       secrets.push({
         id: row.id,
         name: row.name,
         value: decryptedValue,
+        decryptionError,
         comment: row.comment,
         scope: row.scope,
         functionId: row.functionId,
@@ -114,12 +122,20 @@ export class SecretsService {
 
     if (!row) return null;
 
-    const decryptedValue = await this.encryptionService.decrypt(row.value);
+    let decryptedValue = "";
+    let decryptionError: string | undefined;
+    try {
+      decryptedValue = await this.encryptionService.decrypt(row.value);
+    } catch (error) {
+      decryptionError =
+        error instanceof Error ? error.message : "Decryption failed";
+    }
 
     return {
       id: row.id,
       name: row.name,
       value: decryptedValue,
+      decryptionError,
       comment: row.comment,
       scope: row.scope,
       functionId: row.functionId,
@@ -231,11 +247,19 @@ export class SecretsService {
     // Decrypt all values
     const secrets: Secret[] = [];
     for (const row of rows) {
-      const decryptedValue = await this.encryptionService.decrypt(row.value);
+      let decryptedValue = "";
+      let decryptionError: string | undefined;
+      try {
+        decryptedValue = await this.encryptionService.decrypt(row.value);
+      } catch (error) {
+        decryptionError =
+          error instanceof Error ? error.message : "Decryption failed";
+      }
       secrets.push({
         id: row.id,
         name: row.name,
         value: decryptedValue,
+        decryptionError,
         comment: row.comment,
         scope: row.scope,
         functionId: row.functionId,
@@ -278,12 +302,20 @@ export class SecretsService {
 
     if (!row) return null;
 
-    const decryptedValue = await this.encryptionService.decrypt(row.value);
+    let decryptedValue = "";
+    let decryptionError: string | undefined;
+    try {
+      decryptedValue = await this.encryptionService.decrypt(row.value);
+    } catch (error) {
+      decryptionError =
+        error instanceof Error ? error.message : "Decryption failed";
+    }
 
     return {
       id: row.id,
       name: row.name,
       value: decryptedValue,
+      decryptionError,
       comment: row.comment,
       scope: row.scope,
       functionId: row.functionId,
@@ -413,11 +445,19 @@ export class SecretsService {
     // Decrypt all values
     const secrets: Secret[] = [];
     for (const row of rows) {
-      const decryptedValue = await this.encryptionService.decrypt(row.value);
+      let decryptedValue = "";
+      let decryptionError: string | undefined;
+      try {
+        decryptedValue = await this.encryptionService.decrypt(row.value);
+      } catch (error) {
+        decryptionError =
+          error instanceof Error ? error.message : "Decryption failed";
+      }
       secrets.push({
         id: row.id,
         name: row.name,
         value: decryptedValue,
+        decryptionError,
         comment: row.comment,
         scope: row.scope,
         functionId: row.functionId,
@@ -460,12 +500,20 @@ export class SecretsService {
 
     if (!row) return null;
 
-    const decryptedValue = await this.encryptionService.decrypt(row.value);
+    let decryptedValue = "";
+    let decryptionError: string | undefined;
+    try {
+      decryptedValue = await this.encryptionService.decrypt(row.value);
+    } catch (error) {
+      decryptionError =
+        error instanceof Error ? error.message : "Decryption failed";
+    }
 
     return {
       id: row.id,
       name: row.name,
       value: decryptedValue,
+      decryptionError,
       comment: row.comment,
       scope: row.scope,
       functionId: row.functionId,
@@ -595,11 +643,19 @@ export class SecretsService {
     // Decrypt all values
     const secrets: Secret[] = [];
     for (const row of rows) {
-      const decryptedValue = await this.encryptionService.decrypt(row.value);
+      let decryptedValue = "";
+      let decryptionError: string | undefined;
+      try {
+        decryptedValue = await this.encryptionService.decrypt(row.value);
+      } catch (error) {
+        decryptionError =
+          error instanceof Error ? error.message : "Decryption failed";
+      }
       secrets.push({
         id: row.id,
         name: row.name,
         value: decryptedValue,
+        decryptionError,
         comment: row.comment,
         scope: row.scope,
         functionId: row.functionId,
@@ -642,12 +698,20 @@ export class SecretsService {
 
     if (!row) return null;
 
-    const decryptedValue = await this.encryptionService.decrypt(row.value);
+    let decryptedValue = "";
+    let decryptionError: string | undefined;
+    try {
+      decryptedValue = await this.encryptionService.decrypt(row.value);
+    } catch (error) {
+      decryptionError =
+        error instanceof Error ? error.message : "Decryption failed";
+    }
 
     return {
       id: row.id,
       name: row.name,
       value: decryptedValue,
+      decryptionError,
       comment: row.comment,
       scope: row.scope,
       functionId: row.functionId,
@@ -850,6 +914,7 @@ export class SecretsService {
       previewMap.get(secret.name)!.sources.push({
         scope: 'global',
         value: secret.value,
+        decryptionError: secret.decryptionError,
       });
     }
 
@@ -862,6 +927,7 @@ export class SecretsService {
       previewMap.get(secret.name)!.sources.push({
         scope: 'function',
         value: secret.value,
+        decryptionError: secret.decryptionError,
       });
     }
 
@@ -888,6 +954,7 @@ export class SecretsService {
           previewMap.get(secret.name)!.sources.push({
             scope: 'group',
             value: secret.value,
+            decryptionError: secret.decryptionError,
             groupId: group.id,
             groupName: group.name,
           });
@@ -910,13 +977,21 @@ export class SecretsService {
         }>(keySecretsQuery, [SecretScope.Key, group.id]);
 
         for (const row of keySecretRows) {
-          const decryptedValue = await this.encryptionService.decrypt(row.value);
+          let decryptedValue = "";
+          let decryptionError: string | undefined;
+          try {
+            decryptedValue = await this.encryptionService.decrypt(row.value);
+          } catch (error) {
+            decryptionError =
+              error instanceof Error ? error.message : "Decryption failed";
+          }
           if (!previewMap.has(row.name)) {
             previewMap.set(row.name, { name: row.name, sources: [] });
           }
           previewMap.get(row.name)!.sources.push({
             scope: 'key',
             value: decryptedValue,
+            decryptionError,
             groupId: group.id,
             groupName: group.name,
             keyId: row.apiKeyId,

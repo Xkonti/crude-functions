@@ -1157,24 +1157,30 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
           <tr>
             <td><code>${escapeHtml(secret.name)}</code></td>
             <td class="secret-value">
-              <span class="masked">••••••••</span>
-              <span class="revealed" style="display:none;">
-                <code>${escapeHtml(secret.value)}</code>
-              </span>
-              <button type="button" onclick="toggleSecret(this)"
-                      class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
-                👁️
-              </button>
-              <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
-                      class="secondary" style="padding: 0.25rem 0.5rem;">
-                📋
-              </button>
+              ${
+                secret.decryptionError
+                  ? `<span style="color: #d32f2f;" title="${escapeHtml(secret.decryptionError)}">⚠️ Decryption failed</span>`
+                  : `
+                <span class="masked">••••••••</span>
+                <span class="revealed" style="display:none;">
+                  <code>${escapeHtml(secret.value)}</code>
+                </span>
+                <button type="button" onclick="toggleSecret(this)"
+                        class="secondary" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">
+                  👁️
+                </button>
+                <button type="button" onclick="copySecret(this, '${escapeHtml(secret.value).replace(/'/g, "\\'")}')"
+                        class="secondary" style="padding: 0.25rem 0.5rem;">
+                  📋
+                </button>
+              `
+              }
             </td>
             <td>${secret.comment ? escapeHtml(secret.comment) : "<em>—</em>"}</td>
             <td>${formatDate(new Date(secret.createdAt))}</td>
             <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              <a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+              ${secret.decryptionError ? "" : `<a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
               <a href="/web/functions/secrets/${functionId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
@@ -1232,7 +1238,7 @@ function renderFunctionSecretCreateForm(
  */
 function renderFunctionSecretEditForm(
   functionId: number,
-  secret: { id: number; name: string; value: string; comment: string | null },
+  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string
 ): string {
   return `
