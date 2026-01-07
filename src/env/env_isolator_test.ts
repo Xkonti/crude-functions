@@ -7,26 +7,77 @@ import { runInEnvContext, createEnvContext } from "./env_context.ts";
 // Test setup/teardown helpers
 // =====================
 
-function setup(): EnvIsolator {
-  const isolator = new EnvIsolator();
-  isolator.install();
-  return isolator;
+/**
+ * Test context for EnvIsolator tests.
+ * Provides clean setup and teardown with automatic cleanup.
+ */
+interface EnvIsolatorTestContext {
+  isolator: EnvIsolator;
+  originalEnv: typeof Deno.env;
+  cleanup: () => void;
 }
 
-function cleanup(isolator: EnvIsolator): void {
-  isolator.uninstall();
+/**
+ * Create a test context with an installed EnvIsolator.
+ * Automatically tracks environment variables set during the test for cleanup.
+ */
+function createTestContext(): EnvIsolatorTestContext {
+  const isolator = new EnvIsolator();
+  isolator.install();
+  const originalEnv = _getOriginalDenoEnvForTesting();
+  const envVarsToClean = new Set<string>();
+
+  return {
+    isolator,
+    originalEnv: new Proxy(originalEnv, {
+      get(target, prop) {
+        const value = Reflect.get(target, prop);
+        // Track set() calls to auto-cleanup
+        if (prop === "set") {
+          return (key: string, val: string) => {
+            envVarsToClean.add(key);
+            return value.call(target, key, val);
+          };
+        }
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }),
+    cleanup: () => {
+      // Clean up any environment variables that were set
+      for (const key of envVarsToClean) {
+        try {
+          originalEnv.delete(key);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+      isolator.uninstall();
+    },
+  };
+}
+
+/**
+ * Helper to run a test with automatic EnvIsolator setup and cleanup.
+ * Reduces boilerplate in test code.
+ */
+async function withEnvIsolator(
+  testFn: (ctx: EnvIsolatorTestContext) => void | Promise<void>
+): Promise<void> {
+  const ctx = createTestContext();
+  try {
+    await testFn(ctx);
+  } finally {
+    ctx.cleanup();
+  }
 }
 
 // =====================
 // Basic isolation tests
 // =====================
 
-Deno.test("EnvIsolator returns undefined for all keys inside handler context", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator returns undefined for all keys inside handler context", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     // Set a real env var first (outside context)
-    const originalEnv = _getOriginalDenoEnvForTesting();
     originalEnv.set("TEST_REAL_VAR", "real-value");
 
     const result = runInEnvContext(createEnvContext(), () => {
@@ -35,33 +86,22 @@ Deno.test("EnvIsolator returns undefined for all keys inside handler context", (
     });
 
     expect(result).toBe(undefined);
-
-    // Cleanup
-    originalEnv.delete("TEST_REAL_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator allows setting and getting values inside handler context", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator allows setting and getting values inside handler context", async () => {
+  await withEnvIsolator(() => {
     const result = runInEnvContext(createEnvContext(), () => {
       Deno.env.set("HANDLER_VAR", "handler-value");
       return Deno.env.get("HANDLER_VAR");
     });
 
     expect(result).toBe("handler-value");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
 Deno.test("EnvIsolator isolates between concurrent handler executions", async () => {
-  const isolator = setup();
-
-  try {
+  await withEnvIsolator(async () => {
     const results: string[] = [];
 
     const handler1 = runInEnvContext(createEnvContext(), async () => {
@@ -82,35 +122,22 @@ Deno.test("EnvIsolator isolates between concurrent handler executions", async ()
     // Each handler should see its own value
     expect(results).toContain("value-1");
     expect(results).toContain("value-2");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator returns real env outside handler context", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("EnvIsolator returns real env outside handler context", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     originalEnv.set("SYSTEM_VAR", "system-value");
 
     // Outside any handler context
     const result = Deno.env.get("SYSTEM_VAR");
 
     expect(result).toBe("system-value");
-
-    // Cleanup
-    originalEnv.delete("SYSTEM_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator has() returns correct values", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("EnvIsolator has() returns correct values", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     originalEnv.set("REAL_VAR", "exists");
 
     runInEnvContext(createEnvContext(), () => {
@@ -121,18 +148,11 @@ Deno.test("EnvIsolator has() returns correct values", () => {
       Deno.env.set("HANDLER_VAR", "exists");
       expect(Deno.env.has("HANDLER_VAR")).toBe(true);
     });
-
-    // Cleanup
-    originalEnv.delete("REAL_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator delete() works correctly", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator delete() works correctly", async () => {
+  await withEnvIsolator(() => {
     runInEnvContext(createEnvContext(), () => {
       Deno.env.set("DELETE_ME", "value");
       expect(Deno.env.has("DELETE_ME")).toBe(true);
@@ -140,16 +160,11 @@ Deno.test("EnvIsolator delete() works correctly", () => {
       Deno.env.delete("DELETE_ME");
       expect(Deno.env.has("DELETE_ME")).toBe(false);
     });
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator toObject() returns isolated store contents", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("EnvIsolator toObject() returns isolated store contents", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     originalEnv.set("REAL_VAR", "real");
 
     const result = runInEnvContext(createEnvContext(), () => {
@@ -161,58 +176,34 @@ Deno.test("EnvIsolator toObject() returns isolated store contents", () => {
     // Should only contain handler vars, not real vars
     expect(result).toEqual({ HANDLER_A: "a", HANDLER_B: "b" });
     expect(result["REAL_VAR"]).toBeUndefined();
-
-    // Cleanup
-    originalEnv.delete("REAL_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator toObject() returns real env outside context", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("EnvIsolator toObject() returns real env outside context", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     originalEnv.set("SYSTEM_VAR", "system");
 
     // Outside context should return real env
     const result = Deno.env.toObject();
     expect(result.SYSTEM_VAR).toBe("system");
-
-    // Cleanup
-    originalEnv.delete("SYSTEM_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator install is idempotent", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator install is idempotent", async () => {
+  await withEnvIsolator(({ isolator, originalEnv }) => {
     // Install again - should not throw or double-wrap
     isolator.install();
     isolator.install();
 
-    const originalEnv = _getOriginalDenoEnvForTesting();
     originalEnv.set("TEST_VAR", "value");
 
     // Should still work correctly
     expect(Deno.env.get("TEST_VAR")).toBe("value");
-
-    // Cleanup
-    originalEnv.delete("TEST_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator can be uninstalled", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("EnvIsolator can be uninstalled", async () => {
+  await withEnvIsolator(({ isolator, originalEnv }) => {
     originalEnv.set("RESTORE_TEST", "original");
 
     // Verify isolation works
@@ -225,15 +216,7 @@ Deno.test("EnvIsolator can be uninstalled", () => {
 
     // Now should see real env directly
     expect(Deno.env.get("RESTORE_TEST")).toBe("original");
-
-    // Cleanup
-    originalEnv.delete("RESTORE_TEST");
-  } finally {
-    // Already uninstalled, but ensure cleanup
-    if (isolator.installed) {
-      cleanup(isolator);
-    }
-  }
+  });
 });
 
 Deno.test("EnvIsolator installed property reflects state", () => {
@@ -252,11 +235,8 @@ Deno.test("EnvIsolator installed property reflects state", () => {
 // process.env tests
 // =====================
 
-Deno.test("process.env mirrors Deno.env isolation", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("process.env mirrors Deno.env isolation", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     originalEnv.set("PROCESS_TEST", "real");
 
     runInEnvContext(createEnvContext(), () => {
@@ -271,53 +251,34 @@ Deno.test("process.env mirrors Deno.env isolation", () => {
       process.env.REVERSE_SET = "reverse";
       expect(Deno.env.get("REVERSE_SET")).toBe("reverse");
     });
-
-    // Cleanup
-    originalEnv.delete("PROCESS_TEST");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("process.env assignment works in isolated context", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("process.env assignment works in isolated context", async () => {
+  await withEnvIsolator(() => {
     runInEnvContext(createEnvContext(), () => {
       process.env.MY_CONFIG = "my-value";
       expect(process.env.MY_CONFIG).toBe("my-value");
       expect(Deno.env.get("MY_CONFIG")).toBe("my-value");
     });
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("process.env is isolated outside handler context uses real env", () => {
-  const isolator = setup();
-
-  try {
-    const originalEnv = _getOriginalDenoEnvForTesting();
+Deno.test("process.env is isolated outside handler context uses real env", async () => {
+  await withEnvIsolator(({ originalEnv }) => {
     originalEnv.set("SYSTEM_PROCESS_VAR", "system-value");
 
     // Outside context, process.env should see real env
     expect(process.env.SYSTEM_PROCESS_VAR).toBe("system-value");
-
-    // Cleanup
-    originalEnv.delete("SYSTEM_PROCESS_VAR");
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
 // =====================
 // Edge cases
 // =====================
 
-Deno.test("EnvIsolator handles empty keys gracefully", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator handles empty keys gracefully", async () => {
+  await withEnvIsolator(() => {
     runInEnvContext(createEnvContext(), () => {
       // These shouldn't throw
       Deno.env.set("", "empty-key-value");
@@ -326,29 +287,21 @@ Deno.test("EnvIsolator handles empty keys gracefully", () => {
       Deno.env.delete("");
       expect(Deno.env.has("")).toBe(false);
     });
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator handles special characters in values", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator handles special characters in values", async () => {
+  await withEnvIsolator(() => {
     runInEnvContext(createEnvContext(), () => {
       const specialValue = "value with spaces\nand\ttabs\r\nand=equals";
       Deno.env.set("SPECIAL", specialValue);
       expect(Deno.env.get("SPECIAL")).toBe(specialValue);
     });
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator context is fresh for each createEnvContext call", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator context is fresh for each createEnvContext call", async () => {
+  await withEnvIsolator(() => {
     // First context
     runInEnvContext(createEnvContext(), () => {
       Deno.env.set("VAR", "first");
@@ -360,15 +313,11 @@ Deno.test("EnvIsolator context is fresh for each createEnvContext call", () => {
     });
 
     expect(result).toBe(undefined);
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
 
-Deno.test("EnvIsolator nested contexts use innermost store", () => {
-  const isolator = setup();
-
-  try {
+Deno.test("EnvIsolator nested contexts use innermost store", async () => {
+  await withEnvIsolator(() => {
     runInEnvContext(createEnvContext(), () => {
       Deno.env.set("OUTER", "outer-value");
 
@@ -384,7 +333,5 @@ Deno.test("EnvIsolator nested contexts use innermost store", () => {
       expect(Deno.env.get("OUTER")).toBe("outer-value");
       expect(Deno.env.get("INNER")).toBe(undefined);
     });
-  } finally {
-    cleanup(isolator);
-  }
+  });
 });
