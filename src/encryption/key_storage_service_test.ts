@@ -3,20 +3,69 @@ import { KeyStorageService } from "./key_storage_service.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
 import { InvalidKeyError, KeyStorageCorruptionError } from "./errors.ts";
 
-// Helper to create a temp directory for tests
-async function createTestContext(): Promise<{
+/**
+ * Test context for KeyStorageService tests.
+ */
+interface KeyStorageTestContext {
   tempDir: string;
   keyFilePath: string;
   service: KeyStorageService;
-}> {
-  const tempDir = await Deno.makeTempDir();
-  const keyFilePath = `${tempDir}/encryption-keys.json`;
-  const service = new KeyStorageService({ keyFilePath });
-  return { tempDir, keyFilePath, service };
+  cleanup: () => Promise<void>;
 }
 
-async function cleanup(tempDir: string): Promise<void> {
-  await Deno.remove(tempDir, { recursive: true });
+/**
+ * Builder for creating isolated KeyStorageService test environments.
+ * Follows the same pattern as TestSetupBuilder but lightweight for unit tests.
+ */
+class KeyStorageTestBuilder {
+  private existingKeys?: EncryptionKeyFile;
+
+  private constructor() {}
+
+  /**
+   * Create a new KeyStorageTestBuilder instance.
+   */
+  static create(): KeyStorageTestBuilder {
+    return new KeyStorageTestBuilder();
+  }
+
+  /**
+   * Pre-populate the key file with existing keys before building.
+   * Useful for testing loadKeys() and ensureInitialized() with existing data.
+   */
+  withExistingKeys(keys: EncryptionKeyFile): KeyStorageTestBuilder {
+    this.existingKeys = keys;
+    return this;
+  }
+
+  /**
+   * Build the test context with temp directory, key file, and service.
+   * Returns a cleanup function to be called in finally block.
+   */
+  async build(): Promise<KeyStorageTestContext> {
+    // Create temp directory for test isolation
+    const tempDir = await Deno.makeTempDir();
+    const keyFilePath = `${tempDir}/encryption-keys.json`;
+
+    // Pre-populate keys if specified
+    if (this.existingKeys) {
+      await Deno.writeTextFile(keyFilePath, JSON.stringify(this.existingKeys));
+    }
+
+    // Create service instance
+    const service = new KeyStorageService({ keyFilePath });
+
+    // Create cleanup function
+    const cleanup = async () => {
+      try {
+        await Deno.remove(tempDir, { recursive: true });
+      } catch {
+        // Ignore cleanup errors
+      }
+    };
+
+    return { tempDir, keyFilePath, service, cleanup };
+  }
 }
 
 // =====================
@@ -24,19 +73,17 @@ async function cleanup(tempDir: string): Promise<void> {
 // =====================
 
 Deno.test("KeyStorageService.loadKeys returns null when file doesn't exist", async () => {
-  const { tempDir, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   try {
-    const result = await service.loadKeys();
+    const result = await ctx.service.loadKeys();
     expect(result).toBe(null);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.loadKeys returns parsed JSON when file exists", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
-
   const keys: EncryptionKeyFile = {
     current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
     current_version: "A",
@@ -47,16 +94,19 @@ Deno.test("KeyStorageService.loadKeys returns parsed JSON when file exists", asy
     hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
+  const ctx = await KeyStorageTestBuilder.create()
+    .withExistingKeys(keys)
+    .build();
+
   try {
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(keys));
-    const result = await service.loadKeys();
+    const result = await ctx.service.loadKeys();
 
     expect(result).not.toBe(null);
     expect(result!.current_key).toBe(keys.current_key);
     expect(result!.current_version).toBe("A");
     expect(result!.phased_out_key).toBe(null);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -65,7 +115,7 @@ Deno.test("KeyStorageService.loadKeys returns parsed JSON when file exists", asy
 // =====================
 
 Deno.test("KeyStorageService.saveKeys writes JSON to file", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   const keys: EncryptionKeyFile = {
     current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
@@ -78,9 +128,9 @@ Deno.test("KeyStorageService.saveKeys writes JSON to file", async () => {
   };
 
   try {
-    await service.saveKeys(keys);
+    await ctx.service.saveKeys(keys);
 
-    const content = await Deno.readTextFile(keyFilePath);
+    const content = await Deno.readTextFile(ctx.keyFilePath);
     const parsed = JSON.parse(content);
 
     expect(parsed.current_key).toBe(keys.current_key);
@@ -88,7 +138,7 @@ Deno.test("KeyStorageService.saveKeys writes JSON to file", async () => {
     expect(parsed.phased_out_key).toBe(keys.phased_out_key);
     expect(parsed.phased_out_version).toBe("A");
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -97,10 +147,10 @@ Deno.test("KeyStorageService.saveKeys writes JSON to file", async () => {
 // =====================
 
 Deno.test("KeyStorageService.generateKey returns a base64-encoded 32-byte key", async () => {
-  const { tempDir, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   try {
-    const key = await service.generateKey();
+    const key = await ctx.service.generateKey();
 
     // Should be valid base64
     expect(typeof key).toBe("string");
@@ -110,20 +160,20 @@ Deno.test("KeyStorageService.generateKey returns a base64-encoded 32-byte key", 
     const decoded = Uint8Array.from(atob(key), (c) => c.charCodeAt(0));
     expect(decoded.length).toBe(32);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.generateKey produces unique keys each time", async () => {
-  const { tempDir, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   try {
-    const key1 = await service.generateKey();
-    const key2 = await service.generateKey();
+    const key1 = await ctx.service.generateKey();
+    const key2 = await ctx.service.generateKey();
 
     expect(key1).not.toBe(key2);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -171,10 +221,10 @@ Deno.test("KeyStorageService.getNextVersion throws for empty string", () => {
 // =====================
 
 Deno.test("KeyStorageService.ensureInitialized creates keys if file doesn't exist", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   try {
-    const keys = await service.ensureInitialized();
+    const keys = await ctx.service.ensureInitialized();
 
     expect(keys.current_key).toBeDefined();
     expect(keys.current_version).toBe("A");
@@ -184,17 +234,15 @@ Deno.test("KeyStorageService.ensureInitialized creates keys if file doesn't exis
     expect(keys.last_rotation_finished_at).toBeDefined();
 
     // File should exist now
-    const content = await Deno.readTextFile(keyFilePath);
+    const content = await Deno.readTextFile(ctx.keyFilePath);
     const parsed = JSON.parse(content);
     expect(parsed.current_version).toBe("A");
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.ensureInitialized returns existing keys if file exists", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
-
   const existingKeys: EncryptionKeyFile = {
     current_key: "ZXhpc3Rpbmdfa2V5X2V4aXN0aW5nX2tleV9leGlzdGluZw==",
     current_version: "C",
@@ -205,16 +253,18 @@ Deno.test("KeyStorageService.ensureInitialized returns existing keys if file exi
     hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
   };
 
-  try {
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(existingKeys));
+  const ctx = await KeyStorageTestBuilder.create()
+    .withExistingKeys(existingKeys)
+    .build();
 
-    const keys = await service.ensureInitialized();
+  try {
+    const keys = await ctx.service.ensureInitialized();
 
     expect(keys.current_key).toBe(existingKeys.current_key);
     expect(keys.current_version).toBe("C");
     expect(keys.better_auth_secret).toBe(existingKeys.better_auth_secret);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -271,7 +321,7 @@ Deno.test("KeyStorageService.path returns default path when not configured", () 
 // =====================
 
 Deno.test("KeyStorageService.saveKeys cleans up temp files on success", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   const keys: EncryptionKeyFile = {
     current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
@@ -284,15 +334,15 @@ Deno.test("KeyStorageService.saveKeys cleans up temp files on success", async ()
   };
 
   try {
-    await service.saveKeys(keys);
+    await ctx.service.saveKeys(keys);
 
     // Check that main file exists
-    const exists = await Deno.stat(keyFilePath);
+    const exists = await Deno.stat(ctx.keyFilePath);
     expect(exists.isFile).toBe(true);
 
     // Check that no temp files remain
     const files: string[] = [];
-    for await (const entry of Deno.readDir(tempDir)) {
+    for await (const entry of Deno.readDir(ctx.tempDir)) {
       files.push(entry.name);
     }
 
@@ -300,12 +350,12 @@ Deno.test("KeyStorageService.saveKeys cleans up temp files on success", async ()
     const tempFiles = files.filter(f => f.startsWith(".encryption-keys.tmp."));
     expect(tempFiles.length).toBe(0);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.saveKeys cleans up temp files on validation failure", async () => {
-  const { tempDir, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   const invalidKeys = {
     current_key: "invalid-key",
@@ -318,18 +368,18 @@ Deno.test("KeyStorageService.saveKeys cleans up temp files on validation failure
   } as unknown as EncryptionKeyFile;
 
   try {
-    await expect(service.saveKeys(invalidKeys)).rejects.toThrow(InvalidKeyError);
+    await expect(ctx.service.saveKeys(invalidKeys)).rejects.toThrow(InvalidKeyError);
 
     // Check that no temp files remain
     const files: string[] = [];
-    for await (const entry of Deno.readDir(tempDir)) {
+    for await (const entry of Deno.readDir(ctx.tempDir)) {
       files.push(entry.name);
     }
 
     const tempFiles = files.filter(f => f.startsWith(".encryption-keys.tmp."));
     expect(tempFiles.length).toBe(0);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -338,20 +388,20 @@ Deno.test("KeyStorageService.saveKeys cleans up temp files on validation failure
 // =====================
 
 Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for invalid JSON", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   try {
     // Write invalid JSON
-    await Deno.writeTextFile(keyFilePath, "{ invalid json content");
+    await Deno.writeTextFile(ctx.keyFilePath, "{ invalid json content");
 
-    await expect(service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
+    await expect(ctx.service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for missing required fields", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   try {
     // Write JSON with missing fields
@@ -361,99 +411,99 @@ Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for missi
       // Missing other required fields
     };
 
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(incomplete));
+    await Deno.writeTextFile(ctx.keyFilePath, JSON.stringify(incomplete));
 
-    await expect(service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
+    await expect(ctx.service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for invalid version format", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const invalidKeys = {
+    current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
+    current_version: "1", // Invalid: must be A-Z
+    phased_out_key: null,
+    phased_out_version: null,
+    last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
+    better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
+  };
+
+  const ctx = await KeyStorageTestBuilder.create()
+    .withExistingKeys(invalidKeys as unknown as EncryptionKeyFile)
+    .build();
 
   try {
-    const invalidKeys = {
-      current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
-      current_version: "1", // Invalid: must be A-Z
-      phased_out_key: null,
-      phased_out_version: null,
-      last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
-      better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
-      hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
-    };
-
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(invalidKeys));
-
-    await expect(service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
+    await expect(ctx.service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for partial phased_out configuration", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const invalidKeys = {
+    current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
+    current_version: "B",
+    phased_out_key: "b2xka2V5b2xka2V5b2xka2V5b2xka2V5b2xka2V5b2xk",
+    phased_out_version: null, // Invalid: key is set but version is null
+    last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
+    better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
+  };
+
+  const ctx = await KeyStorageTestBuilder.create()
+    .withExistingKeys(invalidKeys as unknown as EncryptionKeyFile)
+    .build();
 
   try {
-    const invalidKeys = {
-      current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
-      current_version: "B",
-      phased_out_key: "b2xka2V5b2xka2V5b2xka2V5b2xka2V5b2xka2V5b2xk",
-      phased_out_version: null, // Invalid: key is set but version is null
-      last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
-      better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
-      hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
-    };
-
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(invalidKeys));
-
-    await expect(service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
+    await expect(ctx.service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for invalid base64", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const invalidKeys = {
+    current_key: "not-valid-base64!!!",
+    current_version: "A",
+    phased_out_key: null,
+    phased_out_version: null,
+    last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
+    better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
+  };
+
+  const ctx = await KeyStorageTestBuilder.create()
+    .withExistingKeys(invalidKeys as unknown as EncryptionKeyFile)
+    .build();
 
   try {
-    const invalidKeys = {
-      current_key: "not-valid-base64!!!",
-      current_version: "A",
-      phased_out_key: null,
-      phased_out_version: null,
-      last_rotation_finished_at: "2024-01-01T00:00:00.000Z",
-      better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
-      hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
-    };
-
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(invalidKeys));
-
-    await expect(service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
+    await expect(ctx.service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for invalid timestamp", async () => {
-  const { tempDir, keyFilePath, service } = await createTestContext();
+  const invalidKeys = {
+    current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
+    current_version: "A",
+    phased_out_key: null,
+    phased_out_version: null,
+    last_rotation_finished_at: "not-a-valid-timestamp",
+    better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
+    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
+  };
+
+  const ctx = await KeyStorageTestBuilder.create()
+    .withExistingKeys(invalidKeys as unknown as EncryptionKeyFile)
+    .build();
 
   try {
-    const invalidKeys = {
-      current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
-      current_version: "A",
-      phased_out_key: null,
-      phased_out_version: null,
-      last_rotation_finished_at: "not-a-valid-timestamp",
-      better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
-      hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
-    };
-
-    await Deno.writeTextFile(keyFilePath, JSON.stringify(invalidKeys));
-
-    await expect(service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
+    await expect(ctx.service.loadKeys()).rejects.toThrow(KeyStorageCorruptionError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -462,7 +512,7 @@ Deno.test("KeyStorageService.loadKeys throws KeyStorageCorruptionError for inval
 // =====================
 
 Deno.test("KeyStorageService.saveKeys throws InvalidKeyError for duplicate versions", async () => {
-  const { tempDir, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   const invalidKeys: EncryptionKeyFile = {
     current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
@@ -475,14 +525,14 @@ Deno.test("KeyStorageService.saveKeys throws InvalidKeyError for duplicate versi
   };
 
   try {
-    await expect(service.saveKeys(invalidKeys)).rejects.toThrow(InvalidKeyError);
+    await expect(ctx.service.saveKeys(invalidKeys)).rejects.toThrow(InvalidKeyError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("KeyStorageService.saveKeys throws InvalidKeyError for lowercase version", async () => {
-  const { tempDir, service } = await createTestContext();
+  const ctx = await KeyStorageTestBuilder.create().build();
 
   const invalidKeys = {
     current_key: "dGVzdGtleXRlc3RrZXl0ZXN0a2V5dGVzdGtleXRlc3Q=",
@@ -495,8 +545,8 @@ Deno.test("KeyStorageService.saveKeys throws InvalidKeyError for lowercase versi
   } as unknown as EncryptionKeyFile;
 
   try {
-    await expect(service.saveKeys(invalidKeys)).rejects.toThrow(InvalidKeyError);
+    await expect(ctx.service.saveKeys(invalidKeys)).rejects.toThrow(InvalidKeyError);
   } finally {
-    await cleanup(tempDir);
+    await ctx.cleanup();
   }
 });
