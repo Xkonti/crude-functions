@@ -1,4 +1,4 @@
-import { resolve, normalize as pathNormalize } from "@std/path";
+import { resolve } from "@std/path";
 
 /**
  * Validation utilities for file paths with security checks.
@@ -42,7 +42,8 @@ export async function resolveAndValidatePath(
 
   // Resolve to absolute path (handles .., and normalization)
   const resolvedPath = resolve(basePath, normalized);
-  const normalizedBase = pathNormalize(basePath);
+  // Also resolve basePath to absolute - pathNormalize doesn't convert relative to absolute
+  const normalizedBase = resolve(basePath);
 
   // CRITICAL: Verify the resolved path is within base directory
   if (

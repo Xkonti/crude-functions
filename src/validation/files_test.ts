@@ -259,3 +259,45 @@ Deno.test("resolveAndValidatePath handles non-existent paths gracefully", async 
     await ctx.cleanup();
   }
 });
+
+// =====================
+// resolveAndValidatePath - relative basePath handling
+// =====================
+
+Deno.test("resolveAndValidatePath handles relative basePath correctly", async () => {
+  // Create temp dir and subdirectory
+  const tempDir = await Deno.makeTempDir();
+  const codeDir = `${tempDir}/code`;
+  await Deno.mkdir(codeDir);
+
+  // Save original cwd and change to tempDir
+  const originalCwd = Deno.cwd();
+  Deno.chdir(tempDir);
+
+  try {
+    // Use relative path like production does
+    const result = await resolveAndValidatePath("./code", "file.ts");
+    expect(result).toBe(`${codeDir}/file.ts`);
+  } finally {
+    // Restore original cwd
+    Deno.chdir(originalCwd);
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("resolveAndValidatePath handles relative basePath with nested file", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const codeDir = `${tempDir}/code`;
+  await Deno.mkdir(codeDir);
+
+  const originalCwd = Deno.cwd();
+  Deno.chdir(tempDir);
+
+  try {
+    const result = await resolveAndValidatePath("./code", "examples/handler.ts");
+    expect(result).toBe(`${codeDir}/examples/handler.ts`);
+  } finally {
+    Deno.chdir(originalCwd);
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
