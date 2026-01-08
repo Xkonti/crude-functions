@@ -1,62 +1,25 @@
 import { expect } from "@std/expect";
-import { DatabaseService } from "../database/database_service.ts";
-import { ConsoleLogService } from "./console_log_service.ts";
-import { SettingsService } from "../settings/settings_service.ts";
-import { EncryptionService } from "../encryption/encryption_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import type { BaseTestContext, LogsContext, RoutesContext } from "../test/types.ts";
 
-const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
+type LogsTestContext = BaseTestContext & LogsContext & RoutesContext;
 
-const TEST_SCHEMA = `
-  CREATE TABLE executionLogs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    requestId TEXT NOT NULL,
-    routeId INTEGER,
-    level TEXT NOT NULL,
-    message TEXT NOT NULL,
-    args TEXT,
-    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
-  CREATE INDEX idx_executionLogs_routeId ON executionLogs(routeId, id);
-  CREATE INDEX idx_executionLogs_route_level ON executionLogs(routeId, level, id);
-  CREATE INDEX idx_executionLogs_timestamp ON executionLogs(timestamp);
+/**
+ * Creates a test context with logs and routes services.
+ * Also creates two test routes (IDs 1 and 2) for testing route-related log operations.
+ */
+async function createTestSetup(): Promise<LogsTestContext> {
+  const ctx = await TestSetupBuilder.create()
+    .withLogs()
+    .withRoute("/test-route-1", "test1.ts")
+    .withRoute("/test-route-2", "test2.ts")
+    .build();
 
-  CREATE TABLE settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    userId TEXT,
-    value TEXT,
-    isEncrypted INTEGER NOT NULL DEFAULT 0,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
-`;
-
-async function createTestSetup(): Promise<{
-  service: ConsoleLogService;
-  db: DatabaseService;
-  settingsService: SettingsService;
-  tempDir: string;
-}> {
-  const tempDir = await Deno.makeTempDir();
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(TEST_SCHEMA);
-
-  const encryptionService = new EncryptionService({
-    encryptionKey: TEST_ENCRYPTION_KEY,
-  });
-  const settingsService = new SettingsService({ db, encryptionService });
-  await settingsService.bootstrapGlobalSettings();
-
-  const service = new ConsoleLogService({ db, settingsService });
-  return { service, db, settingsService, tempDir };
+  return ctx;
 }
 
-async function cleanup(service: ConsoleLogService, db: DatabaseService, tempDir: string): Promise<void> {
-  await service.shutdown();
-  await db.close();
-  await Deno.remove(tempDir, { recursive: true });
+async function cleanup(ctx: LogsTestContext): Promise<void> {
+  await ctx.cleanup();
 }
 
 // =====================
@@ -64,10 +27,10 @@ async function cleanup(service: ConsoleLogService, db: DatabaseService, tempDir:
 // =====================
 
 Deno.test("ConsoleLogService stores log entry", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "test-request-1",
       routeId: 1,
       level: "log",
@@ -75,24 +38,24 @@ Deno.test("ConsoleLogService stores log entry", async () => {
     });
 
     // Shutdown flushes buffered logs
-    await service.shutdown();
+    await ctx.consoleLogService.shutdown();
 
-    const logs = await service.getByRequestId("test-request-1");
+    const logs = await ctx.consoleLogService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
     expect(logs[0].requestId).toBe("test-request-1");
     expect(logs[0].routeId).toBe(1);
     expect(logs[0].level).toBe("log");
     expect(logs[0].message).toBe("Test message");
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService stores log with args", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "test-request-1",
       routeId: 1,
       level: "debug",
@@ -100,91 +63,91 @@ Deno.test("ConsoleLogService stores log with args", async () => {
       args: JSON.stringify([{ key: "value" }, 42]),
     });
 
-    await service.shutdown();
-    const logs = await service.getByRequestId("test-request-1");
+    await ctx.consoleLogService.shutdown();
+    const logs = await ctx.consoleLogService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
     expect(logs[0].args).toBe('[{"key":"value"},42]');
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService retrieves logs by requestId", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Store logs for different requests
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-1",
       routeId: 1,
       level: "log",
       message: "Message 1",
     });
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-2",
       routeId: 1,
       level: "log",
       message: "Message 2",
     });
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-1",
       routeId: 1,
       level: "warn",
       message: "Message 3",
     });
 
-    await service.shutdown();
-    const logs = await service.getByRequestId("request-1");
+    await ctx.consoleLogService.shutdown();
+    const logs = await ctx.consoleLogService.getByRequestId("request-1");
     expect(logs.length).toBe(2);
     expect(logs[0].message).toBe("Message 1");
     expect(logs[1].message).toBe("Message 3");
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService retrieves logs by routeId", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Store logs for different routes
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-1",
       routeId: 1,
       level: "log",
       message: "Route 1 - Message 1",
     });
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-2",
       routeId: 2,
       level: "log",
       message: "Route 2 - Message 1",
     });
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-3",
       routeId: 1,
       level: "warn",
       message: "Route 1 - Message 2",
     });
 
-    await service.shutdown();
-    const logs = await service.getByRouteId(1);
+    await ctx.consoleLogService.shutdown();
+    const logs = await ctx.consoleLogService.getByRouteId(1);
     expect(logs.length).toBe(2);
     // Results are ordered newest to oldest (DESC)
     expect(logs[0].message).toBe("Route 1 - Message 2");
     expect(logs[1].message).toBe("Route 1 - Message 1");
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Store multiple logs
     for (let i = 0; i < 5; i++) {
-      service.store({
+      ctx.consoleLogService.store({
         requestId: `request-${i}`,
         routeId: 1,
         level: "log",
@@ -192,24 +155,24 @@ Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => 
       });
     }
 
-    await service.shutdown();
-    const logs = await service.getByRouteId(1, 3);
+    await ctx.consoleLogService.shutdown();
+    const logs = await ctx.consoleLogService.getByRouteId(1, 3);
     expect(logs.length).toBe(3);
     // Results are ordered newest to oldest (DESC), limit 3 gets most recent
     expect(logs[0].message).toBe("Message 4");
     expect(logs[2].message).toBe("Message 2");
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Store logs
     for (let i = 0; i < 5; i++) {
-      service.store({
+      ctx.consoleLogService.store({
         requestId: `request-${i}`,
         routeId: 1,
         level: "log",
@@ -217,127 +180,127 @@ Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
       });
     }
 
-    await service.shutdown();
-    const logs = await service.getRecent(3);
+    await ctx.consoleLogService.shutdown();
+    const logs = await ctx.consoleLogService.getRecent(3);
     expect(logs.length).toBe(3);
     // Most recent first (DESC order)
     expect(logs[0].message).toBe("Message 4");
     expect(logs[1].message).toBe("Message 3");
     expect(logs[2].message).toBe("Message 2");
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService deletes logs older than date", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Store a log
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "old-request",
       routeId: 1,
       level: "log",
       message: "Old message",
     });
 
-    await service.shutdown();
+    await ctx.consoleLogService.shutdown();
 
     // Delete logs older than 1 second from now
     const futureDate = new Date(Date.now() + 1000);
-    const deleted = await service.deleteOlderThan(futureDate);
+    const deleted = await ctx.consoleLogService.deleteOlderThan(futureDate);
 
     expect(deleted).toBe(1);
 
-    const logs = await service.getByRequestId("old-request");
+    const logs = await ctx.consoleLogService.getByRequestId("old-request");
     expect(logs.length).toBe(0);
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Manually insert logs with SQLite format timestamps (simulating old data from DB)
     const oldDate = new Date("2020-01-01T12:00:00.000Z");
     const sqliteFormat = oldDate.toISOString().replace("T", " ").slice(0, 19);
 
-    await db.execute(
+    await ctx.db.execute(
       `INSERT INTO executionLogs (requestId, routeId, level, message, timestamp)
        VALUES (?, ?, ?, ?, ?)`,
       ["old-sqlite-format", 1, "log", "Old SQLite format log", sqliteFormat]
     );
 
     // Also insert a newer log using the service
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "newer-request",
       routeId: 1,
       level: "log",
       message: "Newer message",
     });
 
-    await service.shutdown();
+    await ctx.consoleLogService.shutdown();
 
     // Delete logs older than a date between the two logs
     const cutoffDate = new Date("2021-01-01T00:00:00.000Z");
-    const deleted = await service.deleteOlderThan(cutoffDate);
+    const deleted = await ctx.consoleLogService.deleteOlderThan(cutoffDate);
 
     // Should delete the old SQLite-format log but not the newer one
     expect(deleted).toBe(1);
 
-    const oldLogs = await service.getByRequestId("old-sqlite-format");
+    const oldLogs = await ctx.consoleLogService.getByRequestId("old-sqlite-format");
     expect(oldLogs.length).toBe(0);
 
-    const newLogs = await service.getByRequestId("newer-request");
+    const newLogs = await ctx.consoleLogService.getByRequestId("newer-request");
     expect(newLogs.length).toBe(1);
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService deletes logs by routeId", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     // Store logs for different routes
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-1",
       routeId: 1,
       level: "log",
       message: "Route 1 message",
     });
-    service.store({
+    ctx.consoleLogService.store({
       requestId: "request-2",
       routeId: 2,
       level: "log",
       message: "Route 2 message",
     });
 
-    await service.shutdown();
+    await ctx.consoleLogService.shutdown();
 
-    const deleted = await service.deleteByRouteId(1);
+    const deleted = await ctx.consoleLogService.deleteByRouteId(1);
     expect(deleted).toBe(1);
 
-    const logsRoute1 = await service.getByRouteId(1);
+    const logsRoute1 = await ctx.consoleLogService.getByRouteId(1);
     expect(logsRoute1.length).toBe(0);
 
-    const logsRoute2 = await service.getByRouteId(2);
+    const logsRoute2 = await ctx.consoleLogService.getByRouteId(2);
     expect(logsRoute2.length).toBe(1);
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });
 
 Deno.test("ConsoleLogService stores all log levels", async () => {
-  const { service, db, tempDir } = await createTestSetup();
+  const ctx = await createTestSetup();
 
   try {
     const levels = ["log", "debug", "info", "warn", "error", "trace"] as const;
 
     for (const level of levels) {
-      service.store({
+      ctx.consoleLogService.store({
         requestId: "request-1",
         routeId: 1,
         level,
@@ -345,8 +308,8 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
       });
     }
 
-    await service.shutdown();
-    const logs = await service.getByRequestId("request-1");
+    await ctx.consoleLogService.shutdown();
+    const logs = await ctx.consoleLogService.getByRequestId("request-1");
     expect(logs.length).toBe(6);
 
     for (let i = 0; i < levels.length; i++) {
@@ -354,6 +317,6 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
       expect(logs[i].message).toBe(`${levels[i]} message`);
     }
   } finally {
-    await cleanup(service, db, tempDir);
+    await cleanup(ctx);
   }
 });

@@ -1,44 +1,107 @@
 /**
- * Test setup builder for creating isolated test environments.
+ * Test setup builder for creating isolated test environments with real infrastructure.
  *
- * Uses real migrations and production initialization flow to ensure tests
- * run against the actual schema. Each test gets its own temp directory
- * for complete isolation.
+ * ## Purpose
  *
- * @example
+ * **The primary goal of TestSetupBuilder is to keep tests in sync with the actual
+ * application code and minimize regressions.** It achieves this by:
+ *
+ * - **Using real migrations** instead of hardcoded schemas that can drift
+ * - **Production initialization order** matching main.ts startup sequence
+ * - **Modular service selection** to include only what tests need
+ * - **Auto-dependency resolution** when services depend on others
+ *
+ * ## Modular Architecture
+ *
+ * Tests can request only the services they need:
+ *
+ * ```typescript
+ * // Minimal context for metrics tests (no encryption, auth, etc.)
+ * const ctx = await TestSetupBuilder.create()
+ *   .withMetrics()
+ *   .build();
+ *
+ * // Just settings and encryption
+ * const ctx = await TestSetupBuilder.create()
+ *   .withSettings()
+ *   .build();
+ *
+ * // Full context (backward compatible - all services)
+ * const ctx = await TestSetupBuilder.create().build();
+ * ```
+ *
+ * ## Two Levels of API
+ *
+ * 1. **Convenience methods** (recommended): `withMetrics()`, `withSettings()`, `withLogs()`
+ *    These compose multiple services and handle dependencies automatically.
+ *
+ * 2. **Individual methods**: `withExecutionMetricsService()`, `withSettingsService()`
+ *    For fine-grained control when you need exactly one service.
+ *
+ * ## Dependency Resolution
+ *
+ * When you enable a service that requires others, dependencies are auto-enabled:
+ * - `withSettings()` → enables encryption services
+ * - `withLogs()` → enables settings → enables encryption
+ * - `withUserService()` → enables auth → enables encryption
+ *
+ * ## When to Use TestSetupBuilder
+ *
+ * Use this builder for tests that need:
+ * - **Database and migrations**: Tests validating service behavior with real schema
+ * - **Multiple services working together**: Integration-style tests
+ * - **Production initialization flow**: Tests that should match main.ts initialization
+ *
+ * ## When NOT to Use TestSetupBuilder
+ *
+ * **Use simple helper functions instead** for:
+ * - **Low-level utilities**: Pure logic with no infrastructure (e.g., env_isolator_test.ts)
+ * - **Single-class unit tests**: Testing a class in isolation
+ * - **Encryption-only tests**: Use KeyStorageService directly (encryption_service_test.ts)
+ *
+ * @example Metrics test (minimal context)
  * ```typescript
  * const ctx = await TestSetupBuilder.create()
- *   .withAdminUser("admin@test.com", "password123")
- *   .withApiKeyGroup("management", "Test keys")
- *   .withApiKey("management", "test-api-key")
- *   .withRoute("/hello", "hello.ts", { methods: ["GET"] })
- *   .withFile("hello.ts", `export default async (c) => c.json({ ok: true })`)
+ *   .withMetrics()
  *   .build();
  *
  * try {
- *   // ... run tests ...
+ *   await ctx.executionMetricsService.store({ ... });
+ * } finally {
+ *   await ctx.cleanup();
+ * }
+ * ```
+ *
+ * @example Full integration test
+ * ```typescript
+ * const ctx = await TestSetupBuilder.create()
+ *   .withApiKeyGroup("management", "Test keys")
+ *   .withApiKey("management", "test-api-key")
+ *   .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+ *   .build();
+ *
+ * try {
+ *   const routes = await ctx.routesService.getAll();
+ *   expect(routes).toHaveLength(1);
  * } finally {
  *   await ctx.cleanup();
  * }
  * ```
  */
 
-import { DatabaseService } from "../database/database_service.ts";
-import { MigrationService } from "../database/migration_service.ts";
-import { KeyStorageService } from "../encryption/key_storage_service.ts";
-import { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
-import { HashService } from "../encryption/hash_service.ts";
-import { SettingsService } from "../settings/settings_service.ts";
-import { ApiKeyService } from "../keys/api_key_service.ts";
-import { RoutesService } from "../routes/routes_service.ts";
-import { FileService } from "../files/file_service.ts";
-import { ConsoleLogService } from "../logs/console_log_service.ts";
-import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
-import { UserService } from "../users/user_service.ts";
-import { createAuth } from "../auth/auth.ts";
 import type { SettingName } from "../settings/types.ts";
 import type {
-  TestContext,
+  BaseTestContext,
+  FullTestContext,
+  MetricsContext,
+  EncryptionContext,
+  SettingsContext,
+  LogsContext,
+  RoutesContext,
+  FilesContext,
+  ApiKeysContext,
+  AuthContext,
+  UsersContext,
   RouteOptions,
   DeferredUser,
   DeferredKeyGroup,
@@ -49,15 +112,46 @@ import type {
   DeferredConsoleLog,
   DeferredMetric,
 } from "./types.ts";
+import {
+  type ServiceFlags,
+  createDefaultFlags,
+  enableServiceWithDependencies,
+  hasAnyServiceEnabled,
+  enableAllServices,
+} from "./dependency_graph.ts";
+import {
+  createCoreInfrastructure,
+  createEncryptionKeys,
+  createEncryptionService,
+  createHashService,
+  createSettingsService,
+  createExecutionMetricsService,
+  createMetricsStateService,
+  createConsoleLogService,
+  createRoutesService,
+  createFileService,
+  createApiKeyService,
+  createBetterAuth,
+  createUserService,
+  createUserDirectly,
+  createCleanupFunction,
+} from "./service_factories.ts";
 
 /**
  * Builder for creating isolated test environments with real migrations.
  *
  * Mirrors the production initialization flow from main.ts to ensure tests
- * run against the actual schema and configuration.
+ * run against the actual schema and configuration. Uses a flag-based system
+ * to selectively include only the services needed for each test.
+ *
+ * The generic type parameter tracks which services are included, providing
+ * compile-time safety when accessing context properties.
  */
-export class TestSetupBuilder {
+export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext> {
   private migrationsDir = "./migrations";
+
+  // Service flags - tracks which services to include
+  private flags: ServiceFlags = createDefaultFlags();
 
   // Deferred data to apply during build
   private deferredUsers: DeferredUser[] = [];
@@ -74,7 +168,7 @@ export class TestSetupBuilder {
   /**
    * Create a new TestSetupBuilder instance.
    */
-  static create(): TestSetupBuilder {
+  static create(): TestSetupBuilder<BaseTestContext> {
     return new TestSetupBuilder();
   }
 
@@ -82,38 +176,248 @@ export class TestSetupBuilder {
    * Set a custom migrations directory.
    * Defaults to "./migrations" relative to the project root.
    */
-  withMigrationsDir(dir: string): TestSetupBuilder {
+  withMigrationsDir(dir: string): this {
     this.migrationsDir = dir;
     return this;
   }
 
+  // =============================================================================
+  // Individual Service Methods (Fine-Grained Control)
+  // =============================================================================
+
+  /**
+   * Include ExecutionMetricsService in the test context.
+   * No dependencies - works with just the base context.
+   */
+  withExecutionMetricsService(): TestSetupBuilder<
+    TContext & { executionMetricsService: MetricsContext["executionMetricsService"] }
+  > {
+    enableServiceWithDependencies(this.flags, "executionMetricsService");
+    return this as unknown as TestSetupBuilder<
+      TContext & { executionMetricsService: MetricsContext["executionMetricsService"] }
+    >;
+  }
+
+  /**
+   * Include MetricsStateService in the test context.
+   * No dependencies - works with just the base context.
+   */
+  withMetricsStateService(): TestSetupBuilder<
+    TContext & { metricsStateService: MetricsContext["metricsStateService"] }
+  > {
+    enableServiceWithDependencies(this.flags, "metricsStateService");
+    return this as unknown as TestSetupBuilder<
+      TContext & { metricsStateService: MetricsContext["metricsStateService"] }
+    >;
+  }
+
+  /**
+   * Include RoutesService in the test context.
+   * No dependencies - works with just the base context.
+   */
+  withRoutesService(): TestSetupBuilder<TContext & RoutesContext> {
+    enableServiceWithDependencies(this.flags, "routesService");
+    return this as unknown as TestSetupBuilder<TContext & RoutesContext>;
+  }
+
+  /**
+   * Include FileService in the test context.
+   * No dependencies - works with just the base context.
+   */
+  withFileService(): TestSetupBuilder<TContext & FilesContext> {
+    enableServiceWithDependencies(this.flags, "fileService");
+    return this as unknown as TestSetupBuilder<TContext & FilesContext>;
+  }
+
+  /**
+   * Include encryption services (VersionedEncryptionService + HashService) in the test context.
+   * Creates encryption keys and both encryption-related services.
+   */
+  withEncryptionService(): TestSetupBuilder<TContext & EncryptionContext> {
+    enableServiceWithDependencies(this.flags, "encryptionService");
+    return this as unknown as TestSetupBuilder<TContext & EncryptionContext>;
+  }
+
+  /**
+   * Include HashService in the test context.
+   * This is typically included via withEncryptionService() which includes both.
+   */
+  withHashService(): TestSetupBuilder<
+    TContext & { hashService: EncryptionContext["hashService"] }
+  > {
+    enableServiceWithDependencies(this.flags, "hashService");
+    return this as unknown as TestSetupBuilder<
+      TContext & { hashService: EncryptionContext["hashService"] }
+    >;
+  }
+
+  /**
+   * Include SettingsService in the test context.
+   * Auto-enables: encryption services (required dependency).
+   */
+  withSettingsService(): TestSetupBuilder<TContext & SettingsContext> {
+    enableServiceWithDependencies(this.flags, "settingsService");
+    return this as unknown as TestSetupBuilder<TContext & SettingsContext>;
+  }
+
+  /**
+   * Include ConsoleLogService in the test context.
+   * Auto-enables: settings service (required dependency).
+   */
+  withConsoleLogService(): TestSetupBuilder<TContext & LogsContext> {
+    enableServiceWithDependencies(this.flags, "consoleLogService");
+    return this as unknown as TestSetupBuilder<TContext & LogsContext>;
+  }
+
+  /**
+   * Include ApiKeyService in the test context.
+   * Auto-enables: encryption services (required dependency).
+   */
+  withApiKeyService(): TestSetupBuilder<TContext & ApiKeysContext> {
+    enableServiceWithDependencies(this.flags, "apiKeyService");
+    return this as unknown as TestSetupBuilder<TContext & ApiKeysContext>;
+  }
+
+  /**
+   * Include Better Auth instance in the test context.
+   * Auto-enables: encryption (for better_auth_secret).
+   */
+  withAuth(): TestSetupBuilder<TContext & AuthContext> {
+    enableServiceWithDependencies(this.flags, "auth");
+    return this as unknown as TestSetupBuilder<TContext & AuthContext>;
+  }
+
+  /**
+   * Include UserService in the test context.
+   * Auto-enables: auth, encryption services.
+   */
+  withUserService(): TestSetupBuilder<TContext & UsersContext> {
+    enableServiceWithDependencies(this.flags, "userService");
+    return this as unknown as TestSetupBuilder<TContext & UsersContext>;
+  }
+
+  // =============================================================================
+  // Convenience Methods (Compose Multiple Services)
+  // =============================================================================
+
+  /**
+   * Include both metrics services (ExecutionMetricsService + MetricsStateService).
+   * Convenience method for tests that need metrics functionality.
+   */
+  withMetrics(): TestSetupBuilder<TContext & MetricsContext> {
+    this.withExecutionMetricsService();
+    this.withMetricsStateService();
+    return this as unknown as TestSetupBuilder<TContext & MetricsContext>;
+  }
+
+  /**
+   * Include encryption services (VersionedEncryptionService + HashService).
+   * Alias for withEncryptionService() for semantic clarity.
+   */
+  withEncryption(): TestSetupBuilder<TContext & EncryptionContext> {
+    return this.withEncryptionService() as unknown as TestSetupBuilder<TContext & EncryptionContext>;
+  }
+
+  /**
+   * Include settings and its dependencies (encryption).
+   * Alias for withSettingsService() for semantic clarity.
+   */
+  withSettings(): TestSetupBuilder<TContext & SettingsContext> {
+    return this.withSettingsService() as unknown as TestSetupBuilder<TContext & SettingsContext>;
+  }
+
+  /**
+   * Include console log service and its dependencies (settings, encryption).
+   * Alias for withConsoleLogService() for semantic clarity.
+   */
+  withLogs(): TestSetupBuilder<TContext & LogsContext> {
+    return this.withConsoleLogService() as unknown as TestSetupBuilder<TContext & LogsContext>;
+  }
+
+  /**
+   * Include routes service.
+   * Alias for withRoutesService() for semantic clarity.
+   */
+  withRoutes(): TestSetupBuilder<TContext & RoutesContext> {
+    return this.withRoutesService() as unknown as TestSetupBuilder<TContext & RoutesContext>;
+  }
+
+  /**
+   * Include file service.
+   * Alias for withFileService() for semantic clarity.
+   */
+  withFiles(): TestSetupBuilder<TContext & FilesContext> {
+    return this.withFileService() as unknown as TestSetupBuilder<TContext & FilesContext>;
+  }
+
+  /**
+   * Include API key service and its dependencies (encryption).
+   * Alias for withApiKeyService() for semantic clarity.
+   */
+  withApiKeys(): TestSetupBuilder<TContext & ApiKeysContext> {
+    return this.withApiKeyService() as unknown as TestSetupBuilder<TContext & ApiKeysContext>;
+  }
+
+  /**
+   * Include user service and auth.
+   * Convenience method that enables both auth and user service.
+   */
+  withUsers(): TestSetupBuilder<TContext & UsersContext> {
+    return this.withUserService() as unknown as TestSetupBuilder<TContext & UsersContext>;
+  }
+
+  /**
+   * Include all services.
+   * This is the default behavior for backward compatibility.
+   */
+  withAll(): TestSetupBuilder<FullTestContext> {
+    enableAllServices(this.flags);
+    return this as unknown as TestSetupBuilder<FullTestContext>;
+  }
+
+  // =============================================================================
+  // Deferred Data Methods
+  // =============================================================================
+
   /**
    * Add an admin user to be created during build.
    * Uses direct DB insert for speed (bypasses Better Auth HTTP requirement).
+   * Auto-enables: userService, auth, encryption.
    *
    * @param email - User email address
    * @param password - User password (will be hashed with bcrypt)
    * @param roles - User roles (defaults to ["userMgmt"])
    */
-  withAdminUser(email: string, password: string, roles?: string[]): TestSetupBuilder {
+  withAdminUser(
+    email: string,
+    password: string,
+    roles?: string[]
+  ): TestSetupBuilder<TContext & UsersContext> {
     this.deferredUsers.push({ email, password, roles });
-    return this;
+    this.withUserService();
+    return this as unknown as TestSetupBuilder<TContext & UsersContext>;
   }
 
   /**
    * Add an API key group to be created during build.
+   * Auto-enables: apiKeyService, encryption.
    *
    * @param name - Group name (lowercase, hyphens allowed)
    * @param description - Optional description
    */
-  withApiKeyGroup(name: string, description?: string): TestSetupBuilder {
+  withApiKeyGroup(
+    name: string,
+    description?: string
+  ): TestSetupBuilder<TContext & ApiKeysContext> {
     this.deferredGroups.push({ name, description });
-    return this;
+    this.withApiKeyService();
+    return this as unknown as TestSetupBuilder<TContext & ApiKeysContext>;
   }
 
   /**
    * Add an API key to be created during build.
    * The group must be added first via withApiKeyGroup().
+   * Auto-enables: apiKeyService, encryption.
    *
    * @param groupName - Name of the group (must exist)
    * @param keyValue - The key value
@@ -125,282 +429,263 @@ export class TestSetupBuilder {
     keyValue: string,
     keyName?: string,
     description?: string
-  ): TestSetupBuilder {
+  ): TestSetupBuilder<TContext & ApiKeysContext> {
     this.deferredKeys.push({ groupName, keyValue, keyName, description });
-    return this;
+    this.withApiKeyService();
+    return this as unknown as TestSetupBuilder<TContext & ApiKeysContext>;
   }
 
   /**
    * Add a route to be created during build.
+   * Auto-enables: routesService.
    *
    * @param path - Route path (e.g., "/hello")
    * @param fileName - Handler filename (e.g., "hello.ts")
    * @param options - Optional route configuration
    */
-  withRoute(path: string, fileName: string, options?: RouteOptions): TestSetupBuilder {
+  withRoute(
+    path: string,
+    fileName: string,
+    options?: RouteOptions
+  ): TestSetupBuilder<TContext & RoutesContext> {
     this.deferredRoutes.push({ path, fileName, options });
-    return this;
+    this.withRoutesService();
+    return this as unknown as TestSetupBuilder<TContext & RoutesContext>;
   }
 
   /**
    * Add a code file to be created during build.
+   * Auto-enables: fileService.
    *
    * @param name - Filename (e.g., "hello.ts")
    * @param content - File content (TypeScript handler code)
    */
-  withFile(name: string, content: string): TestSetupBuilder {
+  withFile(name: string, content: string): TestSetupBuilder<TContext & FilesContext> {
     this.deferredFiles.push({ name, content });
-    return this;
+    this.withFileService();
+    return this as unknown as TestSetupBuilder<TContext & FilesContext>;
   }
 
   /**
    * Set a global setting during build.
+   * Auto-enables: settingsService, encryption.
    *
    * @param name - Setting name
    * @param value - Setting value (string)
    */
-  withSetting(name: SettingName, value: string): TestSetupBuilder {
+  withSetting(
+    name: SettingName,
+    value: string
+  ): TestSetupBuilder<TContext & SettingsContext> {
     this.deferredSettings.push({ name, value });
-    return this;
+    this.withSettingsService();
+    return this as unknown as TestSetupBuilder<TContext & SettingsContext>;
   }
 
   /**
    * Seed a console log entry during build.
+   * Auto-enables: consoleLogService, settingsService, encryption.
    *
    * @param log - Log data
    */
-  withConsoleLog(log: DeferredConsoleLog): TestSetupBuilder {
+  withConsoleLog(log: DeferredConsoleLog): TestSetupBuilder<TContext & LogsContext> {
     this.deferredLogs.push(log);
-    return this;
+    this.withConsoleLogService();
+    return this as unknown as TestSetupBuilder<TContext & LogsContext>;
   }
 
   /**
    * Seed an execution metric during build.
+   * Auto-enables: executionMetricsService.
    *
    * @param metric - Metric data
    */
-  withMetric(metric: DeferredMetric): TestSetupBuilder {
+  withMetric(
+    metric: DeferredMetric
+  ): TestSetupBuilder<TContext & { executionMetricsService: MetricsContext["executionMetricsService"] }> {
     this.deferredMetrics.push(metric);
-    return this;
+    this.withExecutionMetricsService();
+    return this as unknown as TestSetupBuilder<
+      TContext & { executionMetricsService: MetricsContext["executionMetricsService"] }
+    >;
   }
 
+  // =============================================================================
+  // Build Method
+  // =============================================================================
+
   /**
-   * Build the test context with all services initialized.
-   * Follows the same initialization order as main.ts.
+   * Build the test context with selected services initialized.
    *
-   * @returns Complete TestContext with all services and cleanup function
+   * If no services were explicitly selected (no with* methods called),
+   * all services are included for backward compatibility.
+   *
+   * @returns Context with selected services and cleanup function
    */
-  async build(): Promise<TestContext> {
-    // STEP 1: Create temp directory for test isolation
-    const tempDir = await Deno.makeTempDir();
-    const codeDir = `${tempDir}/code`;
-    await Deno.mkdir(codeDir, { recursive: true });
-
-    // STEP 2: Generate encryption keys using real KeyStorageService
-    const keyStorageService = new KeyStorageService({
-      keyFilePath: `${tempDir}/encryption-keys.json`,
-    });
-    const encryptionKeys = await keyStorageService.ensureInitialized();
-
-    // STEP 3: Initialize encryption services
-    const encryptionService = new VersionedEncryptionService({
-      currentKey: encryptionKeys.current_key,
-      currentVersion: encryptionKeys.current_version,
-      phasedOutKey: encryptionKeys.phased_out_key ?? undefined,
-      phasedOutVersion: encryptionKeys.phased_out_version ?? undefined,
-    });
-
-    const hashService = new HashService({
-      hashKey: encryptionKeys.hash_key,
-    });
-
-    // STEP 4: Open database
-    const databasePath = `${tempDir}/database.db`;
-    const db = new DatabaseService({ databasePath });
-    await db.open();
-
-    // STEP 5: Run real migrations
-    const migrationService = new MigrationService({
-      db,
-      migrationsDir: this.migrationsDir,
-    });
-    await migrationService.migrate();
-
-    // STEP 6: Initialize settings service and bootstrap defaults
-    const settingsService = new SettingsService({ db, encryptionService });
-    await settingsService.bootstrapGlobalSettings();
-
-    // STEP 7: Apply deferred settings
-    for (const { name, value } of this.deferredSettings) {
-      await settingsService.setGlobalSetting(name, value);
+  async build(): Promise<TContext> {
+    // Backward compatibility: if no flags are set, enable all services
+    if (!hasAnyServiceEnabled(this.flags)) {
+      enableAllServices(this.flags);
     }
 
-    // STEP 8: Initialize Better Auth
-    const auth = createAuth({
-      databasePath,
-      secret: encryptionKeys.better_auth_secret,
-      hasUsers: false, // Always enable sign-up for tests
-    });
+    // STEP 1: Create core infrastructure (always needed)
+    const { tempDir, codeDir, databasePath, db } = await createCoreInfrastructure(
+      this.migrationsDir
+    );
 
-    // STEP 9: Initialize UserService
-    const userService = new UserService({ db, auth });
-
-    // STEP 10: Create deferred users via direct DB insert
-    for (const user of this.deferredUsers) {
-      await this.createUserDirectly(db, user);
-    }
-
-    // STEP 11: Initialize console log and metrics services
-    const consoleLogService = new ConsoleLogService({ db, settingsService });
-    const executionMetricsService = new ExecutionMetricsService({ db });
-
-    // STEP 12: Initialize API key service
-    const apiKeyService = new ApiKeyService({
-      db,
-      encryptionService,
-      hashService,
-    });
-
-    // STEP 13: Create deferred API key groups and keys
-    for (const { name, description } of this.deferredGroups) {
-      await apiKeyService.getOrCreateGroup(name, description);
-    }
-    for (const { groupName, keyValue, keyName, description } of this.deferredKeys) {
-      const name = keyName ?? `test-key-${Date.now()}`;
-      await apiKeyService.addKey(groupName, name, keyValue, description);
-    }
-
-    // STEP 14: Initialize routes service
-    const routesService = new RoutesService({ db });
-
-    // STEP 15: Create deferred routes
-    for (const { path, fileName, options } of this.deferredRoutes) {
-      await routesService.addRoute({
-        name: options?.name ?? fileName.replace(/\.ts$/, ""),
-        description: options?.description,
-        handler: fileName,
-        route: path,
-        methods: options?.methods ?? ["GET"],
-        keys: options?.keys,
-      });
-    }
-
-    // STEP 16: Initialize file service
-    const fileService = new FileService({ basePath: codeDir });
-
-    // STEP 17: Create deferred files
-    for (const { name, content } of this.deferredFiles) {
-      await fileService.writeFile(name, content);
-    }
-
-    // STEP 18: Seed deferred console logs
-    for (const log of this.deferredLogs) {
-      consoleLogService.store({
-        requestId: log.requestId,
-        routeId: log.routeId,
-        level: log.level,
-        message: log.message,
-        args: log.args,
-      });
-    }
-    await consoleLogService.flush();
-
-    // STEP 19: Seed deferred execution metrics
-    for (const metric of this.deferredMetrics) {
-      await executionMetricsService.store({
-        routeId: metric.routeId,
-        type: metric.type,
-        avgTimeMs: metric.avgTimeMs,
-        maxTimeMs: metric.maxTimeMs,
-        executionCount: metric.executionCount,
-        timestamp: metric.timestamp,
-      });
-    }
-
-    // STEP 20: Create cleanup function
-    const cleanup = this.createCleanupFunction(db, consoleLogService, tempDir);
-
-    // Return complete context
-    return {
+    // Build context incrementally
+    // deno-lint-ignore no-explicit-any
+    const context: any = {
       tempDir,
       codeDir,
+      databasePath,
       db,
-      encryptionKeys,
-      encryptionService,
-      hashService,
-      settingsService,
-      apiKeyService,
-      routesService,
-      fileService,
-      consoleLogService,
-      executionMetricsService,
-      auth,
-      userService,
-      cleanup,
+      cleanup: async () => {}, // Placeholder, will be replaced
     };
-  }
 
-  /**
-   * Create a user directly in the database (bypasses Better Auth API).
-   * Uses bcrypt for password hashing to match Better Auth's format.
-   */
-  private async createUserDirectly(db: DatabaseService, user: DeferredUser): Promise<string> {
-    const userId = crypto.randomUUID();
-    const roles = user.roles ?? ["userMgmt"];
-    const roleString = roles.join(",");
+    // STEP 2: Create encryption keys and services if needed
+    // Note: encryptionService flag implies hashService is also enabled
+    const needsEncryption =
+      this.flags.encryptionService ||
+      this.flags.hashService ||
+      this.flags.settingsService ||
+      this.flags.consoleLogService ||
+      this.flags.apiKeyService ||
+      this.flags.auth ||
+      this.flags.userService;
 
-    // Insert user record
-    await db.execute(
-      `INSERT INTO user (id, email, emailVerified, name, role, banned, createdAt, updatedAt)
-       VALUES (?, ?, 0, ?, ?, 0, datetime('now'), datetime('now'))`,
-      [userId, user.email, user.email.split("@")[0], roleString || null]
-    );
+    if (needsEncryption) {
+      const encryptionKeys = await createEncryptionKeys(tempDir);
+      context.encryptionKeys = encryptionKeys;
 
-    // Hash password using bcrypt (Better Auth uses bcrypt internally)
-    const hashedPassword = await this.hashPasswordBcrypt(user.password);
-
-    // Insert account record with credential provider
-    const accountId = crypto.randomUUID();
-    await db.execute(
-      `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
-       VALUES (?, ?, ?, 'credential', ?, datetime('now'), datetime('now'))`,
-      [accountId, userId, user.email, hashedPassword]
-    );
-
-    return userId;
-  }
-
-  /**
-   * Hash password using bcrypt to match Better Auth's format.
-   * Uses Deno's bcrypt library for compatibility.
-   */
-  private async hashPasswordBcrypt(password: string): Promise<string> {
-    // Import bcrypt dynamically to avoid bundling issues
-    const { hash } = await import("@da/bcrypt");
-    return await hash(password);
-  }
-
-  /**
-   * Create cleanup function with proper teardown order.
-   */
-  private createCleanupFunction(
-    db: DatabaseService,
-    consoleLogService: ConsoleLogService,
-    tempDir: string
-  ): () => Promise<void> {
-    return async () => {
-      // 1. Shutdown console log service (flush pending logs)
-      await consoleLogService.shutdown();
-
-      // 2. Close database
-      await db.close();
-
-      // 3. Remove temp directory
-      try {
-        await Deno.remove(tempDir, { recursive: true });
-      } catch {
-        // Ignore cleanup errors
+      if (this.flags.encryptionService || this.flags.settingsService ||
+          this.flags.consoleLogService || this.flags.apiKeyService ||
+          this.flags.auth || this.flags.userService) {
+        context.encryptionService = createEncryptionService(encryptionKeys);
       }
-    };
+
+      if (this.flags.hashService || this.flags.encryptionService ||
+          this.flags.settingsService || this.flags.consoleLogService ||
+          this.flags.apiKeyService) {
+        context.hashService = createHashService(encryptionKeys);
+      }
+    }
+
+    // STEP 3: Create settings service if needed
+    if (this.flags.settingsService || this.flags.consoleLogService) {
+      context.settingsService = await createSettingsService(db, context.encryptionService);
+
+      // Apply deferred settings
+      for (const { name, value } of this.deferredSettings) {
+        await context.settingsService.setGlobalSetting(name, value);
+      }
+    }
+
+    // STEP 4: Create auth if needed
+    if (this.flags.auth || this.flags.userService) {
+      context.auth = createBetterAuth(databasePath, context.encryptionKeys);
+    }
+
+    // STEP 5: Create user service if needed
+    if (this.flags.userService) {
+      context.userService = createUserService(db, context.auth);
+
+      // Create deferred users
+      for (const user of this.deferredUsers) {
+        await createUserDirectly(db, user.email, user.password, user.roles);
+      }
+    }
+
+    // STEP 6: Create routes service if needed (before logs/metrics that reference routeId)
+    if (this.flags.routesService) {
+      context.routesService = createRoutesService(db);
+
+      // Create deferred routes
+      for (const { path, fileName, options } of this.deferredRoutes) {
+        await context.routesService.addRoute({
+          name: options?.name ?? fileName.replace(/\.ts$/, ""),
+          description: options?.description,
+          handler: fileName,
+          route: path,
+          methods: options?.methods ?? ["GET"],
+          keys: options?.keys,
+        });
+      }
+    }
+
+    // STEP 7: Create file service if needed
+    if (this.flags.fileService) {
+      context.fileService = createFileService(codeDir);
+
+      // Create deferred files
+      for (const { name, content } of this.deferredFiles) {
+        await context.fileService.writeFile(name, content);
+      }
+    }
+
+    // STEP 8: Create API key service if needed
+    if (this.flags.apiKeyService) {
+      context.apiKeyService = createApiKeyService(
+        db,
+        context.encryptionService,
+        context.hashService
+      );
+
+      // Create deferred groups and keys
+      for (const { name, description } of this.deferredGroups) {
+        await context.apiKeyService.getOrCreateGroup(name, description);
+      }
+      for (const { groupName, keyValue, keyName, description } of this.deferredKeys) {
+        const name = keyName ?? `test-key-${Date.now()}`;
+        await context.apiKeyService.addKey(groupName, name, keyValue, description);
+      }
+    }
+
+    // STEP 9: Create console log service if needed (after routes exist for FK constraint)
+    if (this.flags.consoleLogService) {
+      context.consoleLogService = createConsoleLogService(db, context.settingsService);
+
+      // Seed deferred logs
+      for (const log of this.deferredLogs) {
+        context.consoleLogService.store({
+          requestId: log.requestId,
+          routeId: log.routeId,
+          level: log.level,
+          message: log.message,
+          args: log.args,
+        });
+      }
+      await context.consoleLogService.flush();
+    }
+
+    // STEP 10: Create metrics services if needed (after routes exist for FK constraint)
+    if (this.flags.executionMetricsService) {
+      context.executionMetricsService = createExecutionMetricsService(db);
+
+      // Seed deferred metrics
+      for (const metric of this.deferredMetrics) {
+        await context.executionMetricsService.store({
+          routeId: metric.routeId,
+          type: metric.type,
+          avgTimeMs: metric.avgTimeMs,
+          maxTimeMs: metric.maxTimeMs,
+          executionCount: metric.executionCount,
+          timestamp: metric.timestamp,
+        });
+      }
+    }
+
+    if (this.flags.metricsStateService) {
+      context.metricsStateService = createMetricsStateService(db);
+    }
+
+    // STEP 11: Create cleanup function
+    context.cleanup = createCleanupFunction(
+      db,
+      tempDir,
+      this.flags.consoleLogService ? context.consoleLogService : undefined
+    );
+
+    return context as TContext;
   }
 }

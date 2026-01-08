@@ -62,7 +62,7 @@ Deno.test("validateKeyValue rejects invalid values", () => {
 // =====================
 
 Deno.test("ApiKeyService returns empty map when no keys", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const keys = await ctx.apiKeyService.getAll();
@@ -73,7 +73,7 @@ Deno.test("ApiKeyService returns empty map when no keys", async () => {
 });
 
 Deno.test("ApiKeyService.addKey adds key to database", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("email", "email-key", "newkey", "test description");
@@ -95,7 +95,7 @@ Deno.test("ApiKeyService.addKey adds key to database", async () => {
 });
 
 Deno.test("ApiKeyService.addKey silently ignores duplicates", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("email", "test-key", "key1", "first");
@@ -110,7 +110,7 @@ Deno.test("ApiKeyService.addKey silently ignores duplicates", async () => {
 });
 
 Deno.test("ApiKeyService.getAll returns grouped keys", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("management", "admin-key", "key1", "admin key");
@@ -128,7 +128,7 @@ Deno.test("ApiKeyService.getAll returns grouped keys", async () => {
 });
 
 Deno.test("ApiKeyService.getKeys normalizes group to lowercase", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("EMAIL", "test-key", "key1");
@@ -146,7 +146,7 @@ Deno.test("ApiKeyService.getKeys normalizes group to lowercase", async () => {
 });
 
 Deno.test("ApiKeyService.getKeys returns null for nonexistent group", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const keys = await ctx.apiKeyService.getKeys("nonexistent");
@@ -157,7 +157,7 @@ Deno.test("ApiKeyService.getKeys returns null for nonexistent group", async () =
 });
 
 Deno.test("ApiKeyService.hasKey returns true for existing key", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("management", "key-1", "value1");
@@ -171,7 +171,7 @@ Deno.test("ApiKeyService.hasKey returns true for existing key", async () => {
 });
 
 Deno.test("ApiKeyService.removeKey removes specific key", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("management", "key-1", "value1");
@@ -187,7 +187,7 @@ Deno.test("ApiKeyService.removeKey removes specific key", async () => {
 });
 
 Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("management", "key-1", "value1");
@@ -206,7 +206,7 @@ Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
 });
 
 Deno.test("ApiKeyService.removeGroup removes all keys in group", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("management", "key-1", "value1");
@@ -243,7 +243,7 @@ Deno.test("ApiKeyService.getGroups returns groups from database", async () => {
 });
 
 Deno.test("ApiKeyService.createGroup creates a new group", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const initialGroups = await ctx.apiKeyService.getGroups();
@@ -265,7 +265,7 @@ Deno.test("ApiKeyService.createGroup creates a new group", async () => {
 });
 
 Deno.test("ApiKeyService.getGroupByName returns group by name", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.createGroup("email", "Email keys");
@@ -280,7 +280,7 @@ Deno.test("ApiKeyService.getGroupByName returns group by name", async () => {
 });
 
 Deno.test("ApiKeyService.getGroupByName returns null for nonexistent group", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("nonexistent");
@@ -291,7 +291,7 @@ Deno.test("ApiKeyService.getGroupByName returns null for nonexistent group", asy
 });
 
 Deno.test("ApiKeyService.getGroupById returns group by ID", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const id = await ctx.apiKeyService.createGroup("email", "Email keys");
@@ -306,7 +306,7 @@ Deno.test("ApiKeyService.getGroupById returns group by ID", async () => {
 });
 
 Deno.test("ApiKeyService.updateGroup updates group description", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const id = await ctx.apiKeyService.createGroup("email", "Old desc");
@@ -320,7 +320,7 @@ Deno.test("ApiKeyService.updateGroup updates group description", async () => {
 });
 
 Deno.test("ApiKeyService.deleteGroup removes group", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const id = await ctx.apiKeyService.createGroup("email", "Email keys");
@@ -334,7 +334,7 @@ Deno.test("ApiKeyService.deleteGroup removes group", async () => {
 });
 
 Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("email", "key-1", "value1");
@@ -352,7 +352,7 @@ Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
 });
 
 Deno.test("ApiKeyService.getOrCreateGroup creates group if not exists", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const id1 = await ctx.apiKeyService.getOrCreateGroup("email");
@@ -367,7 +367,7 @@ Deno.test("ApiKeyService.getOrCreateGroup creates group if not exists", async ()
 });
 
 Deno.test("ApiKeyService.addKey creates group if needed", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     // Adding key to nonexistent group should create the group
@@ -387,7 +387,7 @@ Deno.test("ApiKeyService.addKey creates group if needed", async () => {
 
 Deno.test("ApiKeyService - Encryption at rest", async (t) => {
   await t.step("stores keys encrypted in database", async () => {
-    const ctx = await TestSetupBuilder.create().build();
+    const ctx = await TestSetupBuilder.create().withAll().build();
 
     try {
       await ctx.apiKeyService.addKey("test-group", "test-key", "my-secret-key", "Test key");
@@ -407,7 +407,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
   });
 
   await t.step("retrieves keys decrypted", async () => {
-    const ctx = await TestSetupBuilder.create().build();
+    const ctx = await TestSetupBuilder.create().withAll().build();
 
     try {
       await ctx.apiKeyService.addKey("test-group", "test-key", "my-secret-key", "Test key");
@@ -422,7 +422,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
   });
 
   await t.step("validates keys correctly with encryption", async () => {
-    const ctx = await TestSetupBuilder.create().build();
+    const ctx = await TestSetupBuilder.create().withAll().build();
 
     try {
       await ctx.apiKeyService.addKey("test-group", "test-key", "my-secret-key", "Test key");
@@ -439,7 +439,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
   });
 
   await t.step("getAll returns decrypted keys", async () => {
-    const ctx = await TestSetupBuilder.create().build();
+    const ctx = await TestSetupBuilder.create().withAll().build();
 
     try {
       await ctx.apiKeyService.addKey("group1", "key-1", "value1", "First key");
@@ -461,7 +461,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
 // =====================
 
 Deno.test("ApiKeyService - Hash stored on addKey", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("test", "key1", "mykey123");
@@ -479,7 +479,7 @@ Deno.test("ApiKeyService - Hash stored on addKey", async () => {
 });
 
 Deno.test("ApiKeyService - Different keys produce different hashes", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("test", "key1", "value1");
@@ -499,7 +499,7 @@ Deno.test("ApiKeyService - Different keys produce different hashes", async () =>
 });
 
 Deno.test("ApiKeyService - Performance with many keys", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     // Create 100 keys in a group
@@ -522,7 +522,7 @@ Deno.test("ApiKeyService - Performance with many keys", async () => {
 });
 
 Deno.test("ApiKeyService - O(1) scaling verification", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     const results = [];
@@ -556,7 +556,7 @@ Deno.test("ApiKeyService - O(1) scaling verification", async () => {
 });
 
 Deno.test("ApiKeyService - getKeyByValue uses hash lookup", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("test", "key1", "value1");
@@ -572,7 +572,7 @@ Deno.test("ApiKeyService - getKeyByValue uses hash lookup", async () => {
 });
 
 Deno.test("ApiKeyService - removeKey uses hash lookup", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     await ctx.apiKeyService.addKey("test", "key1", "value1");

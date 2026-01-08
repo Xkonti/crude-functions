@@ -1,10 +1,11 @@
 import { expect } from "@std/expect";
-import { DatabaseService } from "../database/database_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { KeyRotationService } from "./key_rotation_service.ts";
 import { KeyStorageService } from "./key_storage_service.ts";
 import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
 import type { KeyRotationConfig } from "./key_rotation_types.ts";
+import type { DatabaseService } from "../database/database_service.ts";
 
 // Test keys (32 bytes base64-encoded)
 const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
@@ -23,88 +24,57 @@ function createMockKeyGenerator() {
   };
 }
 
-const SECRETS_SCHEMA = `
-  CREATE TABLE secrets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    comment TEXT,
-    scope INTEGER NOT NULL DEFAULT 0,
-    functionId INTEGER,
-    apiGroupId INTEGER,
-    apiKeyId INTEGER,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-const API_KEYS_SCHEMA = `
-  CREATE TABLE apiKeyGroups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE apiKeys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
-    value TEXT NOT NULL,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-const SETTINGS_SCHEMA = `
-  CREATE TABLE settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT NOT NULL UNIQUE,
-    value TEXT NOT NULL,
-    isEncrypted INTEGER NOT NULL DEFAULT 0,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
+/**
+ * Test context for key rotation tests.
+ * Uses simple helper pattern for custom encryption setup with mock key generator.
+ */
 interface TestContext {
   tempDir: string;
   db: DatabaseService;
   keyStorage: KeyStorageService;
   encryptionService: VersionedEncryptionService;
   config: KeyRotationConfig;
+  cleanup: () => Promise<void>;
 }
 
+/**
+ * Creates a test context for key rotation tests.
+ * Uses TestSetupBuilder for database/migrations, then creates custom encryption
+ * services with mock key generator to avoid spawning openssl processes.
+ *
+ * Follows the "Simple Helper Functions" pattern from the testing skill for
+ * tests requiring custom service configuration.
+ */
 async function createTestContext(
   keysOverride?: Partial<EncryptionKeyFile>
 ): Promise<TestContext> {
-  const tempDir = await Deno.makeTempDir();
-  const keyFilePath = `${tempDir}/encryption-keys.json`;
+  // Build base context with database and migrations
+  // Only need encryption for better_auth_secret and hash_key
+  const baseCtx = await TestSetupBuilder.create()
+    .withEncryption()
+    .build();
 
-  // Create key storage with mock key generator (avoids spawning openssl)
+  // Create custom key storage with mock key generator (avoids spawning openssl)
+  const keyFilePath = `${baseCtx.tempDir}/custom-encryption-keys.json`;
   const keyStorage = new KeyStorageService({
     keyFilePath,
     keyGenerator: createMockKeyGenerator(),
   });
+
+  // Create custom encryption keys with overrides
   const keys: EncryptionKeyFile = {
     current_key: TEST_KEY_A,
     current_version: "A",
     phased_out_key: null,
     phased_out_version: null,
     last_rotation_finished_at: new Date().toISOString(),
-    better_auth_secret: "YXV0aHNlY3JldGF1dGhzZWNyZXRhdXRoc2VjcmV0YXV0",
-    hash_key: "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=",
+    better_auth_secret: baseCtx.encryptionKeys.better_auth_secret,
+    hash_key: baseCtx.encryptionKeys.hash_key,
     ...keysOverride,
   };
   await keyStorage.saveKeys(keys);
 
-  // Create database
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(SECRETS_SCHEMA);
-  await db.exec(API_KEYS_SCHEMA);
-  await db.exec(SETTINGS_SCHEMA);
-
-  // Create encryption service
+  // Create custom encryption service with our test keys
   const encryptionService = new VersionedEncryptionService({
     currentKey: keys.current_key,
     currentVersion: keys.current_version,
@@ -120,12 +90,14 @@ async function createTestContext(
     batchSleepMs: 1,
   };
 
-  return { tempDir, db, keyStorage, encryptionService, config };
-}
-
-async function cleanup(ctx: TestContext): Promise<void> {
-  await ctx.db.close();
-  await Deno.remove(ctx.tempDir, { recursive: true });
+  return {
+    tempDir: baseCtx.tempDir,
+    db: baseCtx.db,
+    keyStorage,
+    encryptionService,
+    config,
+    cleanup: baseCtx.cleanup,
+  };
 }
 
 // Helper to insert encrypted secrets
@@ -146,12 +118,14 @@ async function insertSecret(
 async function insertApiKey(
   ctx: TestContext,
   groupId: number,
-  plaintext: string
+  plaintext: string,
+  name?: string
 ): Promise<number> {
   const encrypted = await ctx.encryptionService.encrypt(plaintext);
+  const keyName = name ?? `test-key-${Date.now()}-${Math.random()}`;
   const result = await ctx.db.execute(
-    "INSERT INTO apiKeys (groupId, value, description) VALUES (?, ?, 'test')",
-    [groupId, encrypted]
+    "INSERT INTO apiKeys (groupId, name, value, description) VALUES (?, ?, ?, 'test')",
+    [groupId, keyName, encrypted]
   );
   return result.lastInsertRowId;
 }
@@ -180,7 +154,7 @@ Deno.test("KeyRotationService - start and stop", async () => {
     // Stop should complete
     await service.stop();
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -201,7 +175,7 @@ Deno.test("KeyRotationService - start is idempotent", async () => {
 
     await service.stop();
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -237,7 +211,7 @@ Deno.test("KeyRotationService - does not rotate when interval not reached", asyn
     );
     expect(row!.value.charAt(0)).toBe("A");
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -279,7 +253,7 @@ Deno.test("KeyRotationService - triggers rotation when interval exceeded", async
     expect(keys!.current_version).toBe("B");
     expect(keys!.phased_out_key).toBe(null);
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -342,7 +316,7 @@ Deno.test("KeyRotationService - resumes incomplete rotation", async () => {
     expect(keys!.phased_out_key).toBe(null);
     expect(keys!.phased_out_version).toBe(null);
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -385,7 +359,7 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
       expect(row.value.charAt(0)).toBe("B");
     }
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -403,12 +377,13 @@ Deno.test("KeyRotationService - rotates apiKeys table", async () => {
 
   try {
     // Create a group and add API keys
-    await ctx.db.execute(
+    const groupResult = await ctx.db.execute(
       "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
       ["test-group", "Test"]
     );
-    await insertApiKey(ctx, 1, "api-key-value-1");
-    await insertApiKey(ctx, 1, "api-key-value-2");
+    const groupId = groupResult.lastInsertRowId;
+    await insertApiKey(ctx, groupId, "api-key-value-1");
+    await insertApiKey(ctx, groupId, "api-key-value-2");
 
     const service = new KeyRotationService({
       db: ctx.db,
@@ -431,7 +406,7 @@ Deno.test("KeyRotationService - rotates apiKeys table", async () => {
       expect(row.value.charAt(0)).toBe("B");
     }
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -482,7 +457,7 @@ Deno.test("KeyRotationService - preserves data integrity after rotation", async 
       expect(decrypted).toBe(originalValues[i]);
     }
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -539,6 +514,6 @@ Deno.test("KeyRotationService - handles concurrent checks safely", async () => {
     const keys = await ctx.keyStorage.loadKeys();
     expect(keys!.current_version).toBe("B");
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });

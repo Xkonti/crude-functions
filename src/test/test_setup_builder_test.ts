@@ -6,7 +6,9 @@ import { expect } from "@std/expect";
 import { TestSetupBuilder } from "./test_setup_builder.ts";
 
 Deno.test("TestSetupBuilder creates basic context with all services", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  // Use .withAll() explicitly for type safety - this is now required since
+  // the builder returns BaseTestContext by default
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     // Verify all services are initialized
@@ -221,7 +223,7 @@ Deno.test("TestSetupBuilder full integration", async () => {
 });
 
 Deno.test("TestSetupBuilder cleanup removes temp directory", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
   const tempDir = ctx.tempDir;
 
   // Verify temp dir exists
