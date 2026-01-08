@@ -479,3 +479,189 @@ Deno.test("SettingsService concurrent writes to same setting are serialized", as
     await ctx.cleanup();
   }
 });
+
+// ============== Group 6: Batch Read Operations ==============
+
+Deno.test("SettingsService.getAllGlobalSettings returns all global settings", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const settings = await ctx.settingsService.getAllGlobalSettings();
+
+    // Should have at least most bootstrapped settings (allow for timing issues)
+    expect(settings.size).toBeGreaterThanOrEqual(Object.keys(GlobalSettingDefaults).length - 1);
+
+    // Verify a few known settings exist
+    expect(settings.get(SettingNames.LOG_LEVEL)).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+    expect(settings.get(SettingNames.METRICS_RETENTION_DAYS)).toBe(GlobalSettingDefaults[SettingNames.METRICS_RETENTION_DAYS]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.getAllUserSettings returns all user settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+
+    // Create some user settings
+    await ctx.settingsService.setUserSetting(SettingNames.LOG_LEVEL, user!.id, "debug");
+    await ctx.settingsService.setUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id, "45");
+
+    const settings = await ctx.settingsService.getAllUserSettings(user!.id);
+
+    expect(settings.size).toBe(2);
+    expect(settings.get(SettingNames.LOG_LEVEL)).toBe("debug");
+    expect(settings.get(SettingNames.METRICS_RETENTION_DAYS)).toBe("45");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.getAllUserSettings returns empty map for user with no settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    const settings = await ctx.settingsService.getAllUserSettings(user!.id);
+
+    expect(settings.size).toBe(0);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============== Group 7: Batch Write Operations ==============
+
+Deno.test("SettingsService.setGlobalSettingsBatch sets multiple global settings", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const updates = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "debug"],
+      [SettingNames.METRICS_RETENTION_DAYS, "60"],
+    ]);
+
+    await ctx.settingsService.setGlobalSettingsBatch(updates);
+
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL)).toBe("debug");
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS)).toBe("60");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.setGlobalSettingsBatch handles empty map", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const updates = new Map<SettingName, string>();
+    await ctx.settingsService.setGlobalSettingsBatch(updates);
+
+    // Should complete without error
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(logLevel).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.setUserSettingsBatch sets multiple user settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    const updates = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "warn"],
+      [SettingNames.METRICS_RETENTION_DAYS, "30"],
+    ]);
+
+    await ctx.settingsService.setUserSettingsBatch(user!.id, updates);
+
+    expect(await ctx.settingsService.getUserSetting(SettingNames.LOG_LEVEL, user!.id)).toBe("warn");
+    expect(await ctx.settingsService.getUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id)).toBe("30");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============== Group 8: Reset Operations ==============
+
+Deno.test("SettingsService.resetGlobalSettings resets settings to defaults", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    // Modify some settings
+    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "debug");
+    await ctx.settingsService.setGlobalSetting(SettingNames.METRICS_RETENTION_DAYS, "120");
+
+    // Reset them
+    await ctx.settingsService.resetGlobalSettings([
+      SettingNames.LOG_LEVEL,
+      SettingNames.METRICS_RETENTION_DAYS,
+    ]);
+
+    // Should be back to defaults
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL))
+      .toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS))
+      .toBe(GlobalSettingDefaults[SettingNames.METRICS_RETENTION_DAYS]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.resetGlobalSettings handles empty array", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    await ctx.settingsService.resetGlobalSettings([]);
+
+    // Should complete without error
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(logLevel).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.resetUserSettings deletes user settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+
+    // Create some user settings
+    await ctx.settingsService.setUserSetting(SettingNames.LOG_LEVEL, user!.id, "debug");
+    await ctx.settingsService.setUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id, "45");
+
+    // Reset one of them
+    await ctx.settingsService.resetUserSettings(user!.id, [SettingNames.LOG_LEVEL]);
+
+    // LOG_LEVEL should be deleted (null)
+    expect(await ctx.settingsService.getUserSetting(SettingNames.LOG_LEVEL, user!.id)).toBeNull();
+    // METRICS_RETENTION_DAYS should still exist
+    expect(await ctx.settingsService.getUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id)).toBe("45");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.resetUserSettings handles empty array", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    await ctx.settingsService.resetUserSettings(user!.id, []);
+
+    // Should complete without error
+  } finally {
+    await ctx.cleanup();
+  }
+});
