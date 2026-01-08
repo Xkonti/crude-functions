@@ -5,7 +5,7 @@ import { KeyStorageService } from "./key_storage_service.ts";
 import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
 import type { KeyRotationConfig } from "./key_rotation_types.ts";
-import type { TestContext as BaseTestContext } from "../test/types.ts";
+import type { DatabaseService } from "../database/database_service.ts";
 
 // Test keys (32 bytes base64-encoded)
 const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
@@ -25,24 +25,33 @@ function createMockKeyGenerator() {
 }
 
 /**
- * Extended test context for key rotation tests.
- * Includes custom key storage and encryption services for rotation testing.
+ * Test context for key rotation tests.
+ * Uses simple helper pattern for custom encryption setup with mock key generator.
  */
-interface TestContext extends BaseTestContext {
+interface TestContext {
+  tempDir: string;
+  db: DatabaseService;
   keyStorage: KeyStorageService;
+  encryptionService: VersionedEncryptionService;
   config: KeyRotationConfig;
+  cleanup: () => Promise<void>;
 }
 
 /**
  * Creates a test context for key rotation tests.
- * Uses TestSetupBuilder for database/migrations, but creates custom encryption
+ * Uses TestSetupBuilder for database/migrations, then creates custom encryption
  * services with mock key generator to avoid spawning openssl processes.
+ *
+ * Follows the "Simple Helper Functions" pattern from the testing skill for
+ * tests requiring custom service configuration.
  */
 async function createTestContext(
   keysOverride?: Partial<EncryptionKeyFile>
 ): Promise<TestContext> {
-  // Build base context with real migrations
-  const baseCtx = await TestSetupBuilder.create().build();
+  // Build base context with database and migrations
+  const baseCtx = await TestSetupBuilder.create()
+    .withAll()
+    .build();
 
   // Create custom key storage with mock key generator (avoids spawning openssl)
   const keyFilePath = `${baseCtx.tempDir}/custom-encryption-keys.json`;
@@ -81,19 +90,13 @@ async function createTestContext(
   };
 
   return {
-    ...baseCtx,
+    tempDir: baseCtx.tempDir,
+    db: baseCtx.db,
     keyStorage,
-    encryptionService, // Override with custom encryption service
+    encryptionService,
     config,
+    cleanup: baseCtx.cleanup,
   };
-}
-
-/**
- * Cleanup test context.
- * Delegates to the base context cleanup which handles db close and temp dir removal.
- */
-async function cleanup(ctx: TestContext): Promise<void> {
-  await ctx.cleanup();
 }
 
 // Helper to insert encrypted secrets
@@ -114,12 +117,14 @@ async function insertSecret(
 async function insertApiKey(
   ctx: TestContext,
   groupId: number,
-  plaintext: string
+  plaintext: string,
+  name?: string
 ): Promise<number> {
   const encrypted = await ctx.encryptionService.encrypt(plaintext);
+  const keyName = name ?? `test-key-${Date.now()}-${Math.random()}`;
   const result = await ctx.db.execute(
-    "INSERT INTO apiKeys (groupId, value, description) VALUES (?, ?, 'test')",
-    [groupId, encrypted]
+    "INSERT INTO apiKeys (groupId, name, value, description) VALUES (?, ?, ?, 'test')",
+    [groupId, keyName, encrypted]
   );
   return result.lastInsertRowId;
 }
@@ -148,7 +153,7 @@ Deno.test("KeyRotationService - start and stop", async () => {
     // Stop should complete
     await service.stop();
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -169,7 +174,7 @@ Deno.test("KeyRotationService - start is idempotent", async () => {
 
     await service.stop();
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -205,7 +210,7 @@ Deno.test("KeyRotationService - does not rotate when interval not reached", asyn
     );
     expect(row!.value.charAt(0)).toBe("A");
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -247,7 +252,7 @@ Deno.test("KeyRotationService - triggers rotation when interval exceeded", async
     expect(keys!.current_version).toBe("B");
     expect(keys!.phased_out_key).toBe(null);
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -310,7 +315,7 @@ Deno.test("KeyRotationService - resumes incomplete rotation", async () => {
     expect(keys!.phased_out_key).toBe(null);
     expect(keys!.phased_out_version).toBe(null);
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -353,7 +358,7 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
       expect(row.value.charAt(0)).toBe("B");
     }
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -371,12 +376,13 @@ Deno.test("KeyRotationService - rotates apiKeys table", async () => {
 
   try {
     // Create a group and add API keys
-    await ctx.db.execute(
+    const groupResult = await ctx.db.execute(
       "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
       ["test-group", "Test"]
     );
-    await insertApiKey(ctx, 1, "api-key-value-1");
-    await insertApiKey(ctx, 1, "api-key-value-2");
+    const groupId = groupResult.lastInsertRowId;
+    await insertApiKey(ctx, groupId, "api-key-value-1");
+    await insertApiKey(ctx, groupId, "api-key-value-2");
 
     const service = new KeyRotationService({
       db: ctx.db,
@@ -399,7 +405,7 @@ Deno.test("KeyRotationService - rotates apiKeys table", async () => {
       expect(row.value.charAt(0)).toBe("B");
     }
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -450,7 +456,7 @@ Deno.test("KeyRotationService - preserves data integrity after rotation", async 
       expect(decrypted).toBe(originalValues[i]);
     }
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
 
@@ -507,6 +513,6 @@ Deno.test("KeyRotationService - handles concurrent checks safely", async () => {
     const keys = await ctx.keyStorage.loadKeys();
     expect(keys!.current_version).toBe("B");
   } finally {
-    await cleanup(ctx);
+    await ctx.cleanup();
   }
 });
