@@ -3,7 +3,7 @@ import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { createHybridAuthMiddleware } from "./auth_middleware.ts";
 import { SettingNames } from "../settings/types.ts";
-import type { TestContext } from "../test/types.ts";
+import type { ApiKeysContext, BaseTestContext, SettingsContext } from "../test/types.ts";
 import type { Auth } from "./auth.ts";
 
 /**
@@ -11,10 +11,9 @@ import type { Auth } from "./auth.ts";
  * The app exposes a single protected endpoint at /api/test that returns
  * auth information (method and API key group if applicable).
  */
-function createTestApp(ctx: TestContext, auth?: Auth): Hono {
-  const authToUse = auth ?? ctx.auth;
+function createTestApp(ctx: BaseTestContext & SettingsContext & ApiKeysContext, auth: Auth): Hono {
   const hybridAuth = createHybridAuthMiddleware({
-    auth: authToUse,
+    auth,
     apiKeyService: ctx.apiKeyService,
     settingsService: ctx.settingsService,
   });
@@ -70,7 +69,10 @@ function createMockAuth(options: { authenticated: boolean } = { authenticated: t
 // HybridAuthMiddleware Tests
 
 Deno.test("HybridAuth: rejects request without API key or session", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Need settings service for hybrid auth
+    .withApiKeyService()  // Need API key service for hybrid auth middleware
+    .build();
 
   try {
     const auth = createMockAuth({ authenticated: false });
@@ -87,7 +89,10 @@ Deno.test("HybridAuth: rejects request without API key or session", async () => 
 });
 
 Deno.test("HybridAuth: accepts valid session without API key", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Need settings service for hybrid auth
+    .withApiKeyService()  // Need API key service for hybrid auth middleware
+    .build();
 
   try {
     const auth = createMockAuth({ authenticated: true });
@@ -107,6 +112,7 @@ Deno.test("HybridAuth: accepts valid session without API key", async () => {
 
 Deno.test("HybridAuth: rejects API key when no access groups configured", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("test-group", "Test Group")
     .withApiKey("test-group", "test-key-123", "test-key")
     .build();
@@ -131,6 +137,7 @@ Deno.test("HybridAuth: rejects API key when no access groups configured", async 
 
 Deno.test("HybridAuth: rejects API key from non-allowed group", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("allowed-group", "Allowed")
     .withApiKeyGroup("forbidden-group", "Forbidden")
     .withApiKey("allowed-group", "allowed-key-value", "allowed-key")
@@ -167,6 +174,7 @@ Deno.test("HybridAuth: rejects API key from non-allowed group", async () => {
 
 Deno.test("HybridAuth: accepts API key from single allowed group", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("management", "Management keys")
     .withApiKey("management", "mgmt-key-123", "mgmt-key")
     .build();
@@ -202,6 +210,7 @@ Deno.test("HybridAuth: accepts API key from single allowed group", async () => {
 
 Deno.test("HybridAuth: accepts API key from multiple allowed groups (first group)", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("admin", "Admin keys")
     .withApiKeyGroup("service", "Service keys")
     .withApiKey("admin", "admin-key-value", "admin-key")
@@ -242,6 +251,7 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (first group
 
 Deno.test("HybridAuth: accepts API key from multiple allowed groups (second group)", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("admin", "Admin keys")
     .withApiKeyGroup("service", "Service keys")
     .withApiKey("admin", "admin-key-value", "admin-key")
@@ -282,6 +292,7 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (second grou
 
 Deno.test("HybridAuth: rejects invalid API key even when access groups configured", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("management", "Management")
     .withApiKey("management", "valid-key-value", "valid-key")
     .build();
@@ -314,6 +325,7 @@ Deno.test("HybridAuth: rejects invalid API key even when access groups configure
 
 Deno.test("HybridAuth: handles malformed access groups setting gracefully", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("test", "Test Group")
     .withApiKey("test", "test-key-value", "test-key")
     .build();
@@ -343,6 +355,7 @@ Deno.test("HybridAuth: handles malformed access groups setting gracefully", asyn
 
 Deno.test("HybridAuth: handles empty access groups setting", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("test", "Test Group")
     .withApiKey("test", "test-key-value", "test-key")
     .build();
@@ -368,6 +381,7 @@ Deno.test("HybridAuth: handles empty access groups setting", async () => {
 
 Deno.test("HybridAuth: prioritizes session over API key when both present", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
     .withApiKeyGroup("management", "Management")
     .withApiKey("management", "test-key-value", "test-key")
     .build();
