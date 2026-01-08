@@ -1,111 +1,22 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
-import { DatabaseService } from "../database/database_service.ts";
-import { ApiKeyService } from "../keys/api_key_service.ts";
-import { SettingsService } from "../settings/settings_service.ts";
-import { EncryptionService } from "../encryption/encryption_service.ts";
-import { HashService } from "../encryption/hash_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { createHybridAuthMiddleware } from "./auth_middleware.ts";
 import { SettingNames } from "../settings/types.ts";
+import type { ApiKeysContext, BaseTestContext, SettingsContext } from "../test/types.ts";
 import type { Auth } from "./auth.ts";
 
-// Test encryption key (32 bytes base64-encoded)
-const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
-// Test hash key (32 bytes base64-encoded)
-const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
-
-const API_KEYS_SCHEMA = `
-  CREATE TABLE apiKeyGroups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE apiKeys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    valueHash TEXT,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE UNIQUE INDEX idx_api_keys_group_name ON apiKeys(groupId, name);
-  CREATE INDEX idx_api_keys_group ON apiKeys(groupId);
-  CREATE INDEX idx_api_keys_hash ON apiKeys(groupId, valueHash);
-`;
-
-const SETTINGS_SCHEMA = `
-  CREATE TABLE settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    userId TEXT,
-    value TEXT,
-    isEncrypted INTEGER NOT NULL DEFAULT 0,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
-  CREATE INDEX idx_settings_name ON settings(name);
-`;
-
 /**
- * Creates a mock Auth object for testing.
+ * Creates a test Hono app with hybrid auth middleware.
+ * The app exposes a single protected endpoint at /api/test that returns
+ * auth information (method and API key group if applicable).
  */
-function createMockAuth(options: { authenticated: boolean } = { authenticated: true }): Auth {
-  return {
-    api: {
-      getSession: () => {
-        if (options.authenticated) {
-          return {
-            user: { id: "test-user", email: "test@example.com", name: "Test User", emailVerified: true },
-            session: { id: "test-session", token: "test-token", userId: "test-user", expiresAt: new Date(Date.now() + 86400000) },
-          };
-        }
-        return null;
-      },
-    },
-  } as unknown as Auth;
-}
-
-interface TestApp {
-  app: Hono;
-  apiKeyService: ApiKeyService;
-  settingsService: SettingsService;
-  db: DatabaseService;
-  tempDir: string;
-}
-
-async function createTestApp(options: { authenticated?: boolean } = {}): Promise<TestApp> {
-  const tempDir = await Deno.makeTempDir();
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(API_KEYS_SCHEMA);
-  await db.exec(SETTINGS_SCHEMA);
-
-  const encryptionService = new EncryptionService({
-    encryptionKey: TEST_ENCRYPTION_KEY,
+function createTestApp(ctx: BaseTestContext & SettingsContext & ApiKeysContext, auth: Auth): Hono {
+  const hybridAuth = createHybridAuthMiddleware({
+    auth,
+    apiKeyService: ctx.apiKeyService,
+    settingsService: ctx.settingsService,
   });
-
-  const hashService = new HashService({
-    hashKey: TEST_HASH_KEY,
-  });
-
-  const apiKeyService = new ApiKeyService({
-    db,
-    encryptionService,
-    hashService,
-  });
-
-  const settingsService = new SettingsService({
-    db,
-    encryptionService,
-  });
-
-  await settingsService.bootstrapGlobalSettings();
-
-  const auth = createMockAuth({ authenticated: options.authenticated ?? false });
-  const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService, settingsService });
 
   const app = new Hono();
 
@@ -122,34 +33,71 @@ async function createTestApp(options: { authenticated?: boolean } = {}): Promise
     });
   });
 
-  return { app, apiKeyService, settingsService, db, tempDir };
+  return app;
 }
 
-async function cleanup(db: DatabaseService, tempDir: string): Promise<void> {
-  await db.close();
-  await Deno.remove(tempDir, { recursive: true });
+/**
+ * Creates a mock Auth object for testing scenarios without valid sessions.
+ * Used for tests that verify API key authentication when no session exists.
+ */
+function createMockAuth(options: { authenticated: boolean } = { authenticated: true }): Auth {
+  return {
+    api: {
+      getSession: () => {
+        if (options.authenticated) {
+          return {
+            user: {
+              id: "test-user",
+              email: "test@example.com",
+              name: "Test User",
+              emailVerified: true,
+            },
+            session: {
+              id: "test-session",
+              token: "test-token",
+              userId: "test-user",
+              expiresAt: new Date(Date.now() + 86400000),
+            },
+          };
+        }
+        return null;
+      },
+    },
+  } as unknown as Auth;
 }
 
 // HybridAuthMiddleware Tests
 
 Deno.test("HybridAuth: rejects request without API key or session", async () => {
-  const { app, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Need settings service for hybrid auth
+    .withApiKeyService()  // Need API key service for hybrid auth middleware
+    .build();
 
   try {
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
+
     const res = await app.request("/api/test");
     expect(res.status).toBe(401);
 
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: accepts valid session without API key", async () => {
-  const { app, db, tempDir } = await createTestApp({ authenticated: true });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Need settings service for hybrid auth
+    .withApiKeyService()  // Need API key service for hybrid auth middleware
+    .build();
 
   try {
+    const auth = createMockAuth({ authenticated: true });
+    const app = createTestApp(ctx, auth);
+
     const res = await app.request("/api/test");
     expect(res.status).toBe(200);
 
@@ -158,16 +106,20 @@ Deno.test("HybridAuth: accepts valid session without API key", async () => {
     expect(json.authMethod).toBe("session");
     expect(json.apiKeyGroup).toBeUndefined();
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: rejects API key when no access groups configured", async () => {
-  const { app, apiKeyService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("test-group", "Test Group")
+    .withApiKey("test-group", "test-key-123", "test-key")
+    .build();
 
   try {
-    // Create a key but don't configure access groups
-    await apiKeyService.addKey("test-group", "test-key", "test-key-123");
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     const res = await app.request("/api/test", {
       headers: {
@@ -179,29 +131,36 @@ Deno.test("HybridAuth: rejects API key when no access groups configured", async 
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: rejects API key from non-allowed group", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("allowed-group", "Allowed")
+    .withApiKeyGroup("forbidden-group", "Forbidden")
+    .withApiKey("allowed-group", "allowed-key-value", "allowed-key")
+    .withApiKey("forbidden-group", "forbidden-key-value", "forbidden-key")
+    .build();
 
   try {
-    // Create two groups
-    const allowedGroupId = await apiKeyService.createGroup("allowed-group", "Allowed");
-    await apiKeyService.createGroup("forbidden-group", "Forbidden");
+    // Get the allowed group ID and configure it as the only allowed group
+    const allowedGroup = await ctx.apiKeyService.getGroupByName("allowed-group");
+    if (!allowedGroup) throw new Error("allowed-group not found");
 
-    // Add keys to both groups
-    await apiKeyService.addKey("allowed-group", "allowed-key", "allowed-key-value");
-    await apiKeyService.addKey("forbidden-group", "forbidden-key", "forbidden-key-value");
+    await ctx.settingsService.setGlobalSetting(
+      SettingNames.API_ACCESS_GROUPS,
+      String(allowedGroup.id)
+    );
 
-    // Configure only the allowed group
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(allowedGroupId));
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     // Try to use key from forbidden group
     const res = await app.request("/api/test", {
       headers: {
-        "X-API-Key": "forbidden-key",
+        "X-API-Key": "forbidden-key-value",
       },
     });
 
@@ -209,20 +168,29 @@ Deno.test("HybridAuth: rejects API key from non-allowed group", async () => {
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: accepts API key from single allowed group", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("management", "Management keys")
+    .withApiKey("management", "mgmt-key-123", "mgmt-key")
+    .build();
 
   try {
-    // Create management group and key
-    const mgmtGroupId = await apiKeyService.createGroup("management", "Management keys");
-    await apiKeyService.addKey("management", "mgmt-key", "mgmt-key-123");
+    // Configure the management group as allowed
+    const mgmtGroup = await ctx.apiKeyService.getGroupByName("management");
+    if (!mgmtGroup) throw new Error("management group not found");
 
-    // Configure access groups
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+    await ctx.settingsService.setGlobalSetting(
+      SettingNames.API_ACCESS_GROUPS,
+      String(mgmtGroup.id)
+    );
+
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     const res = await app.request("/api/test", {
       headers: {
@@ -236,27 +204,33 @@ Deno.test("HybridAuth: accepts API key from single allowed group", async () => {
     expect(json.authMethod).toBe("api-key");
     expect(json.apiKeyGroup).toBe("management");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: accepts API key from multiple allowed groups (first group)", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("admin", "Admin keys")
+    .withApiKeyGroup("service", "Service keys")
+    .withApiKey("admin", "admin-key-value", "admin-key")
+    .withApiKey("service", "service-key-value", "service-key")
+    .build();
 
   try {
-    // Create multiple groups
-    const adminGroupId = await apiKeyService.createGroup("admin", "Admin keys");
-    const serviceGroupId = await apiKeyService.createGroup("service", "Service keys");
-
-    // Add keys to both groups
-    await apiKeyService.addKey("admin", "admin-key", "admin-key-value");
-    await apiKeyService.addKey("service", "service-key", "service-key-value");
+    // Get both group IDs
+    const adminGroup = await ctx.apiKeyService.getGroupByName("admin");
+    const serviceGroup = await ctx.apiKeyService.getGroupByName("service");
+    if (!adminGroup || !serviceGroup) throw new Error("Groups not found");
 
     // Configure both groups (comma-separated IDs)
-    await settingsService.setGlobalSetting(
+    await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      `${adminGroupId},${serviceGroupId}`
+      `${adminGroup.id},${serviceGroup.id}`
     );
+
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     // Test key from first group
     const res = await app.request("/api/test", {
@@ -271,27 +245,33 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (first group
     expect(json.authMethod).toBe("api-key");
     expect(json.apiKeyGroup).toBe("admin");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: accepts API key from multiple allowed groups (second group)", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("admin", "Admin keys")
+    .withApiKeyGroup("service", "Service keys")
+    .withApiKey("admin", "admin-key-value", "admin-key")
+    .withApiKey("service", "service-key-value", "service-key")
+    .build();
 
   try {
-    // Create multiple groups
-    const adminGroupId = await apiKeyService.createGroup("admin", "Admin keys");
-    const serviceGroupId = await apiKeyService.createGroup("service", "Service keys");
-
-    // Add keys to both groups
-    await apiKeyService.addKey("admin", "admin-key", "admin-key-value");
-    await apiKeyService.addKey("service", "service-key", "service-key-value");
+    // Get both group IDs
+    const adminGroup = await ctx.apiKeyService.getGroupByName("admin");
+    const serviceGroup = await ctx.apiKeyService.getGroupByName("service");
+    if (!adminGroup || !serviceGroup) throw new Error("Groups not found");
 
     // Configure both groups (comma-separated IDs)
-    await settingsService.setGlobalSetting(
+    await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      `${adminGroupId},${serviceGroupId}`
+      `${adminGroup.id},${serviceGroup.id}`
     );
+
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     // Test key from second group
     const res = await app.request("/api/test", {
@@ -306,17 +286,28 @@ Deno.test("HybridAuth: accepts API key from multiple allowed groups (second grou
     expect(json.authMethod).toBe("api-key");
     expect(json.apiKeyGroup).toBe("service");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: rejects invalid API key even when access groups configured", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("management", "Management")
+    .withApiKey("management", "valid-key-value", "valid-key")
+    .build();
 
   try {
-    const mgmtGroupId = await apiKeyService.createGroup("management", "Management");
-    await apiKeyService.addKey("management", "valid-key", "valid-key-value");
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+    const mgmtGroup = await ctx.apiKeyService.getGroupByName("management");
+    if (!mgmtGroup) throw new Error("management group not found");
+
+    await ctx.settingsService.setGlobalSetting(
+      SettingNames.API_ACCESS_GROUPS,
+      String(mgmtGroup.id)
+    );
+
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     const res = await app.request("/api/test", {
       headers: {
@@ -328,63 +319,88 @@ Deno.test("HybridAuth: rejects invalid API key even when access groups configure
     const json = await res.json();
     expect(json.error).toBe("Unauthorized");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: handles malformed access groups setting gracefully", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("test", "Test Group")
+    .withApiKey("test", "test-key-value", "test-key")
+    .build();
 
   try {
-    await apiKeyService.addKey("test", "test-key", "test-key-value");
-
     // Set malformed setting (non-numeric values)
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, "abc,xyz,123invalid");
+    await ctx.settingsService.setGlobalSetting(
+      SettingNames.API_ACCESS_GROUPS,
+      "abc,xyz,123invalid"
+    );
+
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     const res = await app.request("/api/test", {
       headers: {
-        "X-API-Key": "test-key",
+        "X-API-Key": "test-key-value",
       },
     });
 
     // Should reject because no valid group IDs could be parsed
     expect(res.status).toBe(401);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: handles empty access groups setting", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: false });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("test", "Test Group")
+    .withApiKey("test", "test-key-value", "test-key")
+    .build();
 
   try {
-    await apiKeyService.addKey("test", "test-key", "test-key-value");
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, "");
+    await ctx.settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, "");
+
+    const auth = createMockAuth({ authenticated: false });
+    const app = createTestApp(ctx, auth);
 
     const res = await app.request("/api/test", {
       headers: {
-        "X-API-Key": "test-key",
+        "X-API-Key": "test-key-value",
       },
     });
 
     // Should reject because no groups are allowed
     expect(res.status).toBe(401);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("HybridAuth: prioritizes session over API key when both present", async () => {
-  const { app, apiKeyService, settingsService, db, tempDir } = await createTestApp({ authenticated: true });
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()  // Required for auth middleware and API access groups
+    .withApiKeyGroup("management", "Management")
+    .withApiKey("management", "test-key-value", "test-key")
+    .build();
 
   try {
-    const mgmtGroupId = await apiKeyService.createGroup("management", "Management");
-    await apiKeyService.addKey("management", "test-key", "test-key-value");
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+    const mgmtGroup = await ctx.apiKeyService.getGroupByName("management");
+    if (!mgmtGroup) throw new Error("management group not found");
+
+    await ctx.settingsService.setGlobalSetting(
+      SettingNames.API_ACCESS_GROUPS,
+      String(mgmtGroup.id)
+    );
+
+    const auth = createMockAuth({ authenticated: true });
+    const app = createTestApp(ctx, auth);
 
     const res = await app.request("/api/test", {
       headers: {
-        "X-API-Key": "test-key",
+        "X-API-Key": "test-key-value",
       },
     });
 
@@ -393,6 +409,6 @@ Deno.test("HybridAuth: prioritizes session over API key when both present", asyn
     expect(json.authMethod).toBe("session"); // Session should be preferred
     expect(json.apiKeyGroup).toBeUndefined();
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
