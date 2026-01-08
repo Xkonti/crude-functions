@@ -25,6 +25,7 @@ import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
 import { createFileRoutes } from "./src/files/file_routes.ts";
+import { createSettingsRoutes } from "./src/settings/settings_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
 import { StreamInterceptor } from "./src/logs/stream_interceptor.ts";
@@ -291,6 +292,13 @@ app.use("/api/files/*", hybridAuth);
 app.use("/api/files", hybridAuth);
 app.route("/api/files", createFileRoutes({
   fileService,
+  settingsService,
+}));
+
+// Protected settings management routes
+app.use("/api/settings/*", hybridAuth);
+app.use("/api/settings", hybridAuth);
+app.route("/api/settings", createSettingsRoutes({
   settingsService,
 }));
 

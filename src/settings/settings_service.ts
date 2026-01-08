@@ -87,6 +87,56 @@ export class SettingsService {
     return row.value;
   }
 
+  /**
+   * Get all global settings.
+   * @returns Record of setting names to values
+   */
+  async getAllGlobalSettings(): Promise<Record<string, string>> {
+    const rows = await this.db.queryAll<SettingRow>(
+      `SELECT * FROM settings WHERE userId IS NULL`
+    );
+
+    const result: Record<string, string> = {};
+    for (const row of rows) {
+      let value = row.value ?? "";
+
+      // Handle encrypted values
+      if (row.isEncrypted && this.encryptionService && value) {
+        value = await this.encryptionService.decrypt(value);
+      }
+
+      result[row.name] = value;
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all user-specific settings for a given user.
+   * @param userId - The user ID
+   * @returns Record of setting names to values
+   */
+  async getAllUserSettings(userId: string): Promise<Record<string, string>> {
+    const rows = await this.db.queryAll<SettingRow>(
+      `SELECT * FROM settings WHERE userId = ?`,
+      [userId]
+    );
+
+    const result: Record<string, string> = {};
+    for (const row of rows) {
+      let value = row.value ?? "";
+
+      // Handle encrypted values
+      if (row.isEncrypted && this.encryptionService && value) {
+        value = await this.encryptionService.decrypt(value);
+      }
+
+      result[row.name] = value;
+    }
+
+    return result;
+  }
+
   // ============== Write Operations ==============
 
   /**
@@ -139,6 +189,49 @@ export class SettingsService {
        DO UPDATE SET value = ?, isEncrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
       [name, userId, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
     );
+  }
+
+  /**
+   * Set multiple global settings in a single transaction.
+   * If any setting update fails, all changes are rolled back.
+   * Settings are stored unencrypted (encrypted=false).
+   * @param settings - Record of setting names to values
+   * @throws Error if transaction fails or any setting name is invalid
+   */
+  async setGlobalSettings(settings: Record<string, string>): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const [name, value] of Object.entries(settings)) {
+        await tx.execute(
+          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
+           VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)
+           ON CONFLICT (name, COALESCE(userId, ''))
+           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
+          [name, value, value]
+        );
+      }
+    });
+  }
+
+  /**
+   * Set multiple user-specific settings in a single transaction.
+   * If any setting update fails, all changes are rolled back.
+   * Settings are stored unencrypted (encrypted=false).
+   * @param userId - The user ID
+   * @param settings - Record of setting names to values
+   * @throws Error if transaction fails or any setting name is invalid
+   */
+  async setUserSettings(userId: string, settings: Record<string, string>): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const [name, value] of Object.entries(settings)) {
+        await tx.execute(
+          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
+           VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
+           ON CONFLICT (name, COALESCE(userId, ''))
+           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
+          [name, userId, value, value]
+        );
+      }
+    });
   }
 
   // ============== Bootstrap Operations ==============
