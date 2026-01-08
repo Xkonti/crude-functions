@@ -603,3 +603,306 @@ Deno.test("File routes allow empty file content", async () => {
     await cleanup();
   }
 });
+
+// ============================================================================
+// POST/PUT with Multipart Form-Data
+// ============================================================================
+
+Deno.test("POST /api/files/:path accepts multipart/form-data with 'file' field", async () => {
+  const { app, fileService, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    const fileContent = "export const x = 1;";
+    const file = new File([fileContent], "script.ts", { type: "text/typescript" });
+    formData.append("file", file);
+
+    const res = await app.request("/api/files/script.ts", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(201);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.path).toBe("script.ts");
+    expect(json.created).toBe(true);
+
+    // Verify file was created on filesystem
+    expect(await fileService.getFile("script.ts")).toBe("export const x = 1;");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("POST /api/files/:path accepts multipart/form-data with 'content' field", async () => {
+  const { app, fileService, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    const binaryData = new Uint8Array([0x89, 0x50, 0x4e, 0x47]); // PNG header
+    const file = new File([binaryData], "image.png", { type: "image/png" });
+    formData.append("content", file);  // Use "content" instead of "file"
+
+    const res = await app.request("/api/files/image.png", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(201);
+
+    // Verify binary content matches
+    const bytes = await fileService.getFileBytes("image.png");
+    expect(bytes).toEqual(binaryData);
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("POST /api/files/:path accepts multipart/form-data with string value", async () => {
+  const { app, fileService, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    formData.append("file", "console.log('hello');");  // String, not File
+
+    const res = await app.request("/api/files/hello.ts", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(201);
+
+    const content = await fileService.getFile("hello.ts");
+    expect(content).toBe("console.log('hello');");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("PUT /api/files/:path creates new file with multipart/form-data", async () => {
+  const { app, fileService, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    const file = new File(["new content"], "new.ts");
+    formData.append("file", file);
+
+    const res = await app.request("/api/files/new.ts", {
+      method: "PUT",
+      body: formData,
+    });
+
+    expect(res.status).toBe(201);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.created).toBe(true);
+
+    expect(await fileService.getFile("new.ts")).toBe("new content");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("PUT /api/files/:path updates existing file with multipart/form-data", async () => {
+  const { app, fileService, cleanup } = await createTestApp({
+    "existing.ts": "old content",
+  });
+
+  try {
+    const formData = new FormData();
+    const file = new File(["new content"], "existing.ts");
+    formData.append("file", file);
+
+    const res = await app.request("/api/files/existing.ts", {
+      method: "PUT",
+      body: formData,
+    });
+
+    expect(res.status).toBe(200);
+
+    const json = await res.json();
+    expect(json.success).toBe(true);
+    expect(json.created).toBe(false);
+
+    expect(await fileService.getFile("existing.ts")).toBe("new content");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("Multipart upload returns 400 for missing file field", async () => {
+  const { app, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    formData.append("wrong_field", "content");  // Neither "file" nor "content"
+
+    const res = await app.request("/api/files/test.ts", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(400);
+
+    const json = await res.json();
+    expect(json.error).toContain("Missing file field");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("Multipart upload returns 413 for oversized File object", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withFiles()
+    .withSettings()
+    .withSetting("files.max-size-bytes", "100")  // 100 bytes limit
+    .build();
+
+  try {
+    const app = new Hono();
+    app.route(
+      "/api/files",
+      createFileRoutes({
+        fileService: ctx.fileService,
+        settingsService: ctx.settingsService,
+      })
+    );
+
+    const formData = new FormData();
+    const largeContent = "x".repeat(200);  // 200 bytes
+    const file = new File([largeContent], "large.txt");
+    formData.append("file", file);
+
+    const res = await app.request("/api/files/large.txt", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(413);
+
+    const json = await res.json();
+    expect(json.error).toContain("exceeds maximum");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("Multipart upload returns 413 for oversized string value", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withFiles()
+    .withSettings()
+    .withSetting("files.max-size-bytes", "100")  // 100 bytes limit
+    .build();
+
+  try {
+    const app = new Hono();
+    app.route(
+      "/api/files",
+      createFileRoutes({
+        fileService: ctx.fileService,
+        settingsService: ctx.settingsService,
+      })
+    );
+
+    const formData = new FormData();
+    formData.append("file", "x".repeat(200));  // String, not File
+
+    const res = await app.request("/api/files/large.txt", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(413);
+
+    const json = await res.json();
+    expect(json.error).toContain("exceeds maximum");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("Multipart upload returns 400 for invalid form-data", async () => {
+  const { app, cleanup } = await createTestApp();
+
+  try {
+    const res = await app.request("/api/files/test.ts", {
+      method: "POST",
+      headers: { "Content-Type": "multipart/form-data; boundary=---broken" },
+      body: "not valid multipart data",
+    });
+
+    expect(res.status).toBe(400);
+
+    const json = await res.json();
+    expect(json.error).toContain("Invalid multipart form-data");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("Multipart upload works with nested directory paths", async () => {
+  const { app, fileService, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    const file = new File(["nested content"], "file.ts");
+    formData.append("file", file);
+
+    const res = await app.request("/api/files/utils/nested/file.ts", {
+      method: "PUT",
+      body: formData,
+    });
+
+    expect(res.status).toBe(201);
+
+    expect(await fileService.getFile("utils/nested/file.ts")).toBe("nested content");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("Multipart upload handles empty File object", async () => {
+  const { app, fileService, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    const file = new File([], "empty.ts");
+    formData.append("file", file);
+
+    const res = await app.request("/api/files/empty.ts", {
+      method: "POST",
+      body: formData,
+    });
+
+    expect(res.status).toBe(201);
+
+    expect(await fileService.getFile("empty.ts")).toBe("");
+  } finally {
+    await cleanup();
+  }
+});
+
+Deno.test("Multipart upload rejects empty string value", async () => {
+  const { app, cleanup } = await createTestApp();
+
+  try {
+    const formData = new FormData();
+    formData.append("file", "");  // Empty string is treated as missing field
+
+    const res = await app.request("/api/files/empty.ts", {
+      method: "POST",
+      body: formData,
+    });
+
+    // Empty string in FormData is falsy and treated as missing field
+    expect(res.status).toBe(400);
+
+    const json = await res.json();
+    expect(json.error).toContain("Missing file field");
+  } finally {
+    await cleanup();
+  }
+});
