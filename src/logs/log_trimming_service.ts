@@ -40,9 +40,13 @@ export class LogTrimmingService {
       return;
     }
 
+    const retentionInfo = this.config.retentionSeconds > 0
+      ? `${this.config.retentionSeconds}s retention`
+      : "time-based retention disabled";
+
     logger.info(
       `[LogTrimming] Starting with interval ${this.config.trimmingIntervalSeconds}s, ` +
-      `max ${this.config.maxLogsPerRoute} logs per route`
+      `max ${this.config.maxLogsPerRoute} logs per route, ${retentionInfo}`
     );
 
     // Run immediately on start, then schedule interval
@@ -115,7 +119,18 @@ export class LogTrimmingService {
 
     this.isProcessing = true;
     try {
-      // Get all distinct route IDs that have logs
+      // STEP 1: Time-based deletion (global)
+      if (this.config.retentionSeconds > 0) {
+        const cutoffDate = new Date(Date.now() - this.config.retentionSeconds * 1000);
+        const deletedByAge = await this.logService.deleteOlderThan(cutoffDate);
+        if (deletedByAge > 0) {
+          logger.info(`[LogTrimming] Deleted ${deletedByAge} logs older than ${cutoffDate.toISOString()}`);
+        }
+      }
+
+      if (this.stopRequested) return;
+
+      // STEP 2: Count-based trimming per route
       const routeIds = await this.logService.getDistinctRouteIds();
 
       let totalDeleted = 0;
