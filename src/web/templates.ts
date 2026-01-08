@@ -95,6 +95,18 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
   <title>${escapeHtml(title)} - Crude Functions</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
+    /* Compact Pico CSS overrides */
+    :root {
+      --pico-font-size: 87.5%;
+      --pico-line-height: 1.25;
+      --pico-form-element-spacing-vertical: 0.5rem;
+      --pico-form-element-spacing-horizontal: 1.0rem;
+    }
+    @media (min-width: 576px) {
+      :root {
+        --pico-font-size: 87.5%;
+      }
+    }
     .actions { white-space: nowrap; }
     .actions a, .actions button { margin-right: 0.5rem; }
     .methods { display: flex; gap: 0.25rem; flex-wrap: wrap; }

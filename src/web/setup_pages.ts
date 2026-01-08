@@ -39,6 +39,18 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
   <title>Setup - Functions Router</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
+    /* Compact Pico CSS overrides */
+    :root {
+      --pico-font-size: 87.5%;
+      --pico-line-height: 1.25;
+      --pico-form-element-spacing-vertical: 0.5rem;
+      --pico-form-element-spacing-horizontal: 1.0rem;
+    }
+    @media (min-width: 576px) {
+      :root {
+        --pico-font-size: 87.5%;
+      }
+    }
     .alert-error {
       padding: 1rem;
       margin-bottom: 1rem;
