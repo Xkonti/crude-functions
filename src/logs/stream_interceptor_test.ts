@@ -1,6 +1,5 @@
 import { expect } from "@std/expect";
 import process from "node:process";
-import { DatabaseService } from "../database/database_service.ts";
 import { ConsoleLogService } from "./console_log_service.ts";
 import {
   StreamInterceptor,
@@ -8,67 +7,30 @@ import {
   originalStreams,
 } from "./stream_interceptor.ts";
 import { runInRequestContext } from "./request_context.ts";
-import { SettingsService } from "../settings/settings_service.ts";
-import { EncryptionService } from "../encryption/encryption_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 
-const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
-
-const TEST_SCHEMA = `
-  CREATE TABLE executionLogs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    requestId TEXT NOT NULL,
-    routeId INTEGER,
-    level TEXT NOT NULL,
-    message TEXT NOT NULL,
-    args TEXT,
-    timestamp TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX idx_executionLogs_requestId ON executionLogs(requestId);
-
-  CREATE TABLE settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    userId TEXT,
-    value TEXT,
-    isEncrypted INTEGER NOT NULL DEFAULT 0,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE UNIQUE INDEX idx_settings_name_user ON settings(name, COALESCE(userId, ''));
-`;
-
-async function createTestSetup(): Promise<{
+interface StreamTestContext {
   logService: ConsoleLogService;
   interceptor: StreamInterceptor;
-  db: DatabaseService;
-  tempDir: string;
-}> {
-  const tempDir = await Deno.makeTempDir();
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(TEST_SCHEMA);
-
-  const encryptionService = new EncryptionService({
-    encryptionKey: TEST_ENCRYPTION_KEY,
-  });
-  const settingsService = new SettingsService({ db, encryptionService });
-  await settingsService.bootstrapGlobalSettings();
-
-  const logService = new ConsoleLogService({ db, settingsService });
-  const interceptor = new StreamInterceptor({ logService });
-
-  return { logService, interceptor, db, tempDir };
+  cleanup: () => Promise<void>;
 }
 
-async function cleanup(
-  logService: ConsoleLogService,
-  interceptor: StreamInterceptor,
-  db: DatabaseService,
-  tempDir: string
-): Promise<void> {
-  interceptor.uninstall();
-  await logService.shutdown();
-  await db.close();
-  await Deno.remove(tempDir, { recursive: true });
+async function createStreamTestContext(): Promise<StreamTestContext> {
+  const ctx = await TestSetupBuilder.create()
+    .withLogs()
+    .build();
+
+  const interceptor = new StreamInterceptor({ logService: ctx.consoleLogService });
+
+  return {
+    logService: ctx.consoleLogService,
+    interceptor,
+    cleanup: async () => {
+      interceptor.uninstall();
+      await ctx.consoleLogService.shutdown();
+      await ctx.cleanup();
+    },
+  };
 }
 
 // =====================
@@ -76,7 +38,7 @@ async function cleanup(
 // =====================
 
 Deno.test("StreamInterceptor captures console.log within request context", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -97,12 +59,12 @@ Deno.test("StreamInterceptor captures console.log within request context", async
     expect(logs[0].level).toBe("log");
     expect(logs[0].routeId).toBe(1);
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor captures all console methods with correct levels", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -131,12 +93,12 @@ Deno.test("StreamInterceptor captures all console methods with correct levels", 
     expect(levels).toContain("warn");
     expect(levels).toContain("error");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor captures process.stdout.write with stdout level", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -156,12 +118,12 @@ Deno.test("StreamInterceptor captures process.stdout.write with stdout level", a
     expect(logs[0].message).toBe("Direct stdout message");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor captures process.stderr.write with stderr level", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -181,12 +143,12 @@ Deno.test("StreamInterceptor captures process.stderr.write with stderr level", a
     expect(logs[0].message).toBe("Direct stderr message");
     expect(logs[0].level).toBe("stderr");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor does not capture logs outside request context", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -200,12 +162,12 @@ Deno.test("StreamInterceptor does not capture logs outside request context", asy
     const allLogs = await logService.getRecent(100);
     expect(allLogs.length).toBe(0);
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor can be uninstalled", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -238,7 +200,7 @@ Deno.test("StreamInterceptor can be uninstalled", async () => {
     const logs2 = await logService.getByRequestId("test-request-2");
     expect(logs2.length).toBe(0);
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
@@ -257,7 +219,7 @@ Deno.test("StreamInterceptor preserves originalStreams functions", () => {
 });
 
 Deno.test("StreamInterceptor install is idempotent", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -277,12 +239,12 @@ Deno.test("StreamInterceptor install is idempotent", async () => {
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor installed getter returns correct state", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { interceptor, cleanup } = await createStreamTestContext();
 
   try {
     expect(interceptor.installed).toBe(false);
@@ -291,12 +253,12 @@ Deno.test("StreamInterceptor installed getter returns correct state", async () =
     interceptor.uninstall();
     expect(interceptor.installed).toBe(false);
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor handles Uint8Array input", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -317,12 +279,12 @@ Deno.test("StreamInterceptor handles Uint8Array input", async () => {
     expect(logs[0].message).toBe("Binary message");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor handles empty messages", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -344,7 +306,7 @@ Deno.test("StreamInterceptor handles empty messages", async () => {
     expect(logs.length).toBe(1);
     expect(logs[0].message).toBe("Real message");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
