@@ -13,6 +13,26 @@ function createTestApp(ctx: Awaited<ReturnType<typeof TestSetupBuilder.prototype
   return app;
 }
 
+// Helper to create a test app with mock session user
+function createTestAppWithSession(
+  ctx: Awaited<ReturnType<typeof TestSetupBuilder.prototype.build>>,
+  userId: string
+) {
+  const app = new Hono();
+
+  // Mock session middleware - simulates authenticated user
+  app.use("*", async (c, next) => {
+    (c as Context).set("user", { id: userId });
+    await next();
+  });
+
+  app.route("/api/settings", createSettingsRoutes({
+    settingsService: ctx.settingsService,
+  }));
+
+  return app;
+}
+
 // ============== GET /api/settings ==============
 
 Deno.test("GET /api/settings returns all global settings", async () => {
@@ -52,16 +72,8 @@ Deno.test("GET /api/settings with session includes user settings", async () => {
       "debug"
     );
 
-    const app = new Hono();
-    app.use("*", async (c, next) => {
-      // Mock session user
-      (c as Context).set("user", { id: user!.id });
-      await next();
-    });
-    app.route("/api/settings", createSettingsRoutes({
-      settingsService: ctx.settingsService,
-    }));
-
+    // Use helper to create app with mock session
+    const app = createTestAppWithSession(ctx, user!.id);
     const res = await app.request("/api/settings");
 
     expect(res.status).toBe(200);
@@ -246,144 +258,6 @@ Deno.test("PUT /api/settings accepts user settings with ?userId", async () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data.success).toBe(true);
-  } finally {
-    await ctx.cleanup();
-  }
-});
-
-// ============== DELETE /api/settings ==============
-
-Deno.test("DELETE /api/settings resets settings to defaults", async () => {
-  const ctx = await TestSetupBuilder.create().withSettings().build();
-  try {
-    // Modify a setting first
-    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "debug");
-
-    const app = createTestApp(ctx);
-    const res = await app.request("/api/settings", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        names: [SettingNames.LOG_LEVEL],
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
-    expect(data.reset.global).toBe(1);
-
-    // Verify setting was reset
-    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
-    expect(logLevel).toBe("info"); // Default value
-  } finally {
-    await ctx.cleanup();
-  }
-});
-
-Deno.test("DELETE /api/settings rejects invalid JSON", async () => {
-  const ctx = await TestSetupBuilder.create().withSettings().build();
-  try {
-    const app = createTestApp(ctx);
-    const res = await app.request("/api/settings", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: "invalid json",
-    });
-
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toContain("Invalid JSON");
-  } finally {
-    await ctx.cleanup();
-  }
-});
-
-Deno.test("DELETE /api/settings rejects missing names field", async () => {
-  const ctx = await TestSetupBuilder.create().withSettings().build();
-  try {
-    const app = createTestApp(ctx);
-    const res = await app.request("/api/settings", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toContain("Missing");
-  } finally {
-    await ctx.cleanup();
-  }
-});
-
-Deno.test("DELETE /api/settings rejects invalid setting names", async () => {
-  const ctx = await TestSetupBuilder.create().withSettings().build();
-  try {
-    const app = createTestApp(ctx);
-    const res = await app.request("/api/settings", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        names: ["unknown.setting"],
-      }),
-    });
-
-    expect(res.status).toBe(400);
-    const data = await res.json();
-    expect(data.error).toBe("Invalid setting names");
-    expect(data.details).toContain("unknown.setting");
-  } finally {
-    await ctx.cleanup();
-  }
-});
-
-Deno.test("DELETE /api/settings handles empty array", async () => {
-  const ctx = await TestSetupBuilder.create().withSettings().build();
-  try {
-    const app = createTestApp(ctx);
-    const res = await app.request("/api/settings", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        names: [],
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
-    expect(data.reset.global).toBe(0);
-  } finally {
-    await ctx.cleanup();
-  }
-});
-
-Deno.test("DELETE /api/settings resets multiple settings atomically", async () => {
-  const ctx = await TestSetupBuilder.create().withSettings().build();
-  try {
-    // Modify multiple settings
-    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "debug");
-    await ctx.settingsService.setGlobalSetting(SettingNames.METRICS_RETENTION_DAYS, "120");
-
-    const app = createTestApp(ctx);
-    const res = await app.request("/api/settings", {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        names: [SettingNames.LOG_LEVEL, SettingNames.METRICS_RETENTION_DAYS],
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.reset.global).toBe(2);
-
-    // Verify both settings were reset
-    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
-    const retention = await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS);
-    expect(logLevel).toBe("info");
-    expect(retention).toBe("90");
   } finally {
     await ctx.cleanup();
   }

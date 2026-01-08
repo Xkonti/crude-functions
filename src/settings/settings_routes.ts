@@ -8,7 +8,6 @@ import {
 import {
   validateSettings,
   requiresUserContext,
-  isValidSettingName,
 } from "../validation/settings.ts";
 
 export interface SettingsRoutesOptions {
@@ -171,87 +170,6 @@ export function createSettingsRoutes(
       console.error("Failed to update settings:", error);
       return c.json(
         { error: "Failed to update settings" },
-        500
-      );
-    }
-  });
-
-  // DELETE /api/settings - Reset settings to defaults
-  routes.delete("/", async (c) => {
-    let body: { names?: string[] };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-
-    if (!body.names || !Array.isArray(body.names)) {
-      return c.json(
-        { error: "Missing or invalid 'names' field (must be array)" },
-        400
-      );
-    }
-
-    // Validate all setting names
-    const invalidNames = body.names.filter(
-      (name) => !isValidSettingName(name)
-    );
-    if (invalidNames.length > 0) {
-      return c.json(
-        {
-          error: "Invalid setting names",
-          details: invalidNames,
-        },
-        400
-      );
-    }
-
-    // Resolve user context
-    const userContext = resolveUserContext(c);
-
-    // Separate settings into user and global
-    const globalNames: SettingName[] = [];
-    const userNames: SettingName[] = [];
-
-    for (const name of body.names) {
-      if (requiresUserContext(name)) {
-        if (!userContext.userId) {
-          return c.json(
-            {
-              error: `Setting '${name}' requires user context. Authenticate or provide ?userId=<id>`,
-            },
-            400
-          );
-        }
-        userNames.push(name as SettingName);
-      } else {
-        globalNames.push(name as SettingName);
-      }
-    }
-
-    // Reset settings atomically
-    try {
-      if (globalNames.length > 0) {
-        await settingsService.resetGlobalSettings(globalNames);
-      }
-      if (userNames.length > 0 && userContext.userId) {
-        await settingsService.resetUserSettings(
-          userContext.userId,
-          userNames
-        );
-      }
-
-      return c.json({
-        success: true,
-        reset: {
-          global: globalNames.length,
-          user: userNames.length,
-        },
-      });
-    } catch (error) {
-      console.error("Failed to reset settings:", error);
-      return c.json(
-        { error: "Failed to reset settings" },
         500
       );
     }
