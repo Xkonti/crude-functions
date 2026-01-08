@@ -3,6 +3,28 @@
  *
  * The TestSetupBuilder provides a fluent API for creating isolated test
  * environments with real migrations and production-like initialization.
+ *
+ * ## Context Hierarchy
+ *
+ * The type system is designed for modular test contexts:
+ *
+ * - `BaseTestContext`: Always present (tempDir, codeDir, db, cleanup)
+ * - Individual contexts: Add specific services (e.g., MetricsContext)
+ * - `FullTestContext`: All services combined
+ * - `TestContext`: Alias for FullTestContext (backward compatibility)
+ *
+ * Tests can request only what they need:
+ * ```typescript
+ * // Minimal context for metrics tests
+ * const ctx = await TestSetupBuilder.create()
+ *   .withMetrics()
+ *   .build();
+ * // ctx has: BaseTestContext & MetricsContext
+ *
+ * // Full context (backward compatible)
+ * const ctx = await TestSetupBuilder.create().build();
+ * // ctx has: FullTestContext
+ * ```
  */
 
 import type { DatabaseService } from "../database/database_service.ts";
@@ -15,59 +37,151 @@ import type { RoutesService } from "../routes/routes_service.ts";
 import type { FileService } from "../files/file_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
+import type { MetricsStateService } from "../metrics/metrics_state_service.ts";
 import type { UserService } from "../users/user_service.ts";
 import type { betterAuth } from "better-auth";
 import type { SettingName } from "../settings/types.ts";
 
+// =============================================================================
+// Base Context (Always Present)
+// =============================================================================
+
 /**
- * Complete test context returned from TestSetupBuilder.build().
- * Contains all initialized services and cleanup function.
+ * Base test context that is always present.
+ * Contains core infrastructure needed by all tests.
  */
-export interface TestContext {
-  // Directories
+export interface BaseTestContext {
   /** Temp directory for test isolation (contains db, keys, code) */
   tempDir: string;
   /** Directory for code files (${tempDir}/code) */
   codeDir: string;
-
-  // Database
+  /** Database path */
+  databasePath: string;
   /** Database service instance */
   db: DatabaseService;
-
-  // Encryption
-  /** Loaded encryption keys */
-  encryptionKeys: EncryptionKeyFile;
-  /** Versioned encryption service instance */
-  encryptionService: VersionedEncryptionService;
-  /** Hash service for API key lookups */
-  hashService: HashService;
-
-  // Core services
-  /** Settings service instance */
-  settingsService: SettingsService;
-  /** API key service instance */
-  apiKeyService: ApiKeyService;
-  /** Routes service instance */
-  routesService: RoutesService;
-  /** File service instance */
-  fileService: FileService;
-  /** Console log service instance */
-  consoleLogService: ConsoleLogService;
-  /** Execution metrics service instance */
-  executionMetricsService: ExecutionMetricsService;
-
-  // Auth
-  /** Better Auth instance */
-  auth: ReturnType<typeof betterAuth>;
-  /** User service instance */
-  userService: UserService;
-
   /**
    * Cleanup function to tear down all resources.
    * Call this in a finally block after tests complete.
    */
   cleanup: () => Promise<void>;
 }
+
+// =============================================================================
+// Individual Service Contexts
+// =============================================================================
+
+/**
+ * Context with encryption services.
+ * Includes encryption keys, versioned encryption, and hash service.
+ */
+export interface EncryptionContext {
+  /** Loaded encryption keys */
+  encryptionKeys: EncryptionKeyFile;
+  /** Versioned encryption service instance */
+  encryptionService: VersionedEncryptionService;
+  /** Hash service for API key lookups */
+  hashService: HashService;
+}
+
+/**
+ * Context with settings service.
+ * Requires encryption services.
+ */
+export interface SettingsContext extends EncryptionContext {
+  /** Settings service instance */
+  settingsService: SettingsService;
+}
+
+/**
+ * Context with console log service.
+ * Requires settings service (which requires encryption).
+ */
+export interface LogsContext extends SettingsContext {
+  /** Console log service instance */
+  consoleLogService: ConsoleLogService;
+}
+
+/**
+ * Context with execution metrics services.
+ * No dependencies beyond base context.
+ */
+export interface MetricsContext {
+  /** Execution metrics service instance */
+  executionMetricsService: ExecutionMetricsService;
+  /** Metrics state service instance */
+  metricsStateService: MetricsStateService;
+}
+
+/**
+ * Context with routes service.
+ * No dependencies beyond base context.
+ */
+export interface RoutesContext {
+  /** Routes service instance */
+  routesService: RoutesService;
+}
+
+/**
+ * Context with file service.
+ * No dependencies beyond base context.
+ */
+export interface FilesContext {
+  /** File service instance */
+  fileService: FileService;
+}
+
+/**
+ * Context with API key service.
+ * Requires encryption services.
+ */
+export interface ApiKeysContext extends EncryptionContext {
+  /** API key service instance */
+  apiKeyService: ApiKeyService;
+}
+
+/**
+ * Context with Better Auth instance.
+ * Requires encryption (for better_auth_secret).
+ */
+export interface AuthContext extends EncryptionContext {
+  /** Better Auth instance */
+  auth: ReturnType<typeof betterAuth>;
+}
+
+/**
+ * Context with user service.
+ * Requires auth context.
+ */
+export interface UsersContext extends AuthContext {
+  /** User service instance */
+  userService: UserService;
+}
+
+// =============================================================================
+// Full Context (All Services)
+// =============================================================================
+
+/**
+ * Complete test context with all services.
+ * This is the intersection of all individual contexts.
+ */
+export type FullTestContext = BaseTestContext &
+  EncryptionContext &
+  SettingsContext &
+  LogsContext &
+  MetricsContext &
+  RoutesContext &
+  FilesContext &
+  ApiKeysContext &
+  UsersContext;
+
+/**
+ * Alias for FullTestContext (backward compatibility).
+ * Use FullTestContext for new code.
+ *
+ * @deprecated Use FullTestContext instead for clarity
+ */
+export type TestContext = FullTestContext;
 
 /**
  * Options for route configuration in withRoute().

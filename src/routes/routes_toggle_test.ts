@@ -38,6 +38,7 @@ function createFunctionRouterWithContext(ctx: TestContext) {
 
 Deno.test("Disabled route returns 404 from /run/*", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
@@ -69,6 +70,7 @@ Deno.test("Disabled route returns 404 from /run/*", async () => {
 
 Deno.test("Enabled route works normally", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
@@ -93,6 +95,7 @@ Deno.test("Enabled route works normally", async () => {
 
 Deno.test("Re-enabling disabled route makes it work again", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
@@ -129,6 +132,7 @@ export default async function (c, ctx) {
 `;
 
   const ctx = await TestSetupBuilder.create()
+    .withAll()
     .withRoute("/fail", "fail.ts", { methods: ["GET"] })
     .withFile("fail.ts", failingHandler)
     .build();
@@ -157,6 +161,7 @@ export default async function (c, ctx) {
 
 Deno.test("Multiple routes can be independently toggled", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
     .withRoute("/goodbye", "goodbye.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
@@ -194,6 +199,7 @@ Deno.test("Multiple routes can be independently toggled", async () => {
 
 Deno.test("Disabled route with API key protection returns 404, not 401", async () => {
   const ctx = await TestSetupBuilder.create()
+    .withAll()
     .withApiKeyGroup("test-group", "Test group")
     .withApiKey("test-group", "test-key-123")
     .withRoute("/protected", "protected.ts", {
@@ -228,7 +234,7 @@ Deno.test("Disabled route with API key protection returns 404, not 401", async (
 });
 
 Deno.test("New routes are enabled by default", async () => {
-  const ctx = await TestSetupBuilder.create().build();
+  const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
     // Add a route programmatically
