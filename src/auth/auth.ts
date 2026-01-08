@@ -54,7 +54,7 @@ export interface AuthOptions {
  *
  * Future: Can be extended to include database-stored origins
  */
-function getTrustedOrigins(
+export function getTrustedOrigins(
   configuredBaseUrl: string | undefined,
   request?: Request
 ): string[] {
