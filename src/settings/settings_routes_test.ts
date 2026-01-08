@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
-import { Hono } from "@hono/hono";
+import { Hono, type Context } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
-import { createSettingsRoutes } from "./settings_routes.ts";
+import { createSettingsRoutes, type SettingInfo } from "./settings_routes.ts";
 import { SettingNames } from "./types.ts";
 
 // Helper to create a test app with settings routes
@@ -55,7 +55,7 @@ Deno.test("GET /api/settings with session includes user settings", async () => {
     const app = new Hono();
     app.use("*", async (c, next) => {
       // Mock session user
-      (c as any).set("user", { id: user!.id });
+      (c as Context).set("user", { id: user!.id });
       await next();
     });
     app.route("/api/settings", createSettingsRoutes({
@@ -68,7 +68,7 @@ Deno.test("GET /api/settings with session includes user settings", async () => {
     const data = await res.json();
 
     // Should include both global and user settings
-    const userSetting = data.settings.find((s: any) =>
+    const userSetting = data.settings.find((s: SettingInfo) =>
       s.name === SettingNames.LOG_LEVEL && s.value === "debug"
     );
     expect(userSetting).toBeDefined();
@@ -99,7 +99,7 @@ Deno.test("GET /api/settings with ?userId includes that user's settings", async 
     const data = await res.json();
 
     // Should include user settings
-    const userSetting = data.settings.find((s: any) =>
+    const userSetting = data.settings.find((s: SettingInfo) =>
       s.name === SettingNames.METRICS_RETENTION_DAYS && s.value === "45"
     );
     expect(userSetting).toBeDefined();

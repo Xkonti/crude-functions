@@ -45,7 +45,7 @@ function resolveUserContext(c: Context): UserContext {
 /**
  * Setting with value and default info
  */
-interface SettingInfo {
+export interface SettingInfo {
   name: string;
   value: string;
   default: string | null;
