@@ -4,6 +4,7 @@
 
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "./test_setup_builder.ts";
+import type { FullTestContext } from "./types.ts";
 
 Deno.test("TestSetupBuilder creates basic context with all services", async () => {
   // Use .withAll() explicitly for type safety - this is now required since
@@ -240,5 +241,77 @@ Deno.test("TestSetupBuilder cleanup removes temp directory", async () => {
     expect(true).toBe(false);
   } catch (error) {
     expect(error instanceof Deno.errors.NotFound).toBe(true);
+  }
+});
+
+Deno.test("TestSetupBuilder.withSecrets creates secrets service", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSecrets()
+    .build();
+
+  try {
+    expect(ctx.secretsService).toBeDefined();
+    // Verify encryption dependencies were auto-enabled
+    expect(ctx.encryptionService).toBeDefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("TestSetupBuilder auto-enables dependencies", async () => {
+  // withSettings() should auto-enable encryption + hash
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .build();
+
+  try {
+    expect(ctx.settingsService).toBeDefined();
+    expect(ctx.encryptionService).toBeDefined();
+    expect(ctx.hashService).toBeDefined();
+    expect(ctx.encryptionKeys).toBeDefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("TestSetupBuilder.create().build() enables all services by default", async () => {
+  // When no with* methods are called, build() enables all services at runtime
+  // Cast to FullTestContext to verify runtime behavior
+  const ctx = await TestSetupBuilder.create().build() as unknown as FullTestContext;
+
+  try {
+    // All services should be available at runtime
+    expect(ctx.routesService).toBeDefined();
+    expect(ctx.fileService).toBeDefined();
+    expect(ctx.apiKeyService).toBeDefined();
+    expect(ctx.secretsService).toBeDefined();
+    expect(ctx.userService).toBeDefined();
+    expect(ctx.settingsService).toBeDefined();
+    expect(ctx.consoleLogService).toBeDefined();
+    expect(ctx.executionMetricsService).toBeDefined();
+    expect(ctx.metricsStateService).toBeDefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("TestSetupBuilder.withMetrics creates minimal context without unrelated services", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withMetrics()
+    .build();
+
+  try {
+    // Should have metrics services
+    expect(ctx.executionMetricsService).toBeDefined();
+    expect(ctx.metricsStateService).toBeDefined();
+
+    // Should NOT have unrelated services (cast to any to check)
+    expect((ctx as any).userService).toBeUndefined();
+    expect((ctx as any).auth).toBeUndefined();
+    expect((ctx as any).apiKeyService).toBeUndefined();
+    expect((ctx as any).secretsService).toBeUndefined();
+    expect((ctx as any).settingsService).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
   }
 });
