@@ -732,9 +732,6 @@ Deno.test("SettingsService concurrent setUserSettingsBatch calls are serialized"
 Deno.test("SettingsService batch operations complete atomically on success", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
-    const initialLogLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
-    const initialRetention = await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS);
-
     // Update multiple settings in one batch
     const updates = new Map<SettingName, string>([
       [SettingNames.LOG_LEVEL, "error"],
