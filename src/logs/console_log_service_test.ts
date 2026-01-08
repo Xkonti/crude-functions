@@ -320,3 +320,104 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
     await cleanup(ctx);
   }
 });
+
+// =====================
+// trimToLimit tests
+// =====================
+
+Deno.test("ConsoleLogService trimToLimit keeps newest logs when over limit", async () => {
+  const ctx = await createTestSetup();
+
+  try {
+    // Store 10 logs for route 1
+    for (let i = 0; i < 10; i++) {
+      ctx.consoleLogService.store({
+        requestId: `request-${i}`,
+        routeId: 1,
+        level: "log",
+        message: `Message ${i}`,
+      });
+    }
+
+    await ctx.consoleLogService.shutdown();
+
+    // Trim to keep only 5 logs
+    const deleted = await ctx.consoleLogService.trimToLimit(1, 5);
+
+    expect(deleted).toBe(5);
+
+    const logs = await ctx.consoleLogService.getByRouteId(1);
+    expect(logs.length).toBe(5);
+    // Newest logs should remain (DESC order, so first is newest)
+    expect(logs[0].message).toBe("Message 9");
+    expect(logs[4].message).toBe("Message 5");
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+Deno.test("ConsoleLogService trimToLimit returns 0 when under limit", async () => {
+  const ctx = await createTestSetup();
+
+  try {
+    // Store 3 logs
+    for (let i = 0; i < 3; i++) {
+      ctx.consoleLogService.store({
+        requestId: `request-${i}`,
+        routeId: 1,
+        level: "log",
+        message: `Message ${i}`,
+      });
+    }
+
+    await ctx.consoleLogService.shutdown();
+
+    // Trim to limit of 5 (more than we have)
+    const deleted = await ctx.consoleLogService.trimToLimit(1, 5);
+
+    expect(deleted).toBe(0);
+
+    const logs = await ctx.consoleLogService.getByRouteId(1);
+    expect(logs.length).toBe(3);
+  } finally {
+    await cleanup(ctx);
+  }
+});
+
+Deno.test("ConsoleLogService trimToLimit only affects specified route", async () => {
+  const ctx = await createTestSetup();
+
+  try {
+    // Store logs for two routes
+    for (let i = 0; i < 10; i++) {
+      ctx.consoleLogService.store({
+        requestId: `r1-request-${i}`,
+        routeId: 1,
+        level: "log",
+        message: `Route 1 - Message ${i}`,
+      });
+      ctx.consoleLogService.store({
+        requestId: `r2-request-${i}`,
+        routeId: 2,
+        level: "log",
+        message: `Route 2 - Message ${i}`,
+      });
+    }
+
+    await ctx.consoleLogService.shutdown();
+
+    // Trim only route 1
+    const deleted = await ctx.consoleLogService.trimToLimit(1, 3);
+
+    expect(deleted).toBe(7);
+
+    const route1Logs = await ctx.consoleLogService.getByRouteId(1);
+    expect(route1Logs.length).toBe(3);
+
+    // Route 2 should be unchanged
+    const route2Logs = await ctx.consoleLogService.getByRouteId(2);
+    expect(route2Logs.length).toBe(10);
+  } finally {
+    await cleanup(ctx);
+  }
+});

@@ -7,6 +7,7 @@ export const SettingNames = {
   LOG_LEVEL: "log.level",
   LOG_TRIMMING_INTERVAL_SECONDS: "log.trimming.interval-seconds",
   LOG_TRIMMING_MAX_PER_FUNCTION: "log.trimming.max-per-function",
+  LOG_TRIMMING_RETENTION_SECONDS: "log.trimming.retention-seconds",
   LOG_BATCHING_MAX_BATCH_SIZE: "log.batching.max-batch-size",
   LOG_BATCHING_MAX_DELAY_MS: "log.batching.max-delay-ms",
 
@@ -38,6 +39,7 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.LOG_LEVEL]: "info",
   [SettingNames.LOG_TRIMMING_INTERVAL_SECONDS]: "300",
   [SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION]: "2000",
+  [SettingNames.LOG_TRIMMING_RETENTION_SECONDS]: "7776000", // 90 days
   [SettingNames.LOG_BATCHING_MAX_BATCH_SIZE]: "50",
   [SettingNames.LOG_BATCHING_MAX_DELAY_MS]: "50",
   [SettingNames.METRICS_AGGREGATION_INTERVAL_SECONDS]: "60",
@@ -92,6 +94,15 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     inputType: "number",
     min: 100,
     max: 100000,
+    category: "Logging",
+  },
+  [SettingNames.LOG_TRIMMING_RETENTION_SECONDS]: {
+    name: SettingNames.LOG_TRIMMING_RETENTION_SECONDS,
+    label: "Log Retention Period",
+    description: "How long to keep logs (seconds). Set to 0 to disable time-based deletion.",
+    inputType: "number",
+    min: 0,
+    max: 31536000, // 365 days
     category: "Logging",
   },
   [SettingNames.LOG_BATCHING_MAX_BATCH_SIZE]: {
@@ -183,6 +194,7 @@ export const SettingsByCategory = {
     SettingNames.LOG_LEVEL,
     SettingNames.LOG_TRIMMING_INTERVAL_SECONDS,
     SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION,
+    SettingNames.LOG_TRIMMING_RETENTION_SECONDS,
     SettingNames.LOG_BATCHING_MAX_BATCH_SIZE,
     SettingNames.LOG_BATCHING_MAX_DELAY_MS,
   ],

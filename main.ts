@@ -204,6 +204,7 @@ metricsAggregationService.start();
 const logTrimmingConfig: LogTrimmingConfig = {
   trimmingIntervalSeconds: await getIntSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, 300),
   maxLogsPerRoute: await getIntSetting(SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION, 2000),
+  retentionSeconds: await getIntSetting(SettingNames.LOG_TRIMMING_RETENTION_SECONDS, 7776000),
 };
 const logTrimmingService = new LogTrimmingService({
   logService: consoleLogService,
