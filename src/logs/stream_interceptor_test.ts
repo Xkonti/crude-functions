@@ -18,6 +18,7 @@ interface StreamTestContext {
 async function createStreamTestContext(): Promise<StreamTestContext> {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
+    .withRoute("/test-route", "test.ts") // Route ID 1 for FK constraint
     .build();
 
   const interceptor = new StreamInterceptor({ logService: ctx.consoleLogService });
@@ -315,7 +316,7 @@ Deno.test("StreamInterceptor handles empty messages", async () => {
 // =====================
 
 Deno.test("StreamInterceptor captures Deno.stdout.writeSync", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -336,12 +337,12 @@ Deno.test("StreamInterceptor captures Deno.stdout.writeSync", async () => {
     expect(logs[0].message).toBe("Deno stdout sync");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor captures Deno.stdout.write (async)", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -362,12 +363,12 @@ Deno.test("StreamInterceptor captures Deno.stdout.write (async)", async () => {
     expect(logs[0].message).toBe("Deno stdout async");
     expect(logs[0].level).toBe("stdout");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor captures Deno.stderr.writeSync", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -388,12 +389,12 @@ Deno.test("StreamInterceptor captures Deno.stderr.writeSync", async () => {
     expect(logs[0].message).toBe("Deno stderr sync");
     expect(logs[0].level).toBe("stderr");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor captures Deno.stderr.write (async)", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -414,12 +415,12 @@ Deno.test("StreamInterceptor captures Deno.stderr.write (async)", async () => {
     expect(logs[0].message).toBe("Deno stderr async");
     expect(logs[0].level).toBe("stderr");
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
 
 Deno.test("StreamInterceptor does not capture Deno streams outside request context", async () => {
-  const { logService, interceptor, db, tempDir } = await createTestSetup();
+  const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -433,6 +434,6 @@ Deno.test("StreamInterceptor does not capture Deno streams outside request conte
     const allLogs = await logService.getRecent(100);
     expect(allLogs.length).toBe(0);
   } finally {
-    await cleanup(logService, interceptor, db, tempDir);
+    await cleanup();
   }
 });
