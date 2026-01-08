@@ -49,8 +49,9 @@ async function createTestContext(
   keysOverride?: Partial<EncryptionKeyFile>
 ): Promise<TestContext> {
   // Build base context with database and migrations
+  // Only need encryption for better_auth_secret and hash_key
   const baseCtx = await TestSetupBuilder.create()
-    .withAll()
+    .withEncryption()
     .build();
 
   // Create custom key storage with mock key generator (avoids spawning openssl)
