@@ -357,3 +357,119 @@ Deno.test("FileService allows valid relative paths", async () => {
     await cleanup(tempDir);
   }
 });
+
+// ============================================================================
+// Binary File Tests
+// ============================================================================
+
+Deno.test("FileService.getFileBytes returns bytes for existing file", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    const content = new Uint8Array([0x00, 0x01, 0xFF, 0xFE]);
+    await Deno.writeFile(`${basePath}/binary.bin`, content);
+
+    const bytes = await service.getFileBytes("binary.bin");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.getFileBytes returns null for non-existent file", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const bytes = await service.getFileBytes("nonexistent.bin");
+    expect(bytes).toBe(null);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.getFileBytes handles nested paths", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.mkdir(`${basePath}/assets`, { recursive: true });
+    const content = new Uint8Array([0x89, 0x50, 0x4E, 0x47]); // PNG header
+    await Deno.writeFile(`${basePath}/assets/image.png`, content);
+
+    const bytes = await service.getFileBytes("assets/image.png");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes creates binary file and returns true", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const content = new Uint8Array([0x89, 0x50, 0x4E, 0x47]); // PNG header
+    const created = await service.writeFileBytes("image.png", content);
+    expect(created).toBe(true);
+
+    const bytes = await service.getFileBytes("image.png");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes updates existing file and returns false", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    const oldContent = new Uint8Array([0x01, 0x02, 0x03]);
+    await Deno.writeFile(`${basePath}/existing.bin`, oldContent);
+
+    const newContent = new Uint8Array([0x04, 0x05, 0x06, 0x07]);
+    const created = await service.writeFileBytes("existing.bin", newContent);
+    expect(created).toBe(false);
+
+    const bytes = await service.getFileBytes("existing.bin");
+    expect(bytes).toEqual(newContent);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes creates parent directories", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const content = new Uint8Array([0x00, 0x11, 0x22, 0x33]);
+    await service.writeFileBytes("deep/nested/data.bin", content);
+
+    const bytes = await service.getFileBytes("deep/nested/data.bin");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes handles empty content", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    await service.writeFileBytes("empty.bin", new Uint8Array(0));
+
+    const bytes = await service.getFileBytes("empty.bin");
+    expect(bytes).toEqual(new Uint8Array(0));
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes handles large binary files", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    // Create 1MB of random-ish data
+    const content = new Uint8Array(1024 * 1024);
+    for (let i = 0; i < content.length; i++) {
+      content[i] = i % 256;
+    }
+
+    await service.writeFileBytes("large.bin", content);
+
+    const bytes = await service.getFileBytes("large.bin");
+    expect(bytes?.length).toBe(content.length);
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});

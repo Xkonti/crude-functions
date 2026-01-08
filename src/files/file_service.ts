@@ -105,13 +105,29 @@ export class FileService {
   }
 
   /**
-   * Gets the content of a file by its relative path.
+   * Gets the content of a file by its relative path as text.
    * Returns null if the file doesn't exist.
    */
   async getFile(path: string): Promise<string | null> {
     const absPath = await this.resolvePath(path);
     try {
       return await Deno.readTextFile(absPath);
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Gets the content of a file by its relative path as bytes.
+   * Returns null if the file doesn't exist.
+   */
+  async getFileBytes(path: string): Promise<Uint8Array | null> {
+    const absPath = await this.resolvePath(path);
+    try {
+      return await Deno.readFile(absPath);
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
         return null;
@@ -137,7 +153,7 @@ export class FileService {
   }
 
   /**
-   * Writes content to a file at the given relative path.
+   * Writes text content to a file at the given relative path.
    * Creates parent directories if they don't exist.
    * Returns true if the file was created, false if it was updated.
    */
@@ -153,6 +169,26 @@ export class FileService {
     }
 
     await Deno.writeTextFile(absPath, content);
+    return !exists;
+  }
+
+  /**
+   * Writes binary content to a file at the given relative path.
+   * Creates parent directories if they don't exist.
+   * Returns true if the file was created, false if it was updated.
+   */
+  async writeFileBytes(path: string, content: Uint8Array): Promise<boolean> {
+    const absPath = await this.resolvePath(path);
+    const exists = await this.fileExists(path);
+
+    // Ensure parent directories exist
+    const lastSlash = absPath.lastIndexOf("/");
+    if (lastSlash > 0) {
+      const parentDir = absPath.substring(0, lastSlash);
+      await Deno.mkdir(parentDir, { recursive: true });
+    }
+
+    await Deno.writeFile(absPath, content);
     return !exists;
   }
 

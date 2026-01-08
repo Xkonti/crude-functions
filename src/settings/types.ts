@@ -23,6 +23,9 @@ export const SettingNames = {
 
   // Security
   API_ACCESS_GROUPS: "api.access-groups",
+
+  // Files
+  FILES_MAX_SIZE_BYTES: "files.max-size-bytes",
 } as const;
 
 /**
@@ -49,6 +52,7 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE]: "100",
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS]: "100",
   [SettingNames.API_ACCESS_GROUPS]: "",
+  [SettingNames.FILES_MAX_SIZE_BYTES]: "52428800", // 50 MB
 };
 
 /**
@@ -184,6 +188,15 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     inputType: "checkboxGroup",
     category: "Security",
   },
+  [SettingNames.FILES_MAX_SIZE_BYTES]: {
+    name: SettingNames.FILES_MAX_SIZE_BYTES,
+    label: "Maximum File Size",
+    description: "Maximum allowed file size in bytes (default: 50 MB)",
+    inputType: "number",
+    min: 1024,
+    max: 524288000,
+    category: "Security",
+  },
 };
 
 /**
@@ -210,5 +223,6 @@ export const SettingsByCategory = {
   ],
   Security: [
     SettingNames.API_ACCESS_GROUPS,
+    SettingNames.FILES_MAX_SIZE_BYTES,
   ],
 } as const;
