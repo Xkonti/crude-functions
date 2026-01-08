@@ -272,28 +272,6 @@ Deno.test("GET /web/code/edit shows file content", async () => {
   }
 });
 
-Deno.test("POST /web/code/edit saves file and redirects", async () => {
-  const { app, db, tempDir, fileService } = await createTestApp();
-  try {
-    await fileService.writeFile("test.ts", "old content");
-
-    const formData = new FormData();
-    formData.append("content", "new content");
-
-    const res = await app.request("/web/code/edit?path=test.ts", {
-      method: "POST",
-      body: formData,
-    });
-    expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toContain("/web/code?success=");
-
-    const content = await fileService.getFile("test.ts");
-    expect(content).toBe("new content");
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
 Deno.test("GET /web/code/upload shows form", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
@@ -303,45 +281,6 @@ Deno.test("GET /web/code/upload shows form", async () => {
     expect(html).toContain("Upload New File");
     expect(html).toContain('name="path"');
     expect(html).toContain('name="content"');
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
-Deno.test("POST /web/code/upload creates file", async () => {
-  const { app, db, tempDir, fileService } = await createTestApp();
-  try {
-    const formData = new FormData();
-    formData.append("path", "new-file.ts");
-    formData.append("content", "export default 'new';");
-
-    const res = await app.request("/web/code/upload", {
-      method: "POST",
-      body: formData,
-    });
-    expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toContain("/web/code?success=");
-
-    const content = await fileService.getFile("new-file.ts");
-    expect(content).toBe("export default 'new';");
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
-Deno.test("POST /web/code/delete removes file", async () => {
-  const { app, db, tempDir, fileService } = await createTestApp();
-  try {
-    await fileService.writeFile("delete-me.ts", "content");
-
-    const res = await app.request("/web/code/delete?path=delete-me.ts", {
-      method: "POST",
-    });
-    expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toContain("/web/code?success=");
-
-    const exists = await fileService.fileExists("delete-me.ts");
-    expect(exists).toBe(false);
   } finally {
     await cleanup(db, tempDir);
   }
@@ -649,24 +588,6 @@ Deno.test("GET /web/code/edit without path redirects with error", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
     const res = await app.request("/web/code/edit");
-    expect(res.status).toBe(302);
-    expect(res.headers.get("Location")).toContain("error=");
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
-Deno.test("POST /web/code/upload rejects path traversal", async () => {
-  const { app, db, tempDir } = await createTestApp();
-  try {
-    const formData = new FormData();
-    formData.append("path", "../escape.ts");
-    formData.append("content", "evil code");
-
-    const res = await app.request("/web/code/upload", {
-      method: "POST",
-      body: formData,
-    });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {

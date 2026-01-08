@@ -120,6 +120,171 @@ Deno.test("FileService.listFiles returns sorted files", async () => {
   }
 });
 
+// listFilesWithMetadata tests
+
+Deno.test("FileService.listFilesWithMetadata returns empty array for empty directory", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const files = await service.listFilesWithMetadata();
+    expect(files).toEqual([]);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata returns correct size for single file", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    const content = "hello world";  // 11 bytes
+    await Deno.writeTextFile(`${basePath}/hello.ts`, content);
+
+    const files = await service.listFilesWithMetadata();
+    expect(files.length).toBe(1);
+    expect(files[0].path).toBe("hello.ts");
+    expect(files[0].size).toBe(11);
+    expect(files[0].mtime).toBeInstanceOf(Date);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata returns accurate size for binary files", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    const binaryContent = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);  // 6 bytes
+    await Deno.writeFile(`${basePath}/data.bin`, binaryContent);
+
+    const files = await service.listFilesWithMetadata();
+    expect(files[0].size).toBe(6);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata returns correct size for zero-byte file", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.writeTextFile(`${basePath}/empty.ts`, "");
+
+    const files = await service.listFilesWithMetadata();
+    expect(files[0].size).toBe(0);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata returns valid mtime", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.writeTextFile(`${basePath}/test.ts`, "content");
+
+    const files = await service.listFilesWithMetadata();
+    const stat = await Deno.stat(`${basePath}/test.ts`);
+
+    expect(files[0].mtime).toBeInstanceOf(Date);
+    // mtime should be within 1 second of filesystem stat
+    const timeDiff = Math.abs(files[0].mtime.getTime() - stat.mtime!.getTime());
+    expect(timeDiff).toBeLessThan(1000);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata sorts files alphabetically by path", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.writeTextFile(`${basePath}/z.ts`, "z");
+    await Deno.writeTextFile(`${basePath}/a.ts`, "a");
+    await Deno.writeTextFile(`${basePath}/m.ts`, "m");
+
+    const files = await service.listFilesWithMetadata();
+    const paths = files.map(f => f.path);
+    expect(paths).toEqual(["a.ts", "m.ts", "z.ts"]);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata handles nested directories with correct paths", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.mkdir(`${basePath}/utils/helpers`, { recursive: true });
+    await Deno.writeTextFile(`${basePath}/root.ts`, "root");
+    await Deno.writeTextFile(`${basePath}/utils/mid.ts`, "mid");
+    await Deno.writeTextFile(`${basePath}/utils/helpers/deep.ts`, "deep");
+
+    const files = await service.listFilesWithMetadata();
+    expect(files.length).toBe(3);
+
+    expect(files.find(f => f.path === "root.ts")).toBeDefined();
+    expect(files.find(f => f.path === "utils/mid.ts")).toBeDefined();
+    expect(files.find(f => f.path === "utils/helpers/deep.ts")).toBeDefined();
+
+    // All files should have size > 0
+    files.forEach(file => {
+      expect(file.size).toBeGreaterThan(0);
+    });
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata returns correct metadata for multiple files", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.writeTextFile(`${basePath}/file1.ts`, "12345");  // 5 bytes
+    await Deno.mkdir(`${basePath}/subdir`, { recursive: true });
+    await Deno.writeTextFile(`${basePath}/subdir/file2.ts`, "123456789");  // 9 bytes
+
+    const files = await service.listFilesWithMetadata();
+    expect(files.length).toBe(2);
+
+    const file1 = files.find(f => f.path === "file1.ts");
+    expect(file1).toBeDefined();
+    expect(file1!.size).toBe(5);
+    expect(file1!.mtime).toBeInstanceOf(Date);
+
+    const file2 = files.find(f => f.path === "subdir/file2.ts");
+    expect(file2).toBeDefined();
+    expect(file2!.size).toBe(9);
+    expect(file2!.mtime).toBeInstanceOf(Date);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata handles very large files", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    // Create 1MB file
+    const largeContent = new Uint8Array(1024 * 1024).fill(0x41);
+    await Deno.writeFile(`${basePath}/large.bin`, largeContent);
+
+    const files = await service.listFilesWithMetadata();
+    expect(files[0].size).toBe(1048576);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.listFilesWithMetadata sorts correctly with mixed root and nested files", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.mkdir(`${basePath}/utils`, { recursive: true });
+    await Deno.writeTextFile(`${basePath}/zebra.ts`, "z");
+    await Deno.writeTextFile(`${basePath}/apple.ts`, "a");
+    await Deno.writeTextFile(`${basePath}/utils/banana.ts`, "b");
+
+    const files = await service.listFilesWithMetadata();
+    const paths = files.map(f => f.path);
+
+    // Should be sorted: apple.ts, utils/banana.ts, zebra.ts
+    expect(paths).toEqual(["apple.ts", "utils/banana.ts", "zebra.ts"]);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
 // getFile tests
 
 Deno.test("FileService.getFile returns content for existing file", async () => {
@@ -353,6 +518,122 @@ Deno.test("FileService allows valid relative paths", async () => {
     await service.writeFile("valid/path.ts", "content");
     const content = await service.getFile("valid/path.ts");
     expect(content).toBe("content");
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+// ============================================================================
+// Binary File Tests
+// ============================================================================
+
+Deno.test("FileService.getFileBytes returns bytes for existing file", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    const content = new Uint8Array([0x00, 0x01, 0xFF, 0xFE]);
+    await Deno.writeFile(`${basePath}/binary.bin`, content);
+
+    const bytes = await service.getFileBytes("binary.bin");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.getFileBytes returns null for non-existent file", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const bytes = await service.getFileBytes("nonexistent.bin");
+    expect(bytes).toBe(null);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.getFileBytes handles nested paths", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    await Deno.mkdir(`${basePath}/assets`, { recursive: true });
+    const content = new Uint8Array([0x89, 0x50, 0x4E, 0x47]); // PNG header
+    await Deno.writeFile(`${basePath}/assets/image.png`, content);
+
+    const bytes = await service.getFileBytes("assets/image.png");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes creates binary file and returns true", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const content = new Uint8Array([0x89, 0x50, 0x4E, 0x47]); // PNG header
+    const created = await service.writeFileBytes("image.png", content);
+    expect(created).toBe(true);
+
+    const bytes = await service.getFileBytes("image.png");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes updates existing file and returns false", async () => {
+  const { service, tempDir, basePath } = await createTestService();
+  try {
+    const oldContent = new Uint8Array([0x01, 0x02, 0x03]);
+    await Deno.writeFile(`${basePath}/existing.bin`, oldContent);
+
+    const newContent = new Uint8Array([0x04, 0x05, 0x06, 0x07]);
+    const created = await service.writeFileBytes("existing.bin", newContent);
+    expect(created).toBe(false);
+
+    const bytes = await service.getFileBytes("existing.bin");
+    expect(bytes).toEqual(newContent);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes creates parent directories", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    const content = new Uint8Array([0x00, 0x11, 0x22, 0x33]);
+    await service.writeFileBytes("deep/nested/data.bin", content);
+
+    const bytes = await service.getFileBytes("deep/nested/data.bin");
+    expect(bytes).toEqual(content);
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes handles empty content", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    await service.writeFileBytes("empty.bin", new Uint8Array(0));
+
+    const bytes = await service.getFileBytes("empty.bin");
+    expect(bytes).toEqual(new Uint8Array(0));
+  } finally {
+    await cleanup(tempDir);
+  }
+});
+
+Deno.test("FileService.writeFileBytes handles large binary files", async () => {
+  const { service, tempDir } = await createTestService();
+  try {
+    // Create 1MB of random-ish data
+    const content = new Uint8Array(1024 * 1024);
+    for (let i = 0; i < content.length; i++) {
+      content[i] = i % 256;
+    }
+
+    await service.writeFileBytes("large.bin", content);
+
+    const bytes = await service.getFileBytes("large.bin");
+    expect(bytes?.length).toBe(content.length);
+    expect(bytes).toEqual(content);
   } finally {
     await cleanup(tempDir);
   }

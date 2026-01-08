@@ -289,7 +289,10 @@ const fileService = new FileService({
 // Protected file management routes
 app.use("/api/files/*", hybridAuth);
 app.use("/api/files", hybridAuth);
-app.route("/api/files", createFileRoutes(fileService));
+app.route("/api/files", createFileRoutes({
+  fileService,
+  settingsService,
+}));
 
 // Encryption key rotation API
 app.use("/api/rotation/*", hybridAuth);
