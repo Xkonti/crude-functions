@@ -46,6 +46,17 @@ function getPastDay(daysAgo: number): Date {
   return new Date(currentDay.getTime() - daysAgo * 24 * 60 * 60 * 1000);
 }
 
+// Check if the given hour is on a different day than the current hour
+// This is critical for tests: when running at 00:xx, getPastHour(1) returns yesterday,
+// and those hours get aggregated into day records, not hour records
+function isPastHourOnDifferentDay(hoursAgo: number): boolean {
+  const now = new Date();
+  const currentDay = floorToDay(now);
+  const pastHour = getPastHour(hoursAgo);
+  const pastHourDay = floorToDay(pastHour);
+  return pastHourDay.getTime() !== currentDay.getTime();
+}
+
 const EXECUTION_METRICS_SCHEMA = `
   CREATE TABLE executionMetrics (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -300,6 +311,7 @@ Deno.test("MetricsAggregationService aggregates minutes into hour", async () => 
   try {
     // Get the last complete hour (1 hour before current hour start)
     const prevHourStart = getPastHour(1);
+    const crossesDayBoundary = isPastHourOnDifferentDay(1);
 
     // Create executions in the last 3 minutes of the previous hour
     // This ensures the hour boundary will be crossed during processing
@@ -345,14 +357,28 @@ Deno.test("MetricsAggregationService aggregates minutes into hour", async () => 
     await new Promise((resolve) => setTimeout(resolve, 500));
     await setup.aggregationService.stop();
 
-    // Check hour aggregate was created for the previous hour
-    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
-    expect(hourMetrics.length).toBe(1);
-    expect(hourMetrics[0].executionCount).toBe(3); // 3 executions in prev hour
-    expect(hourMetrics[0].maxTimeMs).toBe(200);
-    // Weighted average: (100*1 + 200*1 + 150*1) / 3 = 150
-    expect(Math.round(hourMetrics[0].avgTimeMs)).toBe(150);
-    expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+    if (crossesDayBoundary) {
+      // When running at 00:xx, the previous hour (23:xx) is on yesterday,
+      // so hour records get aggregated into day records
+      const dayMetrics = await setup.metricsService.getByRouteId(1, "day");
+      expect(dayMetrics.length).toBe(1);
+      expect(dayMetrics[0].executionCount).toBe(3); // 3 executions from prev day's hour
+      expect(dayMetrics[0].maxTimeMs).toBe(200);
+      expect(Math.round(dayMetrics[0].avgTimeMs)).toBe(150);
+
+      // Hour records from yesterday should be aggregated into day
+      const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+      expect(hourMetrics.length).toBe(0);
+    } else {
+      // Normal case: hour record exists for the previous hour
+      const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+      expect(hourMetrics.length).toBe(1);
+      expect(hourMetrics[0].executionCount).toBe(3); // 3 executions in prev hour
+      expect(hourMetrics[0].maxTimeMs).toBe(200);
+      // Weighted average: (100*1 + 200*1 + 150*1) / 3 = 150
+      expect(Math.round(hourMetrics[0].avgTimeMs)).toBe(150);
+      expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+    }
 
     // Check that minute metrics from prev hour were deleted (aggregated into hour)
     const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
@@ -377,6 +403,11 @@ Deno.test("MetricsAggregationService aggregates hours into day", async () => {
   try {
     // Get the previous complete day
     const prevDayStart = getPastDay(1);
+
+    // Check if we're in the first hour of the day (00:xx)
+    // At 00:xx, the execution at 00:00:10 stays as a minute (hour not complete)
+    const currentHour = new Date().getUTCHours();
+    const isFirstHourOfDay = currentHour === 0;
 
     // Create hour records for the previous day (pre-aggregated for simplicity)
     // These will be aggregated when the day boundary is crossed
@@ -434,10 +465,16 @@ Deno.test("MetricsAggregationService aggregates hours into day", async () => {
     expect(dayMetrics[0].maxTimeMs).toBe(300);
     expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
 
-    // Check that hour metrics from prev day were deleted (aggregated into day)
-    // Current day's hour remains because the current hour hasn't completed yet
+    // Check hour metrics from prev day were deleted (aggregated into day)
     const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
-    expect(hourMetrics.length).toBe(1); // Current hour from today remains
+    if (isFirstHourOfDay) {
+      // At 00:xx, the execution at 00:00:10 stays as a minute (hour 00 not complete yet)
+      // So no hour records exist from today
+      expect(hourMetrics.length).toBe(0);
+    } else {
+      // Later in the day, hour 00 has completed and its minute was aggregated to hour
+      expect(hourMetrics.length).toBe(1);
+    }
 
     // Check all executions were processed
     const executionMetrics = await setup.metricsService.getByRouteId(1, "execution");
@@ -648,6 +685,7 @@ Deno.test("MetricsAggregationService processes pending minutes into hours when n
   try {
     // Get the last complete hour (2 hours ago to ensure it's complete)
     const prevHourStart = getPastHour(2);
+    const crossesDayBoundary = isPastHourOnDifferentDay(2);
 
     // Create minute records directly (as if executions were already processed)
     // This simulates the state where execution→minute happened but minute→hour didn't
@@ -687,12 +725,25 @@ Deno.test("MetricsAggregationService processes pending minutes into hours when n
     await new Promise((resolve) => setTimeout(resolve, 300));
     await setup.aggregationService.stop();
 
-    // Check hour aggregate was created
-    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
-    expect(hourMetrics.length).toBe(1);
-    expect(hourMetrics[0].executionCount).toBe(3);
-    expect(hourMetrics[0].maxTimeMs).toBe(200);
-    expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+    if (crossesDayBoundary) {
+      // When running at 00:xx or 01:xx, getPastHour(2) returns yesterday's hour,
+      // so hour records get aggregated into day records
+      const dayMetrics = await setup.metricsService.getByRouteId(1, "day");
+      expect(dayMetrics.length).toBe(1);
+      expect(dayMetrics[0].executionCount).toBe(3);
+      expect(dayMetrics[0].maxTimeMs).toBe(200);
+
+      // Hour records from yesterday should be aggregated into day
+      const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+      expect(hourMetrics.length).toBe(0);
+    } else {
+      // Normal case: hour record exists for the previous hour
+      const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+      expect(hourMetrics.length).toBe(1);
+      expect(hourMetrics[0].executionCount).toBe(3);
+      expect(hourMetrics[0].maxTimeMs).toBe(200);
+      expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+    }
 
     // Check that minute metrics were deleted (aggregated into hour)
     const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
@@ -762,6 +813,7 @@ Deno.test("MetricsAggregationService processes both pending minutes and hours in
     // Get dates for yesterday and two hours ago
     const prevDayStart = getPastDay(1);
     const prevHourStart = getPastHour(2);
+    const crossesDayBoundary = isPastHourOnDifferentDay(2);
 
     // Create hour records from yesterday (should become day record)
     await setup.metricsService.store({
@@ -795,14 +847,27 @@ Deno.test("MetricsAggregationService processes both pending minutes and hours in
     // Check day aggregate was created from yesterday's hour
     const dayMetrics = await setup.metricsService.getByRouteId(1, "day");
     expect(dayMetrics.length).toBe(1);
-    expect(dayMetrics[0].executionCount).toBe(25);
     expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
 
-    // Check hour aggregate was created from today's minutes
-    const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
-    expect(hourMetrics.length).toBe(1);
-    expect(hourMetrics[0].executionCount).toBe(5);
-    expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+    if (crossesDayBoundary) {
+      // At 00:xx or 01:xx, getPastHour(2) returns yesterday's hour,
+      // so its minutes become hours, which then become day records
+      // Both the hour from 12:00 and the new hour from prevHourStart end up in the same day
+      expect(dayMetrics[0].executionCount).toBe(30); // 25 + 5
+
+      // Hour records from yesterday should be aggregated into day
+      const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+      expect(hourMetrics.length).toBe(0);
+    } else {
+      // Normal case: day record only contains the 12:00 hour
+      expect(dayMetrics[0].executionCount).toBe(25);
+
+      // Hour record from today's minutes exists
+      const hourMetrics = await setup.metricsService.getByRouteId(1, "hour");
+      expect(hourMetrics.length).toBe(1);
+      expect(hourMetrics[0].executionCount).toBe(5);
+      expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
+    }
 
     // All minutes should be processed
     const minuteMetrics = await setup.metricsService.getByRouteId(1, "minute");
