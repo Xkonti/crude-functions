@@ -305,12 +305,12 @@ Deno.test("TestSetupBuilder.withMetrics creates minimal context without unrelate
     expect(ctx.executionMetricsService).toBeDefined();
     expect(ctx.metricsStateService).toBeDefined();
 
-    // Should NOT have unrelated services (cast to any to check)
-    expect((ctx as any).userService).toBeUndefined();
-    expect((ctx as any).auth).toBeUndefined();
-    expect((ctx as any).apiKeyService).toBeUndefined();
-    expect((ctx as any).secretsService).toBeUndefined();
-    expect((ctx as any).settingsService).toBeUndefined();
+    // Should NOT have unrelated services
+    expect("userService" in ctx).toBe(false);
+    expect("auth" in ctx).toBe(false);
+    expect("apiKeyService" in ctx).toBe(false);
+    expect("secretsService" in ctx).toBe(false);
+    expect("settingsService" in ctx).toBe(false);
   } finally {
     await ctx.cleanup();
   }

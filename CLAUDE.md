@@ -51,6 +51,7 @@ Function router handles API key verification (if route requires keys) and handle
 **Services own database access.** Never query the database directly from routes or other code - always go through the appropriate service.
 
 **Why:**
+
 - **Single source of truth**: All queries for a domain live in one place
 - **Easier refactoring**: Change query logic once, affects all callers
 - **Caching layer**: Services can add caching without changing consumers
@@ -58,16 +59,19 @@ Function router handles API key verification (if route requires keys) and handle
 - **Business logic**: Validation and domain rules stay in services, not scattered
 
 **Examples:**
+
 - Routes need API keys? → Use `ApiKeyService`, not direct DB queries
 - Need to create a function route? → Use `RoutesService.addRoute()`, not `db.execute()`
 - File management? → Use `FileService`, which handles both DB and filesystem
 
 **Service architecture**:
+
 - Constructor dependency injection pattern throughout
 - Services assume database is already open (validated at startup)
 - All services take `{ db: DatabaseService, ... }` options object
 
 **Concurrency**:
+
 - `@core/asyncutil/mutex` for write serialization
 - Single-instance design (stateful web service, not ephemeral)
 - WAL mode allows concurrent reads during writes
@@ -102,6 +106,7 @@ export default async function (c, ctx) {
 ```
 
 **Important**: Handlers use Deno imports. External packages need full specifiers:
+
 - NPM: `npm:lodash-es`
 - JSR: `jsr:@std/path`
 - URLs: `https://esm.sh/zod`
@@ -117,12 +122,16 @@ export default async function (c, ctx) {
 
 **Philosophy**: Tests should be simple and focused on tested intent. Minimize infrastructure overhead.
 
+When dealing with testing, fixing tests, adding new tests, etc. please use the `crude-functions-testing` skill.
+
 **TestSetupBuilder** (`src/test/test_setup_builder.ts`):
+
 - Use for service tests needing real database, migrations, and multiple services
 - Mirrors production initialization flow to prevent schema/initialization drift
 - Examples: `routes_service_test.ts`, `api_key_service_test.ts`
 
 **Simple helpers** (in-file functions):
+
 - Use for file-specific setup needs
 - Preferred for low-level utilities and simple unit tests
 - Examples: `env_isolator_test.ts`, `key_storage_service_test.ts`
