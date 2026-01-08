@@ -42,6 +42,7 @@ import { createRotationRoutes } from "./src/encryption/rotation_routes.ts";
 import { HashService } from "./src/encryption/hash_service.ts";
 import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
+import { createSecretsRoutes } from "./src/secrets/secrets_routes.ts";
 import { SettingsService } from "./src/settings/settings_service.ts";
 import { SettingNames } from "./src/settings/types.ts";
 import { UserService } from "./src/users/user_service.ts";
@@ -309,6 +310,11 @@ app.use("/api/settings", hybridAuth);
 app.route("/api/settings", createSettingsRoutes({
   settingsService,
 }));
+
+// Secrets API (hybrid auth)
+app.use("/api/secrets/*", hybridAuth);
+app.use("/api/secrets", hybridAuth);
+app.route("/api/secrets", createSecretsRoutes(secretsService));
 
 // Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({
