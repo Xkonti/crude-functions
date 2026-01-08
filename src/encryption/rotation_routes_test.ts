@@ -1,88 +1,40 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
-import { DatabaseService } from "../database/database_service.ts";
-import { KeyRotationService } from "./key_rotation_service.ts";
+import type { KeyRotationService } from "./key_rotation_service.ts";
 import { KeyStorageService } from "./key_storage_service.ts";
-import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import { createRotationRoutes } from "./rotation_routes.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
-import type { KeyRotationConfig } from "./key_rotation_types.ts";
 
 // Test keys (32 bytes base64-encoded)
 const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
 const TEST_KEY_B = "YjJiNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZTA=";
 
-// Mock key generator
-function createMockKeyGenerator() {
-  const keys = [TEST_KEY_B, TEST_KEY_A];
-  let index = 0;
-  return () => {
-    const key = keys[index % keys.length];
-    index++;
-    return Promise.resolve(key);
-  };
+/**
+ * Creates a mock KeyRotationService for testing status endpoint.
+ * The status endpoint only uses keyStorageService, so KeyRotationService
+ * can be a minimal mock.
+ */
+function createMockKeyRotationService(): KeyRotationService {
+  return {
+    triggerManualRotation: () => Promise.resolve(),
+    start: () => {},
+    stop: () => {},
+  } as unknown as KeyRotationService;
 }
 
-const SECRETS_SCHEMA = `
-  CREATE TABLE secrets (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    comment TEXT,
-    scope INTEGER NOT NULL DEFAULT 0,
-    functionId INTEGER,
-    apiGroupId INTEGER,
-    apiKeyId INTEGER,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-const API_KEYS_SCHEMA = `
-  CREATE TABLE apiKeyGroups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE apiKeys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    valueHash TEXT,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
-const SETTINGS_SCHEMA = `
-  CREATE TABLE settings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    userId TEXT,
-    value TEXT,
-    isEncrypted INTEGER NOT NULL DEFAULT 0,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-`;
-
+/**
+ * Creates test context with KeyStorageService and Hono app.
+ * No database needed - status endpoint only reads from key file.
+ */
 async function createTestApp(): Promise<{
   app: Hono;
-  keyRotationService: KeyRotationService;
   keyStorageService: KeyStorageService;
-  db: DatabaseService;
   tempDir: string;
 }> {
   const tempDir = await Deno.makeTempDir();
   const keyFilePath = `${tempDir}/encryption-keys.json`;
 
-  // Create key storage with mock key generator
-  const keyStorageService = new KeyStorageService({
-    keyFilePath,
-    keyGenerator: createMockKeyGenerator(),
-  });
+  const keyStorageService = new KeyStorageService({ keyFilePath });
 
   // Create initial keys file (set last rotation to 5 days ago for testing)
   const fiveDaysAgo = new Date();
@@ -99,51 +51,22 @@ async function createTestApp(): Promise<{
   };
   await keyStorageService.saveKeys(keys);
 
-  // Create database
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(SECRETS_SCHEMA);
-  await db.exec(API_KEYS_SCHEMA);
-  await db.exec(SETTINGS_SCHEMA);
-
-  // Create encryption service
-  const encryptionService = new VersionedEncryptionService({
-    currentKey: keys.current_key,
-    currentVersion: keys.current_version,
-  });
-
-  // Create rotation service config (small interval for testing)
-  const config: KeyRotationConfig = {
-    checkIntervalSeconds: 1,
-    rotationIntervalDays: 90,
-    batchSize: 10,
-    batchSleepMs: 10,
-  };
-
-  const keyRotationService = new KeyRotationService({
-    db,
-    encryptionService,
-    keyStorage: keyStorageService,
-    config,
-  });
-
   const app = new Hono();
   app.route("/api/rotation", createRotationRoutes({
-    keyRotationService,
+    keyRotationService: createMockKeyRotationService(),
     keyStorageService,
   }));
 
-  return { app, keyRotationService, keyStorageService, db, tempDir };
+  return { app, keyStorageService, tempDir };
 }
 
-async function cleanup(db: DatabaseService, tempDir: string): Promise<void> {
-  await db.close();
+async function cleanup(tempDir: string): Promise<void> {
   await Deno.remove(tempDir, { recursive: true });
 }
 
 // GET /api/rotation/status tests
 Deno.test("GET /api/rotation/status returns rotation status", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const { app, tempDir } = await createTestApp();
 
   try {
     const res = await app.request("/api/rotation/status");
@@ -159,12 +82,12 @@ Deno.test("GET /api/rotation/status returns rotation status", async () => {
     expect(json.daysSinceRotation).toBeGreaterThanOrEqual(4);
     expect(json.daysSinceRotation).toBeLessThanOrEqual(6);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(tempDir);
   }
 });
 
 Deno.test("GET /api/rotation/status calculates days since rotation correctly", async () => {
-  const { app, keyStorageService, db, tempDir } = await createTestApp();
+  const { app, keyStorageService, tempDir } = await createTestApp();
 
   try {
     // Set last rotation to exactly 10 days ago
@@ -185,12 +108,12 @@ Deno.test("GET /api/rotation/status calculates days since rotation correctly", a
     expect(json.daysSinceRotation).toBeGreaterThanOrEqual(9);
     expect(json.daysSinceRotation).toBeLessThanOrEqual(11);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(tempDir);
   }
 });
 
 Deno.test("GET /api/rotation/status detects rotation in progress", async () => {
-  const { app, keyStorageService, db, tempDir } = await createTestApp();
+  const { app, keyStorageService, tempDir } = await createTestApp();
 
   try {
     // Simulate rotation in progress by having both current and phased_out keys
@@ -207,7 +130,7 @@ Deno.test("GET /api/rotation/status detects rotation in progress", async () => {
     const json = await res.json();
     expect(json.isInProgress).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(tempDir);
   }
 });
 
@@ -215,36 +138,12 @@ Deno.test("GET /api/rotation/status handles missing keys file", async () => {
   const tempDir = await Deno.makeTempDir();
   const keyFilePath = `${tempDir}/nonexistent-keys.json`;
 
-  const keyStorageService = new KeyStorageService({
-    keyFilePath,
-    keyGenerator: createMockKeyGenerator(),
-  });
-
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-
-  const encryptionService = new VersionedEncryptionService({
-    currentKey: TEST_KEY_A,
-    currentVersion: "A",
-  });
-
-  const config: KeyRotationConfig = {
-    checkIntervalSeconds: 1,
-    rotationIntervalDays: 90,
-    batchSize: 10,
-    batchSleepMs: 10,
-  };
-
-  const keyRotationService = new KeyRotationService({
-    db,
-    encryptionService,
-    keyStorage: keyStorageService,
-    config,
-  });
+  // KeyStorageService pointing to non-existent file
+  const keyStorageService = new KeyStorageService({ keyFilePath });
 
   const app = new Hono();
   app.route("/api/rotation", createRotationRoutes({
-    keyRotationService,
+    keyRotationService: createMockKeyRotationService(),
     keyStorageService,
   }));
 
@@ -255,12 +154,12 @@ Deno.test("GET /api/rotation/status handles missing keys file", async () => {
     const json = await res.json();
     expect(json.error).toBe("No keys file found");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(tempDir);
   }
 });
 
 Deno.test("GET /api/rotation/status returns current version", async () => {
-  const { app, keyStorageService, db, tempDir } = await createTestApp();
+  const { app, keyStorageService, tempDir } = await createTestApp();
 
   try {
     // Update to version B
@@ -276,6 +175,6 @@ Deno.test("GET /api/rotation/status returns current version", async () => {
     const json = await res.json();
     expect(json.currentVersion).toBe("B");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(tempDir);
   }
 });

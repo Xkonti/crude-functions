@@ -11,7 +11,6 @@ import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { FunctionRouter } from "../functions/function_router.ts";
-import { SecretsService } from "../secrets/secrets_service.ts";
 import type { TestContext } from "../test/types.ts";
 
 const simpleHandler = `
@@ -22,16 +21,12 @@ export default async function (c, ctx) {
 
 /** Helper to create a FunctionRouter with all required services */
 function createFunctionRouterWithContext(ctx: TestContext) {
-  const secretsService = new SecretsService({
-    db: ctx.db,
-    encryptionService: ctx.encryptionService,
-  });
   return new FunctionRouter({
     routesService: ctx.routesService,
     apiKeyService: ctx.apiKeyService,
     consoleLogService: ctx.consoleLogService,
     executionMetricsService: ctx.executionMetricsService,
-    secretsService,
+    secretsService: ctx.secretsService,
     codeDirectory: ctx.codeDir,
   });
 }

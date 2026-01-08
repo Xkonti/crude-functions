@@ -1,96 +1,46 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
-import { DatabaseService } from "../database/database_service.ts";
-import { ApiKeyService } from "./api_key_service.ts";
 import { createApiKeyRoutes } from "./api_key_routes.ts";
-import { EncryptionService } from "../encryption/encryption_service.ts";
-import { HashService } from "../encryption/hash_service.ts";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import type { ApiKeysContext, BaseTestContext } from "../test/types.ts";
 
-// Test encryption key (32 bytes base64-encoded)
-const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
-// Test hash key (32 bytes base64-encoded)
-const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
-
-const API_KEYS_SCHEMA = `
-  CREATE TABLE apiKeyGroups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL UNIQUE,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE TABLE apiKeys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    groupId INTEGER NOT NULL REFERENCES apiKeyGroups(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    valueHash TEXT,
-    description TEXT,
-    createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-    updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE UNIQUE INDEX idx_api_keys_group_name ON apiKeys(groupId, name);
-  CREATE INDEX idx_api_keys_group ON apiKeys(groupId);
-  CREATE INDEX idx_api_keys_hash ON apiKeys(groupId, valueHash);
-`;
-
-async function createTestApp(): Promise<{
-  app: Hono;
-  service: ApiKeyService;
-  db: DatabaseService;
-  tempDir: string;
-}> {
-  const tempDir = await Deno.makeTempDir();
-  const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
-  await db.open();
-  await db.exec(API_KEYS_SCHEMA);
-
-  const encryptionService = new EncryptionService({
-    encryptionKey: TEST_ENCRYPTION_KEY,
-  });
-
-  const hashService = new HashService({
-    hashKey: TEST_HASH_KEY,
-  });
-
-  const service = new ApiKeyService({
-    db,
-    encryptionService,
-    hashService,
-  });
-
+/**
+ * Creates a Hono app with API key routes from a TestSetupBuilder context.
+ */
+function createTestApp(ctx: BaseTestContext & ApiKeysContext): Hono {
   const app = new Hono();
-  app.route("/api/keys", createApiKeyRoutes(service));
-
-  return { app, service, db, tempDir };
-}
-
-async function cleanup(db: DatabaseService, tempDir: string): Promise<void> {
-  await db.close();
-  await Deno.remove(tempDir, { recursive: true });
+  app.route("/api/keys", createApiKeyRoutes(ctx.apiKeyService));
+  return app;
 }
 
 // GET /api/keys tests
 Deno.test("GET /api/keys returns empty groups array when no keys", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys");
     expect(res.status).toBe(200);
 
     const json = await res.json();
     expect(json.groups).toEqual([]);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("GET /api/keys returns all key groups", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1");
-    await service.addKey("service", "key-2", "key2");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
+    await ctx.apiKeyService.addKey("service", "key-2", "key2");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys");
     expect(res.status).toBe(200);
 
@@ -98,18 +48,21 @@ Deno.test("GET /api/keys returns all key groups", async () => {
     expect(json.groups).toContain("email");
     expect(json.groups).toContain("service");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 // GET /api/keys/:group tests
 Deno.test("GET /api/keys/:group returns keys for existing group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1", "first");
-    await service.addKey("email", "key-2", "key2");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1", "first");
+    await ctx.apiKeyService.addKey("email", "key-2", "key2");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/email");
     expect(res.status).toBe(200);
 
@@ -118,47 +71,56 @@ Deno.test("GET /api/keys/:group returns keys for existing group", async () => {
     expect(json.keys.length).toBe(2);
     expect(json.keys.some((k: { value: string; description?: string }) => k.value === "key1" && k.description === "first")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("GET /api/keys/:group returns 404 for non-existent group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/nonexistent");
     expect(res.status).toBe(404);
 
     const json = await res.json();
     expect(json.error).toBeDefined();
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("GET /api/keys/:group normalizes group to lowercase", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/EMAIL");
     expect(res.status).toBe(200);
 
     const json = await res.json();
     expect(json.group).toBe("email");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 // POST /api/keys/:group tests
 Deno.test("POST /api/keys/:group adds new key", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -171,16 +133,19 @@ Deno.test("POST /api/keys/:group adds new key", async () => {
     expect(json.success).toBe(true);
 
     // Verify key was added
-    expect(await service.hasKey("email", "newkey")).toBe(true);
+    expect(await ctx.apiKeyService.hasKey("email", "newkey")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/:group rejects invalid key group", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/INVALID.GROUP", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -192,14 +157,17 @@ Deno.test("POST /api/keys/:group rejects invalid key group", async () => {
     const json = await res.json();
     expect(json.error).toContain("group");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/:group rejects invalid key value", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -211,14 +179,17 @@ Deno.test("POST /api/keys/:group rejects invalid key value", async () => {
     const json = await res.json();
     expect(json.error).toContain("value");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/:group rejects missing value", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/email", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -230,21 +201,24 @@ Deno.test("POST /api/keys/:group rejects missing value", async () => {
     const json = await res.json();
     expect(json.error).toBeDefined();
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 // DELETE /api/keys/by-id/:id tests
 Deno.test("DELETE /api/keys/by-id/:id removes key by ID", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1");
-    await service.addKey("email", "key-2", "key2");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
+    await ctx.apiKeyService.addKey("email", "key-2", "key2");
 
-    const keys = await service.getKeys("email");
+    const keys = await ctx.apiKeyService.getKeys("email");
     const key1Id = keys!.find((k) => k.value === "key1")!.id;
 
+    const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/by-id/${key1Id}`, {
       method: "DELETE",
     });
@@ -255,17 +229,20 @@ Deno.test("DELETE /api/keys/by-id/:id removes key by ID", async () => {
     expect(json.success).toBe(true);
 
     // Verify only key1 was removed
-    expect(await service.hasKey("email", "key1")).toBe(false);
-    expect(await service.hasKey("email", "key2")).toBe(true);
+    expect(await ctx.apiKeyService.hasKey("email", "key1")).toBe(false);
+    expect(await ctx.apiKeyService.hasKey("email", "key2")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("DELETE /api/keys/by-id/:id returns 400 for invalid ID", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/by-id/notanumber", {
       method: "DELETE",
     });
@@ -275,19 +252,22 @@ Deno.test("DELETE /api/keys/by-id/:id returns 400 for invalid ID", async () => {
     const json = await res.json();
     expect(json.error).toContain("Invalid");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 // DELETE /api/keys/:group tests
 Deno.test("DELETE /api/keys/:group removes all keys for group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1");
-    await service.addKey("email", "key-2", "key2");
-    await service.addKey("other", "key-3", "key3");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
+    await ctx.apiKeyService.addKey("email", "key-2", "key2");
+    await ctx.apiKeyService.addKey("other", "key-3", "key3");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/email", {
       method: "DELETE",
     });
@@ -298,27 +278,30 @@ Deno.test("DELETE /api/keys/:group removes all keys for group", async () => {
     expect(json.success).toBe(true);
 
     // Verify keys were removed
-    expect(await service.hasKey("email", "key1")).toBe(false);
-    expect(await service.hasKey("email", "key2")).toBe(false);
-    expect(await service.hasKey("other", "key3")).toBe(true);
+    expect(await ctx.apiKeyService.hasKey("email", "key1")).toBe(false);
+    expect(await ctx.apiKeyService.hasKey("email", "key2")).toBe(false);
+    expect(await ctx.apiKeyService.hasKey("other", "key3")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("DELETE /api/keys/:group returns 404 for non-existent group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.addKey("email", "key-1", "key1");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/nonexistent", {
       method: "DELETE",
     });
 
     expect(res.status).toBe(404);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
@@ -327,28 +310,36 @@ Deno.test("DELETE /api/keys/:group returns 404 for non-existent group", async ()
 // =====================
 
 Deno.test("GET /api/keys/groups returns all groups", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.createGroup("email", "Email keys");
-    await service.createGroup("webhook", "Webhook keys");
+    await ctx.apiKeyService.createGroup("email", "Email keys");
+    await ctx.apiKeyService.createGroup("webhook", "Webhook keys");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/groups");
     expect(res.status).toBe(200);
 
     const json = await res.json();
-    expect(json.groups.length).toBe(2);
+    // Note: migrations create a default "management" group, so we have 3 groups
+    expect(json.groups.length).toBe(3);
     expect(json.groups.some((g: { name: string }) => g.name === "email")).toBe(true);
     expect(json.groups.some((g: { name: string }) => g.name === "webhook")).toBe(true);
+    expect(json.groups.some((g: { name: string }) => g.name === "management")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/groups creates new group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -361,20 +352,23 @@ Deno.test("POST /api/keys/groups creates new group", async () => {
     expect(json.id).toBeGreaterThan(0);
     expect(json.name).toBe("email");
 
-    const group = await service.getGroupByName("email");
+    const group = await ctx.apiKeyService.getGroupByName("email");
     expect(group).not.toBeNull();
     expect(group!.description).toBe("Email keys");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/groups rejects duplicate group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    await service.createGroup("email", "First");
+    await ctx.apiKeyService.createGroup("email", "First");
 
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -383,14 +377,17 @@ Deno.test("POST /api/keys/groups rejects duplicate group", async () => {
 
     expect(res.status).toBe(409);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/groups rejects invalid group name", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -402,14 +399,17 @@ Deno.test("POST /api/keys/groups rejects invalid group name", async () => {
     const json = await res.json();
     expect(json.error).toContain("group name");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("POST /api/keys/groups rejects missing name", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/groups", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -421,16 +421,19 @@ Deno.test("POST /api/keys/groups rejects missing name", async () => {
     const json = await res.json();
     expect(json.error).toContain("name");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("GET /api/keys/groups/:id returns group by ID", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    const id = await service.createGroup("email", "Email keys");
+    const id = await ctx.apiKeyService.createGroup("email", "Email keys");
 
+    const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/groups/${id}`);
     expect(res.status).toBe(200);
 
@@ -439,27 +442,33 @@ Deno.test("GET /api/keys/groups/:id returns group by ID", async () => {
     expect(json.name).toBe("email");
     expect(json.description).toBe("Email keys");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("GET /api/keys/groups/:id returns 404 for nonexistent", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
+    const app = createTestApp(ctx);
     const res = await app.request("/api/keys/groups/999");
     expect(res.status).toBe(404);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("PUT /api/keys/groups/:id updates group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    const id = await service.createGroup("email", "Old desc");
+    const id = await ctx.apiKeyService.createGroup("email", "Old desc");
 
+    const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/groups/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -468,20 +477,23 @@ Deno.test("PUT /api/keys/groups/:id updates group", async () => {
 
     expect(res.status).toBe(200);
 
-    const group = await service.getGroupById(id);
+    const group = await ctx.apiKeyService.getGroupById(id);
     expect(group!.description).toBe("New desc");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("DELETE /api/keys/groups/:id deletes group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    const id = await service.createGroup("email", "Email keys");
-    await service.addKey("email", "key-1", "key1");
+    const id = await ctx.apiKeyService.createGroup("email", "Email keys");
+    await ctx.apiKeyService.addKey("email", "key-1", "key1");
 
+    const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/groups/${id}`, {
       method: "DELETE",
     });
@@ -489,20 +501,25 @@ Deno.test("DELETE /api/keys/groups/:id deletes group", async () => {
     expect(res.status).toBe(200);
 
     // Group and its keys should be gone
-    expect(await service.getGroupById(id)).toBeNull();
-    expect(await service.hasKey("email", "key1")).toBe(false);
+    expect(await ctx.apiKeyService.getGroupById(id)).toBeNull();
+    expect(await ctx.apiKeyService.hasKey("email", "key1")).toBe(false);
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });
 
 Deno.test("DELETE /api/keys/groups/:id blocks deleting management group", async () => {
-  const { app, service, db, tempDir } = await createTestApp();
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeys()
+    .build();
 
   try {
-    const id = await service.createGroup("management", "Management keys");
+    // Management group is created by migrations, so we just get it
+    const group = await ctx.apiKeyService.getGroupByName("management");
+    expect(group).not.toBeNull();
 
-    const res = await app.request(`/api/keys/groups/${id}`, {
+    const app = createTestApp(ctx);
+    const res = await app.request(`/api/keys/groups/${group!.id}`, {
       method: "DELETE",
     });
 
@@ -511,6 +528,6 @@ Deno.test("DELETE /api/keys/groups/:id blocks deleting management group", async 
     const json = await res.json();
     expect(json.error).toContain("management");
   } finally {
-    await cleanup(db, tempDir);
+    await ctx.cleanup();
   }
 });

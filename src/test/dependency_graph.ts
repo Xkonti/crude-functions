@@ -19,6 +19,7 @@ export type ServiceKey =
   | "settingsService"
   | "consoleLogService"
   | "apiKeyService"
+  | "secretsService"
   | "auth"
   | "userService";
 
@@ -37,6 +38,7 @@ export interface ServiceFlags {
   settingsService: boolean;
   consoleLogService: boolean;
   apiKeyService: boolean;
+  secretsService: boolean;
   auth: boolean;
   userService: boolean;
 }
@@ -55,6 +57,7 @@ export function createDefaultFlags(): ServiceFlags {
     settingsService: false,
     consoleLogService: false,
     apiKeyService: false,
+    secretsService: false,
     auth: false,
     userService: false,
   };
@@ -90,6 +93,9 @@ export const DEPENDENCIES: Record<ServiceKey, ServiceKey[]> = {
 
   // API keys depend on encryption
   apiKeyService: ["encryptionService", "hashService"],
+
+  // Secrets depend on encryption
+  secretsService: ["encryptionService"],
 
   // Auth depends on encryption (for better_auth_secret)
   auth: ["encryptionService"],

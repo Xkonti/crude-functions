@@ -79,6 +79,9 @@ Deno.test("RoutesService.getAll returns empty array initially", async () => {
 // Logs (auto-enables settings)
 .withLogs()  // → ConsoleLogService + SettingsService + encryption
 
+// Secrets (auto-enables encryption)
+.withSecrets()  // → SecretsService + EncryptionService
+
 // Users (auto-enables auth)
 .withUsers()  // → UserService + Auth + encryption
 
@@ -98,6 +101,7 @@ Deno.test("RoutesService.getAll returns empty array initially", async () => {
 .withRoutesService()
 .withFileService()
 .withApiKeyService()
+.withSecretsService()
 .withAuth()
 .withUserService()
 ```

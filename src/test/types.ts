@@ -39,6 +39,7 @@ import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import type { MetricsStateService } from "../metrics/metrics_state_service.ts";
 import type { UserService } from "../users/user_service.ts";
+import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { betterAuth } from "better-auth";
 import type { SettingName } from "../settings/types.ts";
 
@@ -140,6 +141,15 @@ export interface ApiKeysContext extends EncryptionContext {
 }
 
 /**
+ * Context with secrets service.
+ * Requires encryption services.
+ */
+export interface SecretsContext extends EncryptionContext {
+  /** Secrets service instance */
+  secretsService: SecretsService;
+}
+
+/**
  * Context with Better Auth instance.
  * Requires encryption (for better_auth_secret).
  */
@@ -173,6 +183,7 @@ export type FullTestContext = BaseTestContext &
   RoutesContext &
   FilesContext &
   ApiKeysContext &
+  SecretsContext &
   UsersContext;
 
 /**
