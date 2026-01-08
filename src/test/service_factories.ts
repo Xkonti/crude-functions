@@ -19,6 +19,7 @@ import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { MetricsStateService } from "../metrics/metrics_state_service.ts";
 import { UserService } from "../users/user_service.ts";
+import { SecretsService } from "../secrets/secrets_service.ts";
 import { createAuth } from "../auth/auth.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
 import type { betterAuth } from "better-auth";
@@ -203,6 +204,24 @@ export function createApiKeyService(
     db,
     encryptionService,
     hashService,
+  });
+}
+
+// =============================================================================
+// Secrets Factory
+// =============================================================================
+
+/**
+ * Creates the SecretsService.
+ * Requires database and encryption service.
+ */
+export function createSecretsService(
+  db: DatabaseService,
+  encryptionService: VersionedEncryptionService
+): SecretsService {
+  return new SecretsService({
+    db,
+    encryptionService,
   });
 }
 

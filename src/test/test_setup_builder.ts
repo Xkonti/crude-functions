@@ -100,6 +100,7 @@ import type {
   RoutesContext,
   FilesContext,
   ApiKeysContext,
+  SecretsContext,
   AuthContext,
   UsersContext,
   RouteOptions,
@@ -131,6 +132,7 @@ import {
   createRoutesService,
   createFileService,
   createApiKeyService,
+  createSecretsService,
   createBetterAuth,
   createUserService,
   createUserDirectly,
@@ -279,6 +281,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   }
 
   /**
+   * Include SecretsService in the test context.
+   * Auto-enables: encryption services (required dependency).
+   */
+  withSecretsService(): TestSetupBuilder<TContext & SecretsContext> {
+    enableServiceWithDependencies(this.flags, "secretsService");
+    return this as unknown as TestSetupBuilder<TContext & SecretsContext>;
+  }
+
+  /**
    * Include Better Auth instance in the test context.
    * Auto-enables: encryption (for better_auth_secret).
    */
@@ -356,6 +367,14 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
    */
   withApiKeys(): TestSetupBuilder<TContext & ApiKeysContext> {
     return this.withApiKeyService() as unknown as TestSetupBuilder<TContext & ApiKeysContext>;
+  }
+
+  /**
+   * Include secrets service and its dependencies (encryption).
+   * Alias for withSecretsService() for semantic clarity.
+   */
+  withSecrets(): TestSetupBuilder<TContext & SecretsContext> {
+    return this.withSecretsService() as unknown as TestSetupBuilder<TContext & SecretsContext>;
   }
 
   /**
@@ -551,6 +570,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       this.flags.settingsService ||
       this.flags.consoleLogService ||
       this.flags.apiKeyService ||
+      this.flags.secretsService ||
       this.flags.auth ||
       this.flags.userService;
 
@@ -560,7 +580,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
       if (this.flags.encryptionService || this.flags.settingsService ||
           this.flags.consoleLogService || this.flags.apiKeyService ||
-          this.flags.auth || this.flags.userService) {
+          this.flags.secretsService || this.flags.auth || this.flags.userService) {
         context.encryptionService = createEncryptionService(encryptionKeys);
       }
 
@@ -639,6 +659,11 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
         const name = keyName ?? `test-key-${Date.now()}`;
         await context.apiKeyService.addKey(groupName, name, keyValue, description);
       }
+    }
+
+    // STEP 8.5: Create secrets service if needed
+    if (this.flags.secretsService) {
+      context.secretsService = createSecretsService(db, context.encryptionService);
     }
 
     // STEP 9: Create console log service if needed (after routes exist for FK constraint)
