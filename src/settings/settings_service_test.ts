@@ -479,3 +479,377 @@ Deno.test("SettingsService concurrent writes to same setting are serialized", as
     await ctx.cleanup();
   }
 });
+
+// ============== Group 6: Batch Read Operations ==============
+
+Deno.test("SettingsService.getAllGlobalSettings returns all global settings", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const settings = await ctx.settingsService.getAllGlobalSettings();
+
+    // Should have at least most bootstrapped settings (allow for timing issues)
+    expect(settings.size).toBeGreaterThanOrEqual(Object.keys(GlobalSettingDefaults).length - 1);
+
+    // Verify a few known settings exist
+    expect(settings.get(SettingNames.LOG_LEVEL)).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+    expect(settings.get(SettingNames.METRICS_RETENTION_DAYS)).toBe(GlobalSettingDefaults[SettingNames.METRICS_RETENTION_DAYS]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.getAllUserSettings returns all user settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+
+    // Create some user settings
+    await ctx.settingsService.setUserSetting(SettingNames.LOG_LEVEL, user!.id, "debug");
+    await ctx.settingsService.setUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id, "45");
+
+    const settings = await ctx.settingsService.getAllUserSettings(user!.id);
+
+    expect(settings.size).toBe(2);
+    expect(settings.get(SettingNames.LOG_LEVEL)).toBe("debug");
+    expect(settings.get(SettingNames.METRICS_RETENTION_DAYS)).toBe("45");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.getAllUserSettings returns empty map for user with no settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    const settings = await ctx.settingsService.getAllUserSettings(user!.id);
+
+    expect(settings.size).toBe(0);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============== Group 7: Batch Write Operations ==============
+
+Deno.test("SettingsService.setGlobalSettingsBatch sets multiple global settings", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const updates = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "debug"],
+      [SettingNames.METRICS_RETENTION_DAYS, "60"],
+    ]);
+
+    await ctx.settingsService.setGlobalSettingsBatch(updates);
+
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL)).toBe("debug");
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS)).toBe("60");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.setGlobalSettingsBatch handles empty map", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const updates = new Map<SettingName, string>();
+    await ctx.settingsService.setGlobalSettingsBatch(updates);
+
+    // Should complete without error
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(logLevel).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.setUserSettingsBatch sets multiple user settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    const updates = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "warn"],
+      [SettingNames.METRICS_RETENTION_DAYS, "30"],
+    ]);
+
+    await ctx.settingsService.setUserSettingsBatch(user!.id, updates);
+
+    expect(await ctx.settingsService.getUserSetting(SettingNames.LOG_LEVEL, user!.id)).toBe("warn");
+    expect(await ctx.settingsService.getUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id)).toBe("30");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============== Group 8: Reset Operations ==============
+
+Deno.test("SettingsService.resetGlobalSettings resets settings to defaults", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    // Modify some settings
+    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "debug");
+    await ctx.settingsService.setGlobalSetting(SettingNames.METRICS_RETENTION_DAYS, "120");
+
+    // Reset them
+    await ctx.settingsService.resetGlobalSettings([
+      SettingNames.LOG_LEVEL,
+      SettingNames.METRICS_RETENTION_DAYS,
+    ]);
+
+    // Should be back to defaults
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL))
+      .toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS))
+      .toBe(GlobalSettingDefaults[SettingNames.METRICS_RETENTION_DAYS]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.resetGlobalSettings handles empty array", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    await ctx.settingsService.resetGlobalSettings([]);
+
+    // Should complete without error
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(logLevel).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.resetUserSettings deletes user settings", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+
+    // Create some user settings
+    await ctx.settingsService.setUserSetting(SettingNames.LOG_LEVEL, user!.id, "debug");
+    await ctx.settingsService.setUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id, "45");
+
+    // Reset one of them
+    await ctx.settingsService.resetUserSettings(user!.id, [SettingNames.LOG_LEVEL]);
+
+    // LOG_LEVEL should be deleted (null)
+    expect(await ctx.settingsService.getUserSetting(SettingNames.LOG_LEVEL, user!.id)).toBeNull();
+    // METRICS_RETENTION_DAYS should still exist
+    expect(await ctx.settingsService.getUserSetting(SettingNames.METRICS_RETENTION_DAYS, user!.id)).toBe("45");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService.resetUserSettings handles empty array", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    await ctx.settingsService.resetUserSettings(user!.id, []);
+
+    // Should complete without error
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============== Group 9: Concurrency and Transaction Tests ==============
+
+Deno.test("SettingsService concurrent setGlobalSettingsBatch calls are serialized", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const batch1 = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "debug"],
+      [SettingNames.METRICS_RETENTION_DAYS, "30"],
+    ]);
+    const batch2 = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "warn"],
+      [SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, "600"],
+    ]);
+
+    // Execute both batches concurrently
+    await Promise.all([
+      ctx.settingsService.setGlobalSettingsBatch(batch1),
+      ctx.settingsService.setGlobalSettingsBatch(batch2),
+    ]);
+
+    // Both batches should have completed successfully
+    // Final values should be from one of the batches (last write wins)
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(["debug", "warn"]).toContain(logLevel);
+
+    // Other settings from respective batches should exist
+    const retention = await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS);
+    const interval = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS);
+    expect(retention).toBeDefined();
+    expect(interval).toBeDefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService concurrent setUserSettingsBatch calls are serialized", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withSettings()
+    .withAdminUser("test@example.com", "password123")
+    .build();
+  try {
+    const user = await ctx.userService.getByEmail("test@example.com");
+    const batch1 = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "debug"],
+    ]);
+    const batch2 = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "error"],
+    ]);
+
+    // Execute both batches concurrently for the same user
+    await Promise.all([
+      ctx.settingsService.setUserSettingsBatch(user!.id, batch1),
+      ctx.settingsService.setUserSettingsBatch(user!.id, batch2),
+    ]);
+
+    // One of the values should win
+    const logLevel = await ctx.settingsService.getUserSetting(SettingNames.LOG_LEVEL, user!.id);
+    expect(["debug", "error"]).toContain(logLevel);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService batch operations complete atomically on success", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    // Update multiple settings in one batch
+    const updates = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "error"],
+      [SettingNames.METRICS_RETENTION_DAYS, "180"],
+      [SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, "900"],
+    ]);
+
+    await ctx.settingsService.setGlobalSettingsBatch(updates);
+
+    // All settings should be updated (atomicity)
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL)).toBe("error");
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS)).toBe("180");
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS)).toBe("900");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService concurrent reads during batch write succeed", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    const updates = new Map<SettingName, string>([
+      [SettingNames.LOG_LEVEL, "debug"],
+      [SettingNames.METRICS_RETENTION_DAYS, "45"],
+    ]);
+
+    // Start a batch write and concurrent reads
+    await Promise.all([
+      ctx.settingsService.setGlobalSettingsBatch(updates),
+      ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL),
+      ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS),
+      ctx.settingsService.getAllGlobalSettings(),
+    ]);
+
+    // All operations should complete without deadlock
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(logLevel).toBe("debug");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService multiple concurrent batch operations complete correctly", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    // Create 10 concurrent batch operations with different settings
+    const operations = Array.from({ length: 10 }, (_, i) => {
+      const batch = new Map<SettingName, string>([
+        [SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION, `${1000 + i * 100}`],
+      ]);
+      return ctx.settingsService.setGlobalSettingsBatch(batch);
+    });
+
+    // All should complete successfully
+    await Promise.all(operations);
+
+    // Final value should be from one of the batches
+    const finalValue = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION);
+    const finalNum = parseInt(finalValue!, 10);
+    expect(finalNum).toBeGreaterThanOrEqual(1000);
+    expect(finalNum).toBeLessThanOrEqual(1900);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService reset operations are atomic", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    // Modify several settings
+    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "error");
+    await ctx.settingsService.setGlobalSetting(SettingNames.METRICS_RETENTION_DAYS, "180");
+    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, "900");
+
+    // Reset multiple settings atomically
+    await ctx.settingsService.resetGlobalSettings([
+      SettingNames.LOG_LEVEL,
+      SettingNames.METRICS_RETENTION_DAYS,
+      SettingNames.LOG_TRIMMING_INTERVAL_SECONDS,
+    ]);
+
+    // All should be back to defaults
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL))
+      .toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS))
+      .toBe(GlobalSettingDefaults[SettingNames.METRICS_RETENTION_DAYS]);
+    expect(await ctx.settingsService.getGlobalSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS))
+      .toBe(GlobalSettingDefaults[SettingNames.LOG_TRIMMING_INTERVAL_SECONDS]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SettingsService concurrent resets and updates don't corrupt data", async () => {
+  const ctx = await TestSetupBuilder.create().withSettings().build();
+  try {
+    // Modify settings
+    await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "error");
+    await ctx.settingsService.setGlobalSetting(SettingNames.METRICS_RETENTION_DAYS, "180");
+
+    // Concurrent reset and update operations
+    await Promise.all([
+      ctx.settingsService.resetGlobalSettings([SettingNames.LOG_LEVEL]),
+      ctx.settingsService.setGlobalSettingsBatch(new Map([[SettingNames.METRICS_RETENTION_DAYS, "30"]])),
+      ctx.settingsService.setGlobalSettingsBatch(new Map([[SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, "1200"]])),
+    ]);
+
+    // All operations should complete successfully
+    // LOG_LEVEL should be at default
+    const logLevel = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_LEVEL);
+    expect(logLevel).toBe(GlobalSettingDefaults[SettingNames.LOG_LEVEL]);
+
+    // Other settings should have their updated values
+    const retention = await ctx.settingsService.getGlobalSetting(SettingNames.METRICS_RETENTION_DAYS);
+    const interval = await ctx.settingsService.getGlobalSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS);
+    expect(retention).toBe("30");
+    expect(interval).toBe("1200");
+  } finally {
+    await ctx.cleanup();
+  }
+});

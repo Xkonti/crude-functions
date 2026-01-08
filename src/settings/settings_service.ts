@@ -141,6 +141,145 @@ export class SettingsService {
     );
   }
 
+  // ============== Batch Read Operations ==============
+
+  /**
+   * Get all global settings as a Map.
+   * @returns Map of setting names to values
+   */
+  async getAllGlobalSettings(): Promise<Map<SettingName, string>> {
+    const rows = await this.db.queryAll<SettingRow>(
+      `SELECT * FROM settings WHERE userId IS NULL`
+    );
+
+    const result = new Map<SettingName, string>();
+    for (const row of rows) {
+      if (!row.value) continue;
+
+      // Handle encrypted values
+      const value = row.isEncrypted && this.encryptionService
+        ? await this.encryptionService.decrypt(row.value)
+        : row.value;
+
+      result.set(row.name as SettingName, value);
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all user-specific settings as a Map.
+   * @param userId - The user ID
+   * @returns Map of setting names to values
+   */
+  async getAllUserSettings(userId: string): Promise<Map<SettingName, string>> {
+    const rows = await this.db.queryAll<SettingRow>(
+      `SELECT * FROM settings WHERE userId = ?`,
+      [userId]
+    );
+
+    const result = new Map<SettingName, string>();
+    for (const row of rows) {
+      if (!row.value) continue;
+
+      // Handle encrypted values
+      const value = row.isEncrypted && this.encryptionService
+        ? await this.encryptionService.decrypt(row.value)
+        : row.value;
+
+      result.set(row.name as SettingName, value);
+    }
+
+    return result;
+  }
+
+  // ============== Batch Write Operations ==============
+
+  /**
+   * Atomically set multiple global settings.
+   * All settings are updated together in a transaction.
+   * Settings are stored as plain text (not encrypted).
+   * @param settings - Map of setting names to values
+   */
+  async setGlobalSettingsBatch(
+    settings: Map<SettingName, string>
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const [name, value] of settings) {
+        await tx.execute(
+          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
+           VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)
+           ON CONFLICT (name, COALESCE(userId, ''))
+           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
+          [name, value, value]
+        );
+      }
+    });
+  }
+
+  /**
+   * Atomically set multiple user-specific settings.
+   * All settings are updated together in a transaction.
+   * Settings are stored as plain text (not encrypted).
+   * @param userId - The user ID
+   * @param settings - Map of setting names to values
+   */
+  async setUserSettingsBatch(
+    userId: string,
+    settings: Map<SettingName, string>
+  ): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const [name, value] of settings) {
+        await tx.execute(
+          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
+           VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
+           ON CONFLICT (name, COALESCE(userId, ''))
+           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
+          [name, userId, value, value]
+        );
+      }
+    });
+  }
+
+  // ============== Reset Operations ==============
+
+  /**
+   * Reset global settings to their default values.
+   * All settings are reset together in a transaction.
+   * @param names - Array of setting names to reset
+   */
+  async resetGlobalSettings(names: SettingName[]): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const name of names) {
+        const defaultValue = GlobalSettingDefaults[name];
+        await tx.execute(
+          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
+           VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)
+           ON CONFLICT (name, COALESCE(userId, ''))
+           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
+          [name, defaultValue, defaultValue]
+        );
+      }
+    });
+  }
+
+  /**
+   * Reset user-specific settings by deleting them from the database.
+   * All settings are deleted together in a transaction.
+   * @param userId - The user ID
+   * @param names - Array of setting names to reset
+   */
+  async resetUserSettings(userId: string, names: SettingName[]): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      for (const name of names) {
+        await tx.execute(
+          `DELETE FROM settings WHERE name = ? AND userId = ?`,
+          [name, userId]
+        );
+      }
+    });
+  }
+
   // ============== Bootstrap Operations ==============
 
   /**
