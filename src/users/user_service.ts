@@ -177,12 +177,22 @@ export class UserService {
     this.validateEmail(data.email);
     this.validatePassword(data.password);
 
-    const createBody = {
+    // Build body with only provided fields (Better Auth doesn't accept undefined)
+    const createBody: {
+      email: string;
+      password: string;
+      name?: string;
+      role?: string;
+    } = {
       email: data.email,
       password: data.password,
       name: data.name,
       role: data.role,
     };
+
+    // Remove undefined fields - Better Auth validates strictly
+    if (!createBody.name) delete createBody.name;
+    if (!createBody.role) delete createBody.role;
 
     try {
       // @ts-expect-error - Better Auth admin plugin API not fully typed
@@ -192,7 +202,16 @@ export class UserService {
       });
       return result.data?.id ?? "";
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+      // Better Auth errors can have various formats - extract message
+      let message = "Unknown error";
+      if (err && typeof err === "object") {
+        // Better Auth APIError has status field
+        if ("status" in err) {
+          message = String(err.status);
+        } else if (err instanceof Error) {
+          message = err.message;
+        }
+      }
       throw new Error(`Failed to create user: ${message}`);
     }
   }

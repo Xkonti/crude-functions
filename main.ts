@@ -47,6 +47,7 @@ import { createLogsRoutes } from "./src/logs/logs_routes.ts";
 import { SettingsService } from "./src/settings/settings_service.ts";
 import { SettingNames } from "./src/settings/types.ts";
 import { UserService } from "./src/users/user_service.ts";
+import { createUserRoutes } from "./src/users/user_routes.ts";
 import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
 
 /**
@@ -325,6 +326,10 @@ app.route("/api/logs", createLogsRoutes({
   routesService,
 }));
 
+// User management API (hybrid auth)
+app.use("/api/users/*", hybridAuth);
+app.use("/api/users", hybridAuth);
+app.route("/api/users", createUserRoutes(userService));
 
 // Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({
