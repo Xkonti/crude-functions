@@ -421,3 +421,164 @@ Deno.test("ConsoleLogService trimToLimit only affects specified route", async ()
     await cleanup(ctx);
   }
 });
+
+// =====================
+// getPaginated tests
+// =====================
+
+Deno.test("ConsoleLogService - getPaginated returns logs across all routes", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withLogs()
+    .withRoute("/test-route-1", "test1.ts")
+    .withRoute("/test-route-2", "test2.ts")
+    .build();
+
+  try {
+    // Insert test logs across multiple routes
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Route 1 log 1', NULL, '2026-01-08 10:00:00.000')`,
+      ["req1"]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Route 1 log 2', NULL, '2026-01-08 10:00:01.000')`,
+      ["req2"]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 2, 'info', 'Route 2 log 1', NULL, '2026-01-08 10:00:02.000')`,
+      ["req3"]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 2, 'info', 'Route 2 log 2', NULL, '2026-01-08 10:00:03.000')`,
+      ["req4"]
+    );
+
+    const result = await ctx.consoleLogService.getPaginated({
+      limit: 2,
+    });
+
+    expect(result.logs.length).toBe(2);
+    expect(result.logs[0].message).toBe("Route 2 log 2"); // newest first
+    expect(result.logs[1].message).toBe("Route 2 log 1");
+    expect(result.hasMore).toBe(true);
+    expect(result.nextCursor).toBeDefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ConsoleLogService - getPaginated filters by routeId", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withLogs()
+    .withRoute("/test-route-1", "test1.ts")
+    .withRoute("/test-route-2", "test2.ts")
+    .build();
+
+  try {
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Route 1 log', NULL, '2026-01-08 10:00:00.000')`,
+      ["req1"]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 2, 'info', 'Route 2 log', NULL, '2026-01-08 10:00:01.000')`,
+      ["req2"]
+    );
+
+    const result = await ctx.consoleLogService.getPaginated({
+      routeId: 1,
+      limit: 10,
+    });
+
+    expect(result.logs.length).toBe(1);
+    expect(result.logs[0].message).toBe("Route 1 log");
+    expect(result.logs[0].routeId).toBe(1);
+    expect(result.hasMore).toBe(false);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ConsoleLogService - getPaginated uses cursor for next page", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withLogs()
+    .withRoute("/test-route-1", "test1.ts")
+    .build();
+
+  try {
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Log 1', NULL, '2026-01-08 10:00:00.000')`,
+      ["req1"]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Log 2', NULL, '2026-01-08 10:00:01.000')`,
+      ["req2"]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Log 3', NULL, '2026-01-08 10:00:02.000')`,
+      ["req3"]
+    );
+
+    const page1 = await ctx.consoleLogService.getPaginated({ limit: 2 });
+    expect(page1.logs.length).toBe(2);
+    expect(page1.hasMore).toBe(true);
+
+    const page2 = await ctx.consoleLogService.getPaginated({
+      limit: 2,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.logs.length).toBe(1);
+    expect(page2.logs[0].message).toBe("Log 1");
+    expect(page2.hasMore).toBe(false);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ConsoleLogService - getPaginated handles same timestamp with different IDs", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withLogs()
+    .withRoute("/test-route-1", "test1.ts")
+    .build();
+
+  try {
+    const sameTimestamp = '2026-01-08 10:00:00.000';
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Log A', NULL, ?)`,
+      ["req1", sameTimestamp]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Log B', NULL, ?)`,
+      ["req2", sameTimestamp]
+    );
+    await ctx.db.execute(
+      `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
+       VALUES (?, 1, 'info', 'Log C', NULL, ?)`,
+      ["req3", sameTimestamp]
+    );
+
+    const page1 = await ctx.consoleLogService.getPaginated({ limit: 2 });
+    expect(page1.logs.length).toBe(2);
+
+    const page2 = await ctx.consoleLogService.getPaginated({
+      limit: 2,
+      cursor: page1.nextCursor,
+    });
+    expect(page2.logs.length).toBe(1);
+
+    // All three logs should be unique across both pages
+    const allMessages = [...page1.logs, ...page2.logs].map(l => l.message).sort();
+    expect(allMessages).toEqual(["Log A", "Log B", "Log C"]);
+  } finally {
+    await ctx.cleanup();
+  }
+});

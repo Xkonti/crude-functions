@@ -1,7 +1,7 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
-import type { ConsoleLog, NewConsoleLog } from "./types.ts";
+import type { ConsoleLog, NewConsoleLog, GetPaginatedOptions, PaginatedLogsResult, PaginationCursor } from "./types.ts";
 import { formatForSqlite, parseSqliteTimestamp } from "../utils/datetime.ts";
 
 export interface ConsoleLogServiceOptions {
@@ -318,6 +318,104 @@ export class ConsoleLogService {
     );
 
     return rows.map((row) => this.rowToConsoleLog(row));
+  }
+
+  /**
+   * Retrieve logs with cursor-based pagination.
+   * Results are ordered from newest to oldest.
+   * Cursor combines timestamp and ID to handle same-timestamp ambiguity.
+   */
+  async getPaginated(options: GetPaginatedOptions): Promise<PaginatedLogsResult> {
+    const { routeId, levels, limit, cursor } = options;
+
+    // Validate limit
+    if (limit < 1 || limit > 1000) {
+      throw new Error(`Invalid limit: ${limit}. Limit must be between 1 and 1000.`);
+    }
+
+    // Decode cursor if provided
+    let cursorData: PaginationCursor | null = null;
+    if (cursor) {
+      try {
+        const decoded = atob(cursor);
+        cursorData = JSON.parse(decoded);
+      } catch {
+        throw new Error("Invalid cursor format");
+      }
+    }
+
+    // Build WHERE clause dynamically
+    const whereClauses: string[] = [];
+    const params: (string | number)[] = [];
+
+    // Add routeId filter if provided
+    if (routeId !== undefined) {
+      whereClauses.push("routeId = ?");
+      params.push(routeId);
+    }
+
+    // Add level filter if provided
+    if (levels && levels.length > 0) {
+      const placeholders = levels.map(() => "?").join(", ");
+      whereClauses.push(`level IN (${placeholders})`);
+      params.push(...levels);
+    }
+
+    // Add cursor filter if provided
+    if (cursorData) {
+      whereClauses.push("(timestamp < ? OR (timestamp = ? AND id < ?))");
+      params.push(cursorData.timestamp, cursorData.timestamp, cursorData.id);
+    }
+
+    // Build final SQL
+    const whereClause = whereClauses.length > 0
+      ? `WHERE ${whereClauses.join(" AND ")}`
+      : "";
+
+    const sql = `SELECT id, requestId, routeId, level, message, args, timestamp
+                 FROM executionLogs
+                 ${whereClause}
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT ?`;
+    params.push(limit + 1);
+
+    const rows = await this.db.queryAll<ConsoleLogRow>(sql, params);
+
+    // Check if there are more results
+    const hasMore = rows.length > limit;
+    const resultRows = rows.slice(0, limit);
+    const logs = resultRows.map(row => this.rowToConsoleLog(row));
+
+    // Generate next cursor if there are more results
+    // Use raw timestamp from database row to preserve exact format
+    let nextCursor: string | undefined;
+    if (hasMore && resultRows.length > 0) {
+      const lastRow = resultRows[resultRows.length - 1];
+      const cursorObj: PaginationCursor = {
+        timestamp: lastRow.timestamp,
+        id: lastRow.id,
+      };
+      nextCursor = btoa(JSON.stringify(cursorObj));
+    }
+
+    // Generate previous cursor (first item of current page)
+    // Use raw timestamp from database row to preserve exact format
+    let prevCursor: string | undefined;
+    if (cursor && resultRows.length > 0) {
+      const firstRow = resultRows[0];
+      const cursorObj: PaginationCursor = {
+        timestamp: firstRow.timestamp,
+        id: firstRow.id,
+      };
+      prevCursor = btoa(JSON.stringify(cursorObj));
+    }
+
+    return {
+      logs,
+      hasMore,
+      nextCursor,
+      prevCursor,
+    };
   }
 
   /**
