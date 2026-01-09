@@ -17,6 +17,8 @@ function createMockUserService(): {
 
   const service = {
     async createUser(data: { email: string; password: string; name?: string; role?: string }): Promise<string> {
+      await Promise.resolve(); // Satisfy require-await lint rule
+
       // Check for duplicate email
       for (const user of users.values()) {
         if (user.email.toLowerCase() === data.email.toLowerCase()) {
@@ -42,16 +44,19 @@ function createMockUserService(): {
     },
 
     async getAll(): Promise<User[]> {
+      await Promise.resolve(); // Satisfy require-await lint rule
       return Array.from(users.values()).sort(
         (a, b) => b.createdAt.getTime() - a.createdAt.getTime()
       );
     },
 
     async getById(id: string): Promise<User | null> {
+      await Promise.resolve(); // Satisfy require-await lint rule
       return users.get(id) ?? null;
     },
 
     async getByEmail(email: string): Promise<User | null> {
+      await Promise.resolve(); // Satisfy require-await lint rule
       for (const user of users.values()) {
         if (user.email.toLowerCase() === email.toLowerCase()) {
           return user;
@@ -61,6 +66,8 @@ function createMockUserService(): {
     },
 
     async updateUser(id: string, data: { password?: string; role?: string }): Promise<void> {
+      await Promise.resolve(); // Satisfy require-await lint rule
+
       const user = users.get(id);
       if (!user) {
         throw new Error(`User with id '${id}' not found`);
@@ -73,6 +80,8 @@ function createMockUserService(): {
     },
 
     async deleteUser(id: string): Promise<void> {
+      await Promise.resolve(); // Satisfy require-await lint rule
+
       const user = users.get(id);
       if (!user) {
         throw new Error(`User with id '${id}' not found`);
