@@ -144,6 +144,18 @@ export class ApiKeyService {
   }
 
   /**
+   * Get the count of keys in a group.
+   * Used to check before group deletion.
+   */
+  async getKeyCountForGroup(groupId: number): Promise<number> {
+    const row = await this.db.queryOne<{ count: number }>(
+      "SELECT COUNT(*) as count FROM apiKeys WHERE groupId = ?",
+      [groupId]
+    );
+    return row?.count ?? 0;
+  }
+
+  /**
    * Get or create a group by name.
    * @returns The group ID
    */
@@ -434,6 +446,76 @@ export class ApiKeyService {
    */
   async removeKeyById(id: number): Promise<void> {
     await this.db.execute("DELETE FROM apiKeys WHERE id = ?", [id]);
+  }
+
+  /**
+   * Update an existing API key.
+   * @param keyId - The key ID to update
+   * @param updates - Fields to update (all optional)
+   * @throws Error if key not found or name conflicts
+   */
+  async updateKey(
+    keyId: number,
+    updates: { name?: string; value?: string; description?: string }
+  ): Promise<void> {
+    // Get existing key
+    const existing = await this.getById(keyId);
+    if (!existing) {
+      throw new Error(`API key with id ${keyId} not found`);
+    }
+
+    const setClauses: string[] = [];
+    const params: (string | number | null)[] = [];
+
+    // Handle name update
+    if (updates.name !== undefined) {
+      const normalizedName = updates.name.toLowerCase();
+      if (!validateKeyName(normalizedName)) {
+        throw new Error(
+          "Invalid key name. Must contain only lowercase letters, numbers, dashes, and underscores."
+        );
+      }
+      // Check for duplicate name in same group (excluding current key)
+      const duplicate = await this.db.queryOne<{ id: number }>(
+        "SELECT id FROM apiKeys WHERE groupId = ? AND name = ? AND id != ?",
+        [existing.group.id, normalizedName, keyId]
+      );
+      if (duplicate) {
+        throw new Error(
+          `A key with name '${normalizedName}' already exists in group '${existing.group.name}'`
+        );
+      }
+      setClauses.push("name = ?");
+      params.push(normalizedName);
+    }
+
+    // Handle value update
+    if (updates.value !== undefined) {
+      const encryptedValue = await this.encryptKey(updates.value);
+      const valueHash = await this.hashService.computeHash(updates.value);
+      setClauses.push("value = ?");
+      params.push(encryptedValue);
+      setClauses.push("valueHash = ?");
+      params.push(valueHash);
+    }
+
+    // Handle description update
+    if (updates.description !== undefined) {
+      setClauses.push("description = ?");
+      params.push(updates.description || null);
+    }
+
+    if (setClauses.length === 0) {
+      return; // Nothing to update
+    }
+
+    setClauses.push("updatedAt = CURRENT_TIMESTAMP");
+    params.push(keyId);
+
+    await this.db.execute(
+      `UPDATE apiKeys SET ${setClauses.join(", ")} WHERE id = ?`,
+      params
+    );
   }
 
   /**
