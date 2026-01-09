@@ -14,8 +14,8 @@ export interface RouteInfo {
   route: string;
   /** Allowed HTTP methods */
   methods: string[];
-  /** Required API key names (if any) */
-  keys?: string[];
+  /** Required API key group IDs (if any) */
+  keys?: number[];
 }
 
 /**

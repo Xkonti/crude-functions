@@ -874,7 +874,7 @@ Deno.test("SecretsService.getSecretsPreviewForFunction returns aggregated secret
     await service.createKeySecret(keys![0].id, "SHARED_SECRET", "key");
     await service.createGlobalSecret("GLOBAL_ONLY", "global-only");
 
-    const preview = await service.getSecretsPreviewForFunction(functionId, ["allowed-group"]);
+    const preview = await service.getSecretsPreviewForFunction(functionId, [group!.id]);
 
     expect(preview.length).toBe(2);
 
@@ -912,7 +912,7 @@ Deno.test("SecretsService.getSecretsPreviewForFunction respects accepted groups"
     await service.createGroupSecret(blocked!.id, "BLOCKED_SECRET", "blocked");
 
     // Only allow "allowed-group"
-    const preview = await service.getSecretsPreviewForFunction(routes[0].id, ["allowed-group"]);
+    const preview = await service.getSecretsPreviewForFunction(routes[0].id, [allowed!.id]);
 
     const names = preview.map((p) => p.name);
     expect(names).toContain("ALLOWED_SECRET");

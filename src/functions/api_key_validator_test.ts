@@ -31,16 +31,17 @@ function createMockExtractor(
   };
 }
 
-// Mock ApiKeyService with configurable behavior
+// Mock ApiKeyService with configurable behavior using group IDs
+// keyGroups maps groupId -> Map<keyValue, keyInfo>
 function createMockApiKeyService(
-  keyGroups: Map<string, Map<string, { keyId: number; groupId: number; keyName: string }>>
+  keyGroups: Map<number, Map<string, { keyId: number; groupId: number; keyName: string; groupName: string }>>
 ): ApiKeyService {
   return {
-    getKeyByValue: (
-      group: string,
+    getKeyByValueInGroup: (
+      groupId: number,
       keyValue: string
-    ): Promise<{ keyId: number; groupId: number; keyName: string } | null> => {
-      const groupKeys = keyGroups.get(group.toLowerCase());
+    ): Promise<{ keyId: number; groupId: number; keyName: string; groupName: string } | null> => {
+      const groupKeys = keyGroups.get(groupId);
       if (!groupKeys) return Promise.resolve(null);
       return Promise.resolve(groupKeys.get(keyValue) ?? null);
     },
@@ -62,7 +63,7 @@ Deno.test("ApiKeyValidator returns error when no API key found", async () => {
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["group1"]);
+  const result = await validator.validate(c, [1]); // Use numeric group ID
 
   expect(result.valid).toBe(false);
   expect(result.error).toBe("Missing API key");
@@ -82,7 +83,7 @@ Deno.test("ApiKeyValidator returns error when no extractors provided", async () 
       headers: { "X-API-Key": "some-key" },
     })
   );
-  const result = await validator.validate(c, ["group1"]);
+  const result = await validator.validate(c, [1]); // Use numeric group ID
 
   expect(result.valid).toBe(false);
   expect(result.error).toBe("Missing API key");
@@ -102,7 +103,7 @@ Deno.test("ApiKeyValidator returns error when API key not in any allowed group",
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["group1", "group2"]);
+  const result = await validator.validate(c, [1, 2]); // Use numeric group IDs
 
   expect(result.valid).toBe(false);
   expect(result.error).toBe("Invalid API key");
@@ -110,10 +111,11 @@ Deno.test("ApiKeyValidator returns error when API key not in any allowed group",
 });
 
 Deno.test("ApiKeyValidator returns error when key exists in different group", async () => {
+  // Key exists in group 10, not in groups 1 or 2
   const keyGroups = new Map([
     [
-      "other-group",
-      new Map([["valid-key", { keyId: 1, groupId: 10, keyName: "test-key" }]]),
+      10,
+      new Map([["valid-key", { keyId: 1, groupId: 10, keyName: "test-key", groupName: "other-group" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -126,7 +128,7 @@ Deno.test("ApiKeyValidator returns error when key exists in different group", as
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["group1", "group2"]);
+  const result = await validator.validate(c, [1, 2]); // Allowed groups 1 and 2, key is in group 10
 
   expect(result.valid).toBe(false);
   expect(result.error).toBe("Invalid API key");
@@ -137,10 +139,11 @@ Deno.test("ApiKeyValidator returns error when key exists in different group", as
 // ===================
 
 Deno.test("ApiKeyValidator validates key in first allowed group", async () => {
+  // Key exists in group 100
   const keyGroups = new Map([
     [
-      "group1",
-      new Map([["my-api-key", { keyId: 42, groupId: 100, keyName: "prod-key" }]]),
+      100,
+      new Map([["my-api-key", { keyId: 42, groupId: 100, keyName: "prod-key", groupName: "group1" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -153,7 +156,7 @@ Deno.test("ApiKeyValidator validates key in first allowed group", async () => {
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["group1", "group2"]);
+  const result = await validator.validate(c, [100, 200]); // Allowed groups 100 and 200
 
   expect(result.valid).toBe(true);
   expect(result.keyGroup).toBe("group1");
@@ -164,10 +167,11 @@ Deno.test("ApiKeyValidator validates key in first allowed group", async () => {
 });
 
 Deno.test("ApiKeyValidator validates key in second allowed group", async () => {
+  // Key exists in group 200, not in group 100
   const keyGroups = new Map([
     [
-      "group2",
-      new Map([["my-api-key", { keyId: 5, groupId: 200, keyName: "backup-key" }]]),
+      200,
+      new Map([["my-api-key", { keyId: 5, groupId: 200, keyName: "backup-key", groupName: "group2" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -180,7 +184,7 @@ Deno.test("ApiKeyValidator validates key in second allowed group", async () => {
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["group1", "group2"]);
+  const result = await validator.validate(c, [100, 200]); // Allowed groups 100 and 200
 
   expect(result.valid).toBe(true);
   expect(result.keyGroup).toBe("group2");
@@ -190,14 +194,15 @@ Deno.test("ApiKeyValidator validates key in second allowed group", async () => {
 });
 
 Deno.test("ApiKeyValidator returns first matching group when key exists in multiple groups", async () => {
+  // Same key exists in both groups 10 and 20
   const keyGroups = new Map([
     [
-      "group1",
-      new Map([["shared-key", { keyId: 1, groupId: 10, keyName: "key1" }]]),
+      10,
+      new Map([["shared-key", { keyId: 1, groupId: 10, keyName: "key1", groupName: "group1" }]]),
     ],
     [
-      "group2",
-      new Map([["shared-key", { keyId: 2, groupId: 20, keyName: "key2" }]]),
+      20,
+      new Map([["shared-key", { keyId: 2, groupId: 20, keyName: "key2", groupName: "group2" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -210,7 +215,7 @@ Deno.test("ApiKeyValidator returns first matching group when key exists in multi
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["group1", "group2"]);
+  const result = await validator.validate(c, [10, 20]); // Group 10 checked first
 
   expect(result.valid).toBe(true);
   expect(result.keyGroup).toBe("group1");
@@ -224,8 +229,8 @@ Deno.test("ApiKeyValidator returns first matching group when key exists in multi
 Deno.test("ApiKeyValidator uses first extractor that finds a key", async () => {
   const keyGroups = new Map([
     [
-      "mygroup",
-      new Map([["first-key", { keyId: 1, groupId: 1, keyName: "first" }]]),
+      1,
+      new Map([["first-key", { keyId: 1, groupId: 1, keyName: "first", groupName: "mygroup" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -239,7 +244,7 @@ Deno.test("ApiKeyValidator uses first extractor that finds a key", async () => {
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["mygroup"]);
+  const result = await validator.validate(c, [1]);
 
   expect(result.valid).toBe(true);
   expect(result.source).toBe("first source");
@@ -248,8 +253,8 @@ Deno.test("ApiKeyValidator uses first extractor that finds a key", async () => {
 Deno.test("ApiKeyValidator falls back to second extractor when first returns null", async () => {
   const keyGroups = new Map([
     [
-      "mygroup",
-      new Map([["second-key", { keyId: 2, groupId: 2, keyName: "second" }]]),
+      2,
+      new Map([["second-key", { keyId: 2, groupId: 2, keyName: "second", groupName: "mygroup" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -263,7 +268,7 @@ Deno.test("ApiKeyValidator falls back to second extractor when first returns nul
   });
 
   const c = await createContext(new Request("http://localhost/test"));
-  const result = await validator.validate(c, ["mygroup"]);
+  const result = await validator.validate(c, [2]);
 
   expect(result.valid).toBe(true);
   expect(result.source).toBe("second source");
@@ -276,8 +281,8 @@ Deno.test("ApiKeyValidator falls back to second extractor when first returns nul
 Deno.test("ApiKeyValidator uses default extractors when none provided", async () => {
   const keyGroups = new Map([
     [
-      "api-keys",
-      new Map([["header-key-123", { keyId: 10, groupId: 5, keyName: "header-key" }]]),
+      5,
+      new Map([["header-key-123", { keyId: 10, groupId: 5, keyName: "header-key", groupName: "api-keys" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -292,7 +297,7 @@ Deno.test("ApiKeyValidator uses default extractors when none provided", async ()
       headers: { "X-API-Key": "header-key-123" },
     })
   );
-  const result = await validator.validate(c, ["api-keys"]);
+  const result = await validator.validate(c, [5]);
 
   expect(result.valid).toBe(true);
   expect(result.keyGroup).toBe("api-keys");
@@ -302,8 +307,8 @@ Deno.test("ApiKeyValidator uses default extractors when none provided", async ()
 Deno.test("ApiKeyValidator default extractors work with Authorization Bearer", async () => {
   const keyGroups = new Map([
     [
-      "tokens",
-      new Map([["bearer-token-xyz", { keyId: 20, groupId: 8, keyName: "bearer" }]]),
+      8,
+      new Map([["bearer-token-xyz", { keyId: 20, groupId: 8, keyName: "bearer", groupName: "tokens" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -317,7 +322,7 @@ Deno.test("ApiKeyValidator default extractors work with Authorization Bearer", a
       headers: { Authorization: "Bearer bearer-token-xyz" },
     })
   );
-  const result = await validator.validate(c, ["tokens"]);
+  const result = await validator.validate(c, [8]);
 
   expect(result.valid).toBe(true);
   expect(result.source).toBe("Authorization Bearer");
@@ -326,8 +331,8 @@ Deno.test("ApiKeyValidator default extractors work with Authorization Bearer", a
 Deno.test("ApiKeyValidator default extractors work with query parameter", async () => {
   const keyGroups = new Map([
     [
-      "query-keys",
-      new Map([["query-key-abc", { keyId: 30, groupId: 15, keyName: "query" }]]),
+      15,
+      new Map([["query-key-abc", { keyId: 30, groupId: 15, keyName: "query", groupName: "query-keys" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -339,7 +344,7 @@ Deno.test("ApiKeyValidator default extractors work with query parameter", async 
   const c = await createContext(
     new Request("http://localhost/test?api_key=query-key-abc")
   );
-  const result = await validator.validate(c, ["query-keys"]);
+  const result = await validator.validate(c, [15]);
 
   expect(result.valid).toBe(true);
   expect(result.source).toBe("query:api_key");
@@ -356,6 +361,11 @@ Deno.test("ApiKeyValidator integration with real ApiKeyService", async () => {
     .build();
 
   try {
+    // Get the group ID for validation
+    const productionGroup = await ctx.apiKeyService.getGroupByName("production");
+    expect(productionGroup).not.toBeNull();
+    const groupId = productionGroup!.id;
+
     const validator = new ApiKeyValidator({
       apiKeyService: ctx.apiKeyService,
     });
@@ -366,7 +376,7 @@ Deno.test("ApiKeyValidator integration with real ApiKeyService", async () => {
         headers: { "X-API-Key": "real-api-key-123" },
       })
     );
-    const validResult = await validator.validate(validContext, ["production"]);
+    const validResult = await validator.validate(validContext, [groupId]);
 
     expect(validResult.valid).toBe(true);
     expect(validResult.keyGroup).toBe("production");
@@ -380,7 +390,7 @@ Deno.test("ApiKeyValidator integration with real ApiKeyService", async () => {
         headers: { "X-API-Key": "wrong-key" },
       })
     );
-    const invalidResult = await validator.validate(invalidContext, ["production"]);
+    const invalidResult = await validator.validate(invalidContext, [groupId]);
 
     expect(invalidResult.valid).toBe(false);
     expect(invalidResult.error).toBe("Invalid API key");
@@ -398,6 +408,11 @@ Deno.test("ApiKeyValidator integration rejects key from wrong group", async () =
     .build();
 
   try {
+    // Get the user group ID (we'll only allow user group)
+    const userGroup = await ctx.apiKeyService.getGroupByName("user");
+    expect(userGroup).not.toBeNull();
+    const userGroupId = userGroup!.id;
+
     const validator = new ApiKeyValidator({
       apiKeyService: ctx.apiKeyService,
     });
@@ -408,7 +423,7 @@ Deno.test("ApiKeyValidator integration rejects key from wrong group", async () =
         headers: { "X-API-Key": "admin-secret-key" },
       })
     );
-    const result = await validator.validate(c, ["user"]);
+    const result = await validator.validate(c, [userGroupId]);
 
     expect(result.valid).toBe(false);
     expect(result.error).toBe("Invalid API key");
@@ -425,6 +440,12 @@ Deno.test("ApiKeyValidator integration with multiple allowed groups", async () =
     .build();
 
   try {
+    // Get both group IDs
+    const primaryGroup = await ctx.apiKeyService.getGroupByName("primary");
+    const secondaryGroup = await ctx.apiKeyService.getGroupByName("secondary");
+    expect(primaryGroup).not.toBeNull();
+    expect(secondaryGroup).not.toBeNull();
+
     const validator = new ApiKeyValidator({
       apiKeyService: ctx.apiKeyService,
     });
@@ -435,7 +456,7 @@ Deno.test("ApiKeyValidator integration with multiple allowed groups", async () =
         headers: { "X-API-Key": "secondary-key-value" },
       })
     );
-    const result = await validator.validate(c, ["primary", "secondary"]);
+    const result = await validator.validate(c, [primaryGroup!.id, secondaryGroup!.id]);
 
     expect(result.valid).toBe(true);
     expect(result.keyGroup).toBe("secondary");
@@ -451,8 +472,8 @@ Deno.test("ApiKeyValidator integration with multiple allowed groups", async () =
 Deno.test("ApiKeyValidator rejects when allowed groups list is empty", async () => {
   const keyGroups = new Map([
     [
-      "somegroup",
-      new Map([["my-key", { keyId: 1, groupId: 1, keyName: "key" }]]),
+      1,
+      new Map([["my-key", { keyId: 1, groupId: 1, keyName: "key", groupName: "somegroup" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);

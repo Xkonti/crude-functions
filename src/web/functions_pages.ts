@@ -1154,8 +1154,8 @@ function renderFunctionForm(
             : availableGroups.map(
                 (group) => `
                 <label>
-                  <input type="checkbox" name="keys" value="${escapeHtml(group.name)}"
-                         ${selectedKeys.includes(group.name) ? "checked" : ""}>
+                  <input type="checkbox" name="keys" value="${group.id}"
+                         ${selectedKeys.includes(group.id) ? "checked" : ""}>
                   <strong>${escapeHtml(group.name)}</strong>${group.description ? `: ${escapeHtml(group.description)}` : ""}
                 </label>
               `
@@ -1249,8 +1249,10 @@ function parseFormData(formData: FormData): {
   // Handle methods - use getAll for multiple checkbox values
   const methods = formData.getAll("methods").map((m) => m.toString());
 
-  // Handle keys - use getAll for multiple checkbox values
-  const keysArray = formData.getAll("keys").map((k) => k.toString());
+  // Handle keys - use getAll for multiple checkbox values (values are group IDs)
+  const keysArray = formData.getAll("keys")
+    .map((k) => parseInt(k.toString(), 10))
+    .filter((id) => !isNaN(id) && id > 0);
 
   // Validation
   if (!validateRouteName(name)) {

@@ -899,7 +899,7 @@ export class SecretsService {
    */
   async getSecretsPreviewForFunction(
     functionId: number,
-    acceptedGroupNames: string[]
+    acceptedGroupIds: number[]
   ): Promise<SecretPreview[]> {
     const previewMap = new Map<string, SecretPreview>();
 
@@ -930,16 +930,16 @@ export class SecretsService {
     }
 
     // 3. Load group and key secrets (only for accepted groups)
-    if (acceptedGroupNames.length > 0) {
-      // Get group IDs for accepted group names
-      const placeholders = acceptedGroupNames.map(() => '?').join(',');
+    if (acceptedGroupIds.length > 0) {
+      // Get group info for accepted group IDs
+      const placeholders = acceptedGroupIds.map(() => '?').join(',');
       const groupsQuery = `
         SELECT id, name FROM apiKeyGroups
-        WHERE name IN (${placeholders})
+        WHERE id IN (${placeholders})
       `;
       const groups = await this.db.queryAll<{ id: number; name: string }>(
         groupsQuery,
-        acceptedGroupNames
+        acceptedGroupIds
       );
 
       for (const group of groups) {

@@ -204,8 +204,14 @@ export interface RouteOptions {
   description?: string;
   /** Allowed HTTP methods (defaults to ["GET"]) */
   methods?: string[];
-  /** API key group names required to access this route */
-  keys?: string[];
+  /**
+   * API key groups required to access this route.
+   * Can be specified as:
+   * - Group IDs (numbers) - used directly
+   * - Group names (strings) - resolved to IDs at build time
+   *   (group must be created with withApiKeyGroup before the route)
+   */
+  keys?: (number | string)[];
 }
 
 /**

@@ -205,22 +205,7 @@ Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
   }
 });
 
-Deno.test("ApiKeyService.removeGroup removes all keys in group", async () => {
-  const ctx = await TestSetupBuilder.create().withApiKeys().build();
-
-  try {
-    await ctx.apiKeyService.addKey("management", "key-1", "value1");
-    await ctx.apiKeyService.addKey("email", "key-2", "value2");
-
-    await ctx.apiKeyService.removeGroup("email");
-
-    const keys = await ctx.apiKeyService.getAll();
-    expect(keys.has("email")).toBe(false);
-    expect(keys.has("management")).toBe(true);
-  } finally {
-    await ctx.cleanup();
-  }
-});
+// NOTE: removeGroup (batch delete) was removed - groups must be empty before deletion
 
 // =====================
 // Group CRUD tests

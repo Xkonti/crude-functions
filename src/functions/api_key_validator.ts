@@ -39,14 +39,14 @@ export class ApiKeyValidator {
   }
 
   /**
-   * Validate API key against allowed key groups
+   * Validate API key against allowed key group IDs
    * @param c - Hono context
-   * @param allowedKeyGroups - Array of key groups to check against
+   * @param allowedGroupIds - Array of group IDs to check against
    * @returns Validation result with matched key group and source if successful
    */
   async validate(
     c: Context,
-    allowedKeyGroups: string[]
+    allowedGroupIds: number[]
   ): Promise<ApiKeyValidationResult> {
     // Try each extractor in order until one finds a key
     let apiKey: string | null = null;
@@ -69,14 +69,14 @@ export class ApiKeyValidator {
       };
     }
 
-    // Check each allowed key group
-    for (const keyGroup of allowedKeyGroups) {
-      const keyInfo = await this.apiKeyService.getKeyByValue(keyGroup, apiKey);
+    // Check each allowed key group by ID
+    for (const groupId of allowedGroupIds) {
+      const keyInfo = await this.apiKeyService.getKeyByValueInGroup(groupId, apiKey);
       if (keyInfo) {
-        logger.debug(`API key validated successfully (key group: ${keyGroup}, source: ${source})`);
+        logger.debug(`API key validated successfully (key group: ${keyInfo.groupName}, source: ${source})`);
         return {
           valid: true,
-          keyGroup,
+          keyGroup: keyInfo.groupName,
           keyGroupId: keyInfo.groupId,
           keyId: keyInfo.keyId,
           source: source!,
