@@ -189,7 +189,7 @@ function renderServerSettingsTab(
       // Fetch rotation status
       async function loadStatus() {
         try {
-          const response = await fetch('/api/rotation/status');
+          const response = await fetch('/api/encryption-keys/rotation');
           const data = await response.json();
 
           if (data.error) {
@@ -224,7 +224,7 @@ function renderServerSettingsTab(
         messageEl.style.display = 'none';
 
         try {
-          const response = await fetch('/api/rotation/trigger', {
+          const response = await fetch('/api/encryption-keys/rotation', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
           });
