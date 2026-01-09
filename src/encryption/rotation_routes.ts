@@ -37,7 +37,7 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
    * @returns 200 with rotation status
    * @returns 500 on server error
    */
-  routes.get("/", async (c: Context) => {
+  routes.get("/rotation", async (c: Context) => {
     try {
       // Load encryption keys to get rotation timestamps
       const keys = await keyStorageService.loadKeys();
@@ -104,7 +104,7 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
    * @returns 409 if rotation is already in progress
    * @returns 500 on server error
    */
-  routes.post("/", async (c: Context) => {
+  routes.post("/rotation", async (c: Context) => {
     try {
       await keyRotationService.triggerManualRotation();
       return c.json({
