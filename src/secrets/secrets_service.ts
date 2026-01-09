@@ -2,15 +2,12 @@ import type { DatabaseService } from "../database/database_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { Secret, SecretRow, SecretPreview } from "./types.ts";
 import { SecretScope } from "./types.ts";
-import { validateSecretName } from "../validation/secrets.ts";
+import { validateSecretName as isValidSecretName } from "../validation/secrets.ts";
 
 export interface SecretsServiceOptions {
   db: DatabaseService;
   encryptionService: IEncryptionService;
 }
-
-// Secret names: A-Z, a-z, 0-9, underscore, dash
-const SECRET_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Service for managing secrets with encryption at rest.
@@ -823,7 +820,7 @@ export class SecretsService {
       throw new Error("Secret name cannot be empty");
     }
 
-    if (!SECRET_NAME_REGEX.test(name)) {
+    if (!isValidSecretName(name)) {
       throw new Error(
         "Secret name can only contain letters, numbers, underscores, and dashes"
       );
@@ -1529,6 +1526,14 @@ export class SecretsService {
         if (functionId === undefined) {
           throw new Error("functionId is required for function-scoped secrets");
         }
+        // Validate that the function exists
+        const route = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM routes WHERE id = ?",
+          [functionId]
+        );
+        if (!route) {
+          throw new Error(`Function with ID ${functionId} not found`);
+        }
         await this.createFunctionSecret(functionId, name, value, comment);
         const functionSecret = await this.db.queryOne<{ id: number }>(
           "SELECT id FROM secrets WHERE name = ? AND scope = ? AND functionId = ? ORDER BY id DESC LIMIT 1",
@@ -1541,6 +1546,14 @@ export class SecretsService {
         if (groupId === undefined) {
           throw new Error("groupId is required for group-scoped secrets");
         }
+        // Validate that the group exists
+        const group = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM apiKeyGroups WHERE id = ?",
+          [groupId]
+        );
+        if (!group) {
+          throw new Error(`API key group with ID ${groupId} not found`);
+        }
         await this.createGroupSecret(groupId, name, value, comment);
         const groupSecret = await this.db.queryOne<{ id: number }>(
           "SELECT id FROM secrets WHERE name = ? AND scope = ? AND apiGroupId = ? ORDER BY id DESC LIMIT 1",
@@ -1552,6 +1565,14 @@ export class SecretsService {
       case SecretScope.Key: {
         if (keyId === undefined) {
           throw new Error("keyId is required for key-scoped secrets");
+        }
+        // Validate that the key exists
+        const key = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM apiKeys WHERE id = ?",
+          [keyId]
+        );
+        if (!key) {
+          throw new Error(`API key with ID ${keyId} not found`);
         }
         await this.createKeySecret(keyId, name, value, comment);
         const keySecret = await this.db.queryOne<{ id: number }>(
@@ -1593,7 +1614,7 @@ export class SecretsService {
 
     if (name !== undefined) {
       // Validate name
-      if (!validateSecretName(name)) {
+      if (!isValidSecretName(name)) {
         throw new Error(
           "Secret name can only contain letters, numbers, underscores, and dashes"
         );
