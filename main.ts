@@ -305,11 +305,12 @@ app.route("/api/files", createFileRoutes({
 }));
 
 // Encryption key rotation API
-app.use("/api/rotation/*", hybridAuth);
-app.use("/api/rotation", hybridAuth);
-app.route("/api/rotation", createRotationRoutes({
+app.use("/api/encryption-keys/*", hybridAuth);
+app.use("/api/encryption-keys", hybridAuth);
+app.route("/api/encryption-keys", createRotationRoutes({
   keyRotationService,
   keyStorageService,
+  settingsService,
 }));
 
 // Settings API (hybrid auth)

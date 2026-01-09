@@ -58,6 +58,28 @@ function isPastHourOnDifferentDay(hoursAgo: number): boolean {
 
 type MetricsTestContext = BaseTestContext & MetricsContext;
 
+/**
+ * Wait for a condition to be true, with timeout.
+ * Avoids race conditions from arbitrary delays.
+ */
+async function waitFor<T>(
+  condition: () => T | Promise<T>,
+  description: string,
+  timeoutMs = 5000
+): Promise<T> {
+  const startTime = Date.now();
+  while (true) {
+    const result = await condition();
+    if (result) return result;
+
+    if (Date.now() - startTime > timeoutMs) {
+      throw new Error(`Timeout waiting for ${description} after ${timeoutMs}ms`);
+    }
+
+    await new Promise((r) => setTimeout(r, 10)); // Poll every 10ms
+  }
+}
+
 interface TestSetup {
   aggregationService: MetricsAggregationService;
   ctx: MetricsTestContext;
@@ -261,7 +283,18 @@ Deno.test("MetricsAggregationService skips empty periods (no zero-value rows)", 
     });
 
     setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // Wait for both minute records to be created (condition-based waiting)
+    // Use longer timeout since aggregation involves multiple DB operations
+    await waitFor(
+      async () => {
+        const mins = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+        return mins.length >= 2;
+      },
+      "both minute records to be created",
+      10000 // 10 second timeout for safety
+    );
+
     await setup.aggregationService.stop();
 
     // Should have minute records for both minutes only
@@ -634,9 +667,19 @@ Deno.test("MetricsAggregationService stop waits for processing to complete", asy
       });
     }
 
-    // Start and wait a moment for processing to begin, then stop
+    // Start and wait for processing to complete (condition-based waiting)
     setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Wait for minute record to be created
+    await waitFor(
+      async () => {
+        const mins = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+        return mins.length >= 1;
+      },
+      "minute record to be created",
+      10000 // 10 second timeout for safety
+    );
+
     await setup.aggregationService.stop();
 
     // Processing should have completed
