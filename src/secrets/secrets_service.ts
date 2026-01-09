@@ -2,14 +2,12 @@ import type { DatabaseService } from "../database/database_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { Secret, SecretRow, SecretPreview } from "./types.ts";
 import { SecretScope } from "./types.ts";
+import { validateSecretName as isValidSecretName } from "../validation/secrets.ts";
 
 export interface SecretsServiceOptions {
   db: DatabaseService;
   encryptionService: IEncryptionService;
 }
-
-// Secret names: A-Z, a-z, 0-9, underscore, dash
-const SECRET_NAME_REGEX = /^[a-zA-Z0-9_-]+$/;
 
 /**
  * Service for managing secrets with encryption at rest.
@@ -822,7 +820,7 @@ export class SecretsService {
       throw new Error("Secret name cannot be empty");
     }
 
-    if (!SECRET_NAME_REGEX.test(name)) {
+    if (!isValidSecretName(name)) {
       throw new Error(
         "Secret name can only contain letters, numbers, underscores, and dashes"
       );
@@ -1244,5 +1242,512 @@ export class SecretsService {
     }
 
     return hasAnySecret ? result : undefined;
+  }
+
+  // ============== Generic REST API Operations ==============
+
+  /**
+   * Convert scope string to enum value
+   */
+  private scopeStringToEnum(scope: string): SecretScope | null {
+    const scopeMap: Record<string, SecretScope> = {
+      global: SecretScope.Global,
+      function: SecretScope.Function,
+      group: SecretScope.Group,
+      key: SecretScope.Key,
+    };
+    return scopeMap[scope] ?? null;
+  }
+
+  /**
+   * Get a secret by ID regardless of scope
+   * Returns full secret with decrypted value
+   */
+  async getSecretById(id: number): Promise<Secret | null> {
+    const row = await this.db.queryOne<{
+      id: number;
+      name: string;
+      value: string;
+      comment: string | null;
+      scope: number;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
+    }>(
+      `SELECT id, name, value, comment, scope,
+              functionId, apiGroupId, apiKeyId,
+              createdAt, updatedAt
+       FROM secrets
+       WHERE id = ?`,
+      [id]
+    );
+
+    if (!row) {
+      return null;
+    }
+
+    // Decrypt the value
+    let decryptedValue = "";
+    let decryptionError: string | undefined;
+    try {
+      decryptedValue = await this.encryptionService.decrypt(row.value);
+    } catch (error) {
+      decryptionError =
+        error instanceof Error ? error.message : "Decryption failed";
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      value: decryptedValue,
+      decryptionError,
+      comment: row.comment,
+      scope: row.scope,
+      functionId: row.functionId,
+      apiGroupId: row.apiGroupId,
+      apiKeyId: row.apiKeyId,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  /**
+   * Search for secrets by name across all scopes or specific scope
+   * Returns array of secrets with decrypted values
+   */
+  async getSecretsByName(
+    name: string,
+    scope?: string
+  ): Promise<Secret[]> {
+    let query = `
+      SELECT id, name, value, comment, scope,
+             functionId, apiGroupId, apiKeyId,
+             createdAt, updatedAt
+      FROM secrets
+      WHERE name = ?
+    `;
+    const params: (string | number)[] = [name];
+
+    if (scope) {
+      const scopeEnum = this.scopeStringToEnum(scope);
+      if (scopeEnum === null) {
+        return [];
+      }
+      query += " AND scope = ?";
+      params.push(scopeEnum);
+    }
+
+    query += " ORDER BY scope ASC, id ASC";
+
+    const rows = await this.db.queryAll<{
+      id: number;
+      name: string;
+      value: string;
+      comment: string | null;
+      scope: number;
+      functionId: number | null;
+      apiGroupId: number | null;
+      apiKeyId: number | null;
+      createdAt: string;
+      updatedAt: string;
+    }>(query, params);
+
+    // Decrypt all values
+    const secrets: Secret[] = [];
+    for (const row of rows) {
+      let decryptedValue = "";
+      let decryptionError: string | undefined;
+      try {
+        decryptedValue = await this.encryptionService.decrypt(row.value);
+      } catch (error) {
+        decryptionError =
+          error instanceof Error ? error.message : "Decryption failed";
+      }
+      secrets.push({
+        id: row.id,
+        name: row.name,
+        value: decryptedValue,
+        decryptionError,
+        comment: row.comment,
+        scope: row.scope,
+        functionId: row.functionId,
+        apiGroupId: row.apiGroupId,
+        apiKeyId: row.apiKeyId,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      });
+    }
+
+    return secrets;
+  }
+
+  /**
+   * Get all secrets with optional filtering
+   * Returns with or without values based on includeValues flag
+   */
+  async getAllSecrets(options: {
+    scope?: string;
+    functionId?: number;
+    groupId?: number;
+    keyId?: number;
+    includeValues?: boolean;
+  } = {}): Promise<Secret[] | SecretRow[]> {
+    const { scope, functionId, groupId, keyId, includeValues = false } = options;
+
+    let query: string;
+    const params: (string | number)[] = [];
+
+    if (includeValues) {
+      query = `
+        SELECT id, name, value, comment, scope,
+               functionId, apiGroupId, apiKeyId,
+               createdAt, updatedAt
+        FROM secrets
+        WHERE 1=1
+      `;
+    } else {
+      query = `
+        SELECT id, name, comment, createdAt, updatedAt, scope,
+               functionId, apiGroupId, apiKeyId
+        FROM secrets
+        WHERE 1=1
+      `;
+    }
+
+    // Apply filters
+    if (scope) {
+      const scopeEnum = this.scopeStringToEnum(scope);
+      if (scopeEnum === null) {
+        return [];
+      }
+      query += " AND scope = ?";
+      params.push(scopeEnum);
+    }
+
+    if (functionId !== undefined) {
+      query += " AND functionId = ?";
+      params.push(functionId);
+    }
+
+    if (groupId !== undefined) {
+      query += " AND apiGroupId = ?";
+      params.push(groupId);
+    }
+
+    if (keyId !== undefined) {
+      query += " AND apiKeyId = ?";
+      params.push(keyId);
+    }
+
+    query += " ORDER BY name ASC";
+
+    if (includeValues) {
+      const rows = await this.db.queryAll<{
+        id: number;
+        name: string;
+        value: string;
+        comment: string | null;
+        scope: number;
+        functionId: number | null;
+        apiGroupId: number | null;
+        apiKeyId: number | null;
+        createdAt: string;
+        updatedAt: string;
+      }>(query, params);
+
+      // Decrypt all values
+      const secrets: Secret[] = [];
+      for (const row of rows) {
+        let decryptedValue = "";
+        let decryptionError: string | undefined;
+        try {
+          decryptedValue = await this.encryptionService.decrypt(row.value);
+        } catch (error) {
+          decryptionError =
+            error instanceof Error ? error.message : "Decryption failed";
+        }
+        secrets.push({
+          id: row.id,
+          name: row.name,
+          value: decryptedValue,
+          decryptionError,
+          comment: row.comment,
+          scope: row.scope,
+          functionId: row.functionId,
+          apiGroupId: row.apiGroupId,
+          apiKeyId: row.apiKeyId,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        });
+      }
+      return secrets;
+    } else {
+      const rows = await this.db.queryAll<SecretRow>(query, params);
+      return rows;
+    }
+  }
+
+  /**
+   * Create a secret for any scope
+   * Returns the new secret ID
+   */
+  async createSecret(data: {
+    name: string;
+    value: string;
+    comment?: string;
+    scope: string;
+    functionId?: number;
+    groupId?: number;
+    keyId?: number;
+  }): Promise<number> {
+    const { name, value, comment, scope, functionId, groupId, keyId } = data;
+
+    // Validate scope
+    const scopeEnum = this.scopeStringToEnum(scope);
+    if (scopeEnum === null) {
+      throw new Error(`Invalid scope: ${scope}`);
+    }
+
+    // Delegate to scope-specific methods
+    switch (scopeEnum) {
+      case SecretScope.Global: {
+        await this.createGlobalSecret(name, value, comment);
+        // Get the ID of the created secret
+        const globalSecret = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM secrets WHERE name = ? AND scope = ? ORDER BY id DESC LIMIT 1",
+          [name, SecretScope.Global]
+        );
+        return globalSecret!.id;
+      }
+
+      case SecretScope.Function: {
+        if (functionId === undefined) {
+          throw new Error("functionId is required for function-scoped secrets");
+        }
+        // Validate that the function exists
+        const route = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM routes WHERE id = ?",
+          [functionId]
+        );
+        if (!route) {
+          throw new Error(`Function with ID ${functionId} not found`);
+        }
+        await this.createFunctionSecret(functionId, name, value, comment);
+        const functionSecret = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM secrets WHERE name = ? AND scope = ? AND functionId = ? ORDER BY id DESC LIMIT 1",
+          [name, SecretScope.Function, functionId]
+        );
+        return functionSecret!.id;
+      }
+
+      case SecretScope.Group: {
+        if (groupId === undefined) {
+          throw new Error("groupId is required for group-scoped secrets");
+        }
+        // Validate that the group exists
+        const group = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM apiKeyGroups WHERE id = ?",
+          [groupId]
+        );
+        if (!group) {
+          throw new Error(`API key group with ID ${groupId} not found`);
+        }
+        await this.createGroupSecret(groupId, name, value, comment);
+        const groupSecret = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM secrets WHERE name = ? AND scope = ? AND apiGroupId = ? ORDER BY id DESC LIMIT 1",
+          [name, SecretScope.Group, groupId]
+        );
+        return groupSecret!.id;
+      }
+
+      case SecretScope.Key: {
+        if (keyId === undefined) {
+          throw new Error("keyId is required for key-scoped secrets");
+        }
+        // Validate that the key exists
+        const key = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM apiKeys WHERE id = ?",
+          [keyId]
+        );
+        if (!key) {
+          throw new Error(`API key with ID ${keyId} not found`);
+        }
+        await this.createKeySecret(keyId, name, value, comment);
+        const keySecret = await this.db.queryOne<{ id: number }>(
+          "SELECT id FROM secrets WHERE name = ? AND scope = ? AND apiKeyId = ? ORDER BY id DESC LIMIT 1",
+          [name, SecretScope.Key, keyId]
+        );
+        return keySecret!.id;
+      }
+
+      default:
+        throw new Error(`Unsupported scope: ${scope}`);
+    }
+  }
+
+  /**
+   * Update a secret by ID
+   * Updates name, value, and/or comment
+   * At least one field must be provided
+   */
+  async updateSecretById(
+    id: number,
+    updates: {
+      name?: string;
+      value?: string;
+      comment?: string;
+    }
+  ): Promise<void> {
+    const { name, value, comment } = updates;
+
+    // Get the current secret to determine scope
+    const current = await this.getSecretById(id);
+    if (!current) {
+      throw new Error(`Secret with ID ${id} not found`);
+    }
+
+    // Build the update query dynamically
+    const updateFields: string[] = [];
+    const params: (string | number)[] = [];
+
+    if (name !== undefined) {
+      // Validate name
+      if (!isValidSecretName(name)) {
+        throw new Error(
+          "Secret name can only contain letters, numbers, underscores, and dashes"
+        );
+      }
+
+      // Check for duplicate name in same scope
+      const duplicateQuery = this.buildDuplicateQuery(current.scope);
+      const duplicateParams = this.buildDuplicateParams(
+        name,
+        current.scope,
+        current.functionId,
+        current.apiGroupId,
+        current.apiKeyId
+      );
+      duplicateParams.push(id); // Exclude current ID
+
+      const duplicate = await this.db.queryOne(
+        duplicateQuery + " AND id != ?",
+        duplicateParams
+      );
+
+      if (duplicate) {
+        const scopeName = this.getScopeName(current.scope);
+        throw new Error(
+          `A secret with name '${name}' already exists in ${scopeName} scope`
+        );
+      }
+
+      updateFields.push("name = ?");
+      params.push(name);
+    }
+
+    if (value !== undefined) {
+      const encryptedValue = await this.encryptionService.encrypt(value);
+      updateFields.push("value = ?");
+      params.push(encryptedValue);
+    }
+
+    if (comment !== undefined) {
+      updateFields.push("comment = ?");
+      params.push(comment);
+    }
+
+    if (updateFields.length === 0) {
+      throw new Error("At least one field must be provided for update");
+    }
+
+    updateFields.push("updatedAt = datetime('now')");
+    params.push(id);
+
+    const query = `
+      UPDATE secrets
+      SET ${updateFields.join(", ")}
+      WHERE id = ?
+    `;
+
+    const result = await this.db.execute(query, params);
+
+    if (result.changes === 0) {
+      throw new Error(`Secret with ID ${id} not found`);
+    }
+  }
+
+  /**
+   * Delete a secret by ID
+   */
+  async deleteSecretById(id: number): Promise<void> {
+    const result = await this.db.execute(
+      "DELETE FROM secrets WHERE id = ?",
+      [id]
+    );
+
+    if (result.changes === 0) {
+      throw new Error(`Secret with ID ${id} not found`);
+    }
+  }
+
+  // Helper methods for duplicate checking and scope naming
+
+  private buildDuplicateQuery(scope: number): string {
+    let query = "SELECT id FROM secrets WHERE name = ? AND scope = ?";
+
+    switch (scope) {
+      case SecretScope.Function:
+        query += " AND functionId = ?";
+        break;
+      case SecretScope.Group:
+        query += " AND apiGroupId = ?";
+        break;
+      case SecretScope.Key:
+        query += " AND apiKeyId = ?";
+        break;
+    }
+
+    return query;
+  }
+
+  private buildDuplicateParams(
+    name: string,
+    scope: number,
+    functionId: number | null,
+    apiGroupId: number | null,
+    apiKeyId: number | null
+  ): (string | number)[] {
+    const params: (string | number)[] = [name, scope];
+
+    switch (scope) {
+      case SecretScope.Function:
+        if (functionId !== null) params.push(functionId);
+        break;
+      case SecretScope.Group:
+        if (apiGroupId !== null) params.push(apiGroupId);
+        break;
+      case SecretScope.Key:
+        if (apiKeyId !== null) params.push(apiKeyId);
+        break;
+    }
+
+    return params;
+  }
+
+  private getScopeName(scope: number): string {
+    switch (scope) {
+      case SecretScope.Global:
+        return "global";
+      case SecretScope.Function:
+        return "function";
+      case SecretScope.Group:
+        return "group";
+      case SecretScope.Key:
+        return "key";
+      default:
+        return "unknown";
+    }
   }
 }
