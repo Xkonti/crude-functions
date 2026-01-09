@@ -23,3 +23,24 @@ export interface RequestContext {
 
 /** Input type for storing a new console log (id and timestamp are auto-generated) */
 export type NewConsoleLog = Omit<ConsoleLog, "id" | "timestamp">;
+
+/** Pagination cursor combining timestamp and ID for robust pagination */
+export interface PaginationCursor {
+  timestamp: string; // ISO timestamp
+  id: number;
+}
+
+/** Options for paginated log queries */
+export interface GetPaginatedOptions {
+  routeId?: number;
+  limit: number; // 1-1000
+  cursor?: string; // base64-encoded PaginationCursor
+}
+
+/** Result of paginated log query */
+export interface PaginatedLogsResult {
+  logs: ConsoleLog[];
+  hasMore: boolean;
+  nextCursor?: string; // base64-encoded PaginationCursor
+  prevCursor?: string; // base64-encoded PaginationCursor
+}
