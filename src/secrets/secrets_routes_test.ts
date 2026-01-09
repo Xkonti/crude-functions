@@ -454,7 +454,7 @@ Deno.test("POST /api/secrets creates key-scoped secret", async () => {
     .build();
 
   try {
-    const groupId = await ctx.apiKeyService.createGroup("test-group");
+    const _groupId = await ctx.apiKeyService.createGroup("test-group");
     await ctx.apiKeyService.addKey("test-group", "test-key", "key-value");
     const keys = await ctx.apiKeyService.getKeys("test-group");
     const keyId = keys![0].id;
