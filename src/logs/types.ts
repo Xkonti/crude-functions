@@ -33,6 +33,7 @@ export interface PaginationCursor {
 /** Options for paginated log queries */
 export interface GetPaginatedOptions {
   routeId?: number;
+  levels?: ConsoleLogLevel[]; // Optional log level filtering
   limit: number; // 1-1000
   cursor?: string; // base64-encoded PaginationCursor
 }

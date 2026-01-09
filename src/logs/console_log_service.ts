@@ -326,7 +326,7 @@ export class ConsoleLogService {
    * Cursor combines timestamp and ID to handle same-timestamp ambiguity.
    */
   async getPaginated(options: GetPaginatedOptions): Promise<PaginatedLogsResult> {
-    const { routeId, limit, cursor } = options;
+    const { routeId, levels, limit, cursor } = options;
 
     // Validate limit
     if (limit < 1 || limit > 1000) {
@@ -344,43 +344,40 @@ export class ConsoleLogService {
       }
     }
 
-    // Build query with cursor filtering
-    let sql: string;
+    // Build WHERE clause dynamically
+    const whereClauses: string[] = [];
     const params: (string | number)[] = [];
 
+    // Add routeId filter if provided
     if (routeId !== undefined) {
-      if (cursorData) {
-        sql = `SELECT id, requestId, routeId, level, message, args, timestamp
-               FROM executionLogs
-               WHERE routeId = ?
-                 AND (timestamp < ? OR (timestamp = ? AND id < ?))
-               ORDER BY timestamp DESC, id DESC
-               LIMIT ?`;
-        params.push(routeId, cursorData.timestamp, cursorData.timestamp, cursorData.id, limit + 1);
-      } else {
-        sql = `SELECT id, requestId, routeId, level, message, args, timestamp
-               FROM executionLogs
-               WHERE routeId = ?
-               ORDER BY timestamp DESC, id DESC
-               LIMIT ?`;
-        params.push(routeId, limit + 1);
-      }
-    } else {
-      if (cursorData) {
-        sql = `SELECT id, requestId, routeId, level, message, args, timestamp
-               FROM executionLogs
-               WHERE (timestamp < ? OR (timestamp = ? AND id < ?))
-               ORDER BY timestamp DESC, id DESC
-               LIMIT ?`;
-        params.push(cursorData.timestamp, cursorData.timestamp, cursorData.id, limit + 1);
-      } else {
-        sql = `SELECT id, requestId, routeId, level, message, args, timestamp
-               FROM executionLogs
-               ORDER BY timestamp DESC, id DESC
-               LIMIT ?`;
-        params.push(limit + 1);
-      }
+      whereClauses.push("routeId = ?");
+      params.push(routeId);
     }
+
+    // Add level filter if provided
+    if (levels && levels.length > 0) {
+      const placeholders = levels.map(() => "?").join(", ");
+      whereClauses.push(`level IN (${placeholders})`);
+      params.push(...levels);
+    }
+
+    // Add cursor filter if provided
+    if (cursorData) {
+      whereClauses.push("(timestamp < ? OR (timestamp = ? AND id < ?))");
+      params.push(cursorData.timestamp, cursorData.timestamp, cursorData.id);
+    }
+
+    // Build final SQL
+    const whereClause = whereClauses.length > 0
+      ? `WHERE ${whereClauses.join(" AND ")}`
+      : "";
+
+    const sql = `SELECT id, requestId, routeId, level, message, args, timestamp
+                 FROM executionLogs
+                 ${whereClause}
+                 ORDER BY timestamp DESC, id DESC
+                 LIMIT ?`;
+    params.push(limit + 1);
 
     const rows = await this.db.queryAll<ConsoleLogRow>(sql, params);
 
