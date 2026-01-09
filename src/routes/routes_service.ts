@@ -8,7 +8,7 @@ export interface FunctionRoute {
   handler: string;
   route: string;
   methods: string[];
-  keys?: string[];
+  keys?: number[];
   enabled: boolean;
 }
 
@@ -152,10 +152,10 @@ export class RoutesService {
     }
 
     // Parse keys with error handling
-    let keys: string[] | undefined;
+    let keys: number[] | undefined;
     if (row.keys) {
       try {
-        keys = JSON.parse(row.keys) as string[];
+        keys = JSON.parse(row.keys) as number[];
       } catch (error) {
         globalThis.console.error(
           `[RoutesService] Failed to parse keys for route ${row.id}: ${row.keys}`,

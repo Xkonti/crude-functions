@@ -616,34 +616,10 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       }
     }
 
-    // STEP 6: Create routes service if needed (before logs/metrics that reference routeId)
-    if (this.flags.routesService) {
-      context.routesService = createRoutesService(db);
+    // STEP 6: Create API key service if needed (BEFORE routes for key resolution)
+    // Map to track group name -> ID for resolving route keys
+    const groupNameToId = new Map<string, number>();
 
-      // Create deferred routes
-      for (const { path, fileName, options } of this.deferredRoutes) {
-        await context.routesService.addRoute({
-          name: options?.name ?? fileName.replace(/\.ts$/, ""),
-          description: options?.description,
-          handler: fileName,
-          route: path,
-          methods: options?.methods ?? ["GET"],
-          keys: options?.keys,
-        });
-      }
-    }
-
-    // STEP 7: Create file service if needed
-    if (this.flags.fileService) {
-      context.fileService = createFileService(codeDir);
-
-      // Create deferred files
-      for (const { name, content } of this.deferredFiles) {
-        await context.fileService.writeFile(name, content);
-      }
-    }
-
-    // STEP 8: Create API key service if needed
     if (this.flags.apiKeyService) {
       context.apiKeyService = createApiKeyService(
         db,
@@ -653,11 +629,58 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
       // Create deferred groups and keys
       for (const { name, description } of this.deferredGroups) {
-        await context.apiKeyService.getOrCreateGroup(name, description);
+        const groupId = await context.apiKeyService.getOrCreateGroup(name, description);
+        groupNameToId.set(name, groupId);
       }
       for (const { groupName, keyValue, keyName, description } of this.deferredKeys) {
         const name = keyName ?? `test-key-${Date.now()}`;
         await context.apiKeyService.addKey(groupName, name, keyValue, description);
+      }
+    }
+
+    // STEP 7: Create routes service if needed (after API keys for key resolution)
+    if (this.flags.routesService) {
+      context.routesService = createRoutesService(db);
+
+      // Create deferred routes
+      for (const { path, fileName, options } of this.deferredRoutes) {
+        // Resolve any string keys to their IDs
+        let resolvedKeys: number[] | undefined;
+        if (options?.keys && options.keys.length > 0) {
+          resolvedKeys = options.keys.map((key) => {
+            if (typeof key === "number") {
+              return key;
+            }
+            // Resolve string key name to ID
+            const id = groupNameToId.get(key);
+            if (id === undefined) {
+              throw new Error(
+                `Test setup error: Route "${path}" references API key group "${key}" ` +
+                `which was not created. Add .withApiKeyGroup("${key}") before the route.`
+              );
+            }
+            return id;
+          });
+        }
+
+        await context.routesService.addRoute({
+          name: options?.name ?? fileName.replace(/\.ts$/, ""),
+          description: options?.description,
+          handler: fileName,
+          route: path,
+          methods: options?.methods ?? ["GET"],
+          keys: resolvedKeys,
+        });
+      }
+    }
+
+    // STEP 8: Create file service if needed
+    if (this.flags.fileService) {
+      context.fileService = createFileService(codeDir);
+
+      // Create deferred files
+      for (const { name, content } of this.deferredFiles) {
+        await context.fileService.writeFile(name, content);
       }
     }
 

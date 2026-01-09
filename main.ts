@@ -19,7 +19,7 @@ import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
 import { createHybridAuthMiddleware } from "./src/auth/auth_middleware.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
-import { createApiKeyRoutes } from "./src/keys/api_key_routes.ts";
+import { createApiKeyRoutes, createApiKeyGroupRoutes } from "./src/keys/api_key_routes.ts";
 import { RoutesService } from "./src/routes/routes_service.ts";
 import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
@@ -276,7 +276,12 @@ app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 // Hybrid auth middleware (accepts session OR API key)
 const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService, settingsService });
 
-// Protected API management routes
+// Protected API key group management routes
+app.use("/api/key-groups/*", hybridAuth);
+app.use("/api/key-groups", hybridAuth);
+app.route("/api/key-groups", createApiKeyGroupRoutes(apiKeyService));
+
+// Protected API key management routes
 app.use("/api/keys/*", hybridAuth);
 app.use("/api/keys", hybridAuth);
 app.route("/api/keys", createApiKeyRoutes(apiKeyService));

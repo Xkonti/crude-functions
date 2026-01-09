@@ -109,12 +109,13 @@ export function createHybridAuthMiddleware(options: HybridAuthMiddlewareOptions)
           .map((id) => parseInt(id.trim(), 10))
           .filter((id) => !isNaN(id));
 
-        // Check API key against each allowed group
+        // Check API key against each allowed group by ID
         for (const groupId of groupIds) {
-          const group = await apiKeyService.getGroupById(groupId);
-          if (group && (await apiKeyService.hasKey(group.name, apiKey))) {
+          if (await apiKeyService.hasKeyInGroup(groupId, apiKey)) {
+            // Fetch group name for context
+            const group = await apiKeyService.getGroupById(groupId);
             c.set("authMethod", "api-key");
-            c.set("apiKeyGroup", group.name);
+            c.set("apiKeyGroup", group?.name ?? `group-${groupId}`);
             await next();
             return;
           }

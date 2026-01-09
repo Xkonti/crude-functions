@@ -125,7 +125,7 @@ interface TestRoute {
   route: string;
   methods: string[];
   description?: string;
-  keys?: string[];
+  keys?: number[];
 }
 
 interface TestContext {
@@ -564,20 +564,43 @@ Deno.test("POST /web/keys/delete removes key by ID", async () => {
   }
 });
 
-Deno.test("POST /web/keys/delete-group removes all keys for group", async () => {
+Deno.test("POST /web/keys/delete-group removes empty group", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    await apiKeyService.addKey("toremove", "key-1", "val1");
-    await apiKeyService.addKey("toremove", "key-2", "val2");
+    // Create empty group (no keys)
+    await apiKeyService.createGroup("toremove", "Group to remove");
+    const group = await apiKeyService.getGroupByName("toremove");
 
-    const res = await app.request("/web/keys/delete-group?group=toremove", {
+    const res = await app.request(`/web/keys/delete-group?id=${group!.id}`, {
       method: "POST",
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/keys?success=");
 
-    const keys = await apiKeyService.getKeys("toremove");
-    expect(keys).toBeNull();
+    // Group should be gone
+    const deletedGroup = await apiKeyService.getGroupByName("toremove");
+    expect(deletedGroup).toBeNull();
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("POST /web/keys/delete-group rejects group with keys", async () => {
+  const { app, db, tempDir, apiKeyService } = await createTestApp();
+  try {
+    await apiKeyService.addKey("haskeys", "key-1", "val1");
+    const group = await apiKeyService.getGroupByName("haskeys");
+
+    const res = await app.request(`/web/keys/delete-group?id=${group!.id}`, {
+      method: "POST",
+    });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("Location")).toContain("error=");
+    expect(res.headers.get("Location")).toContain("Delete%20keys%20first");
+
+    // Group should still exist
+    const existingGroup = await apiKeyService.getGroupByName("haskeys");
+    expect(existingGroup).not.toBeNull();
   } finally {
     await cleanup(db, tempDir);
   }
@@ -613,12 +636,14 @@ Deno.test("POST /web/keys/create rejects invalid key group", async () => {
   }
 });
 
-Deno.test("GET /web/keys/delete-group blocks deleting all management keys", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test("GET /web/keys/delete-group blocks deleting management group", async () => {
+  const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    const res = await app.request("/web/keys/delete-group?group=management");
+    const group = await apiKeyService.getGroupByName("management");
+    const res = await app.request(`/web/keys/delete-group?id=${group!.id}`);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
+    expect(res.headers.get("Location")).toContain("management");
   } finally {
     await cleanup(db, tempDir);
   }

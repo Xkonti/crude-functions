@@ -68,8 +68,8 @@ export function createKeysPages(
                       ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
                       <a href="/web/keys/create?group=${encodeURIComponent(groupName)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>
                       ${
-                        groupName !== "management"
-                          ? `<a href="/web/keys/delete-group?group=${encodeURIComponent(groupName)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
+                        groupName !== "management" && groupInfo
+                          ? `<a href="/web/keys/delete-group?id=${groupInfo.id}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
                           : ""
                       }
                     </div>
@@ -463,32 +463,41 @@ export function createKeysPages(
 
   // Delete group confirmation
   routes.get("/delete-group", async (c) => {
-    const groupName = c.req.query("group");
+    const groupIdStr = c.req.query("id");
 
-    if (!groupName) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("No key group specified"));
+    if (!groupIdStr) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("No group ID specified"));
     }
 
-    const group = await apiKeyService.getGroupByName(groupName);
-    const keys = await apiKeyService.getKeys(groupName);
-
-    if (!group && (!keys || keys.length === 0)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent(`Key group not found: ${groupName}`));
+    const groupId = parseInt(groupIdStr, 10);
+    if (isNaN(groupId)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
-    if (groupName.toLowerCase() === "management") {
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Group not found"));
+    }
+
+    if (group.name === "management") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Cannot delete management group")
       );
     }
 
-    const keyCount = keys?.length ?? 0;
+    // Check if group has keys
+    const keyCount = await apiKeyService.getKeyCountForGroup(groupId);
+    if (keyCount > 0) {
+      return c.redirect(
+        "/web/keys?error=" + encodeURIComponent(`Cannot delete group with ${keyCount} existing key(s). Delete keys first.`)
+      );
+    }
 
     return c.html(
       confirmPage(
         "Delete Group",
-        `Are you sure you want to delete the group "${groupName}" and ALL its keys? This will remove ${keyCount} key(s). This action cannot be undone.`,
-        `/web/keys/delete-group?group=${encodeURIComponent(groupName)}`,
+        `Are you sure you want to delete the group "${group.name}"? This action cannot be undone.`,
+        `/web/keys/delete-group?id=${groupId}`,
         "/web/keys",
         getLayoutUser(c)
       )
@@ -497,22 +506,40 @@ export function createKeysPages(
 
   // Handle delete group
   routes.post("/delete-group", async (c) => {
-    const groupName = c.req.query("group");
+    const groupIdStr = c.req.query("id");
 
-    if (!groupName) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("No key group specified"));
+    if (!groupIdStr) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("No group ID specified"));
     }
 
-    if (groupName.toLowerCase() === "management") {
+    const groupId = parseInt(groupIdStr, 10);
+    if (isNaN(groupId)) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
+    }
+
+    const group = await apiKeyService.getGroupById(groupId);
+    if (!group) {
+      return c.redirect("/web/keys?error=" + encodeURIComponent("Group not found"));
+    }
+
+    if (group.name === "management") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Cannot delete management group")
       );
     }
 
-    try {
-      await apiKeyService.removeGroupEntirely(groupName);
+    // Check if group has keys
+    const keyCount = await apiKeyService.getKeyCountForGroup(groupId);
+    if (keyCount > 0) {
       return c.redirect(
-        "/web/keys?success=" + encodeURIComponent(`Group and all keys deleted: ${groupName}`)
+        "/web/keys?error=" + encodeURIComponent(`Cannot delete group with ${keyCount} existing key(s). Delete keys first.`)
+      );
+    }
+
+    try {
+      await apiKeyService.deleteGroup(groupId);
+      return c.redirect(
+        "/web/keys?success=" + encodeURIComponent(`Group deleted: ${group.name}`)
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete group";

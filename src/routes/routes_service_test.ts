@@ -100,13 +100,15 @@ Deno.test("RoutesService.addRoute creates route with required fields", async () 
 Deno.test("RoutesService.addRoute creates route with all fields", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
+    // Use dummy group ID (no FK constraint in routes table)
+    const testGroupId = 999;
     await ctx.routesService.addRoute({
       name: "test",
       description: "Test route",
       handler: "test.ts",
       route: "/test",
       methods: ["GET", "POST"],
-      keys: ["api-key"],
+      keys: [testGroupId],
     });
 
     const route = await ctx.routesService.getByName("test");
@@ -114,7 +116,7 @@ Deno.test("RoutesService.addRoute creates route with all fields", async () => {
     expect(route?.description).toBe("Test route");
     expect(route?.methods).toContain("GET");
     expect(route?.methods).toContain("POST");
-    expect(route?.keys).toContain("api-key");
+    expect(route?.keys).toContain(testGroupId);
   } finally {
     await ctx.cleanup();
   }

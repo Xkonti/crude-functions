@@ -205,22 +205,7 @@ Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
   }
 });
 
-Deno.test("ApiKeyService.removeGroup removes all keys in group", async () => {
-  const ctx = await TestSetupBuilder.create().withApiKeys().build();
-
-  try {
-    await ctx.apiKeyService.addKey("management", "key-1", "value1");
-    await ctx.apiKeyService.addKey("email", "key-2", "value2");
-
-    await ctx.apiKeyService.removeGroup("email");
-
-    const keys = await ctx.apiKeyService.getAll();
-    expect(keys.has("email")).toBe(false);
-    expect(keys.has("management")).toBe(true);
-  } finally {
-    await ctx.cleanup();
-  }
-});
+// NOTE: removeGroup (batch delete) was removed - groups must be empty before deletion
 
 // =====================
 // Group CRUD tests
@@ -582,6 +567,255 @@ Deno.test("ApiKeyService - removeKey uses hash lookup", async () => {
 
     expect(await ctx.apiKeyService.hasKey("test", "value1")).toBe(false);
     expect(await ctx.apiKeyService.hasKey("test", "value2")).toBe(true);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// =====================
+// getKeyCountForGroup tests
+// =====================
+
+Deno.test("ApiKeyService.getKeyCountForGroup returns 0 for empty group", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .build();
+
+  try {
+    const group = await ctx.apiKeyService.getGroupByName("test-group");
+    const count = await ctx.apiKeyService.getKeyCountForGroup(group!.id);
+    expect(count).toBe(0);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.getKeyCountForGroup returns correct count", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "key1", "key-1")
+    .withApiKey("test-group", "key2", "key-2")
+    .build();
+
+  try {
+    const group = await ctx.apiKeyService.getGroupByName("test-group");
+    const count = await ctx.apiKeyService.getKeyCountForGroup(group!.id);
+    expect(count).toBe(2);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.getKeyCountForGroup returns 0 for non-existent group id", async () => {
+  const ctx = await TestSetupBuilder.create().withApiKeys().build();
+
+  try {
+    const count = await ctx.apiKeyService.getKeyCountForGroup(99999);
+    expect(count).toBe(0);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// =====================
+// updateKey tests
+// =====================
+
+Deno.test("ApiKeyService.updateKey updates name successfully", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "original-value", "original-name")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    await ctx.apiKeyService.updateKey(keyId, { name: "new-name" });
+
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.name).toBe("new-name");
+    expect(updated!.key.value).toBe("original-value"); // Unchanged
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey updates value and hash", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "original-value", "test-key")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    await ctx.apiKeyService.updateKey(keyId, { value: "new-value" });
+
+    // Check decrypted value
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.value).toBe("new-value");
+
+    // Check hash was updated (hasKey should work with new value)
+    expect(await ctx.apiKeyService.hasKey("test-group", "new-value")).toBe(true);
+    expect(await ctx.apiKeyService.hasKey("test-group", "original-value")).toBe(false);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey updates description", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "value1", "test-key", "Old description")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    await ctx.apiKeyService.updateKey(keyId, { description: "New description" });
+
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.description).toBe("New description");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey can clear description", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "value1", "test-key", "Has description")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    await ctx.apiKeyService.updateKey(keyId, { description: "" });
+
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.description).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey throws for non-existent key", async () => {
+  const ctx = await TestSetupBuilder.create().withApiKeys().build();
+
+  try {
+    await expect(
+      ctx.apiKeyService.updateKey(99999, { name: "new-name" })
+    ).rejects.toThrow("API key with id 99999 not found");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey throws for duplicate name in group", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "value1", "key-one")
+    .withApiKey("test-group", "value2", "key-two")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const key2Id = keys!.find(k => k.name === "key-two")!.id;
+
+    // Try to rename key-two to key-one (which already exists)
+    await expect(
+      ctx.apiKeyService.updateKey(key2Id, { name: "key-one" })
+    ).rejects.toThrow("already exists");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey allows same name on same key", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "value1", "test-key")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    // Update with same name should not throw
+    await ctx.apiKeyService.updateKey(keyId, { name: "test-key", description: "Updated" });
+
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.name).toBe("test-key");
+    expect(updated!.key.description).toBe("Updated");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey with empty updates does nothing", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "value1", "test-key", "Original desc")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    // Empty update should not throw and not change anything
+    await ctx.apiKeyService.updateKey(keyId, {});
+
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.name).toBe("test-key");
+    expect(updated!.key.value).toBe("value1");
+    expect(updated!.key.description).toBe("Original desc");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey throws for invalid name format", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "value1", "test-key")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    await expect(
+      ctx.apiKeyService.updateKey(keyId, { name: "Invalid Name!" })
+    ).rejects.toThrow("Invalid key name");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("ApiKeyService.updateKey can update multiple fields", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withApiKeyGroup("test-group")
+    .withApiKey("test-group", "old-value", "old-name", "Old desc")
+    .build();
+
+  try {
+    const keys = await ctx.apiKeyService.getKeys("test-group");
+    const keyId = keys![0].id;
+
+    await ctx.apiKeyService.updateKey(keyId, {
+      name: "new-name",
+      value: "new-value",
+      description: "New desc",
+    });
+
+    const updated = await ctx.apiKeyService.getById(keyId);
+    expect(updated!.key.name).toBe("new-name");
+    expect(updated!.key.value).toBe("new-value");
+    expect(updated!.key.description).toBe("New desc");
   } finally {
     await ctx.cleanup();
   }

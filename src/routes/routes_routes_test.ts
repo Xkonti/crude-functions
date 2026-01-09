@@ -10,7 +10,7 @@ interface TestRoute {
   route: string;
   methods: string[];
   description?: string;
-  keys?: string[];
+  keys?: (number | string)[];
 }
 
 function createTestApp(ctx: BaseTestContext & RoutesContext): Hono {
