@@ -88,7 +88,7 @@ SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`. Acc
 - `/ping` - Health check
 - `/api/auth/*` - Better Auth handlers
 - `/api/keys/*` - API key management (protected)
-- `/api/routes/*` - Route management (protected)
+- `/api/functions/*` - Function management (protected)
 - `/api/files/*` - Code file management (protected)
 - `/web/*` - Web UI (session auth)
 - `/run/*` - Function execution

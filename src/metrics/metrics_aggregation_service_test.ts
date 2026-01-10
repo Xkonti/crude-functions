@@ -58,28 +58,6 @@ function isPastHourOnDifferentDay(hoursAgo: number): boolean {
 
 type MetricsTestContext = BaseTestContext & MetricsContext;
 
-/**
- * Wait for a condition to be true, with timeout.
- * Avoids race conditions from arbitrary delays.
- */
-async function waitFor<T>(
-  condition: () => T | Promise<T>,
-  description: string,
-  timeoutMs = 5000
-): Promise<T> {
-  const startTime = Date.now();
-  while (true) {
-    const result = await condition();
-    if (result) return result;
-
-    if (Date.now() - startTime > timeoutMs) {
-      throw new Error(`Timeout waiting for ${description} after ${timeoutMs}ms`);
-    }
-
-    await new Promise((r) => setTimeout(r, 10)); // Poll every 10ms
-  }
-}
-
 interface TestSetup {
   aggregationService: MetricsAggregationService;
   ctx: MetricsTestContext;
@@ -150,10 +128,8 @@ Deno.test("MetricsAggregationService aggregates executions into minute", async (
       timestamp: new Date(minuteStart.getTime() + 50000), // 50s into minute
     });
 
-    // Start and let it run once
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Check that minute aggregate was created
     const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
@@ -198,9 +174,8 @@ Deno.test("MetricsAggregationService handles weighted averages correctly", async
       timestamp: new Date(minuteStart.getTime() + 20000),
     });
 
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
     expect(minuteMetrics.length).toBe(1);
@@ -239,9 +214,8 @@ Deno.test("MetricsAggregationService processes multiple routes separately", asyn
       timestamp: new Date(minuteStart.getTime() + 20000),
     });
 
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     const route1Minutes = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
     const route2Minutes = await setup.ctx.executionMetricsService.getByRouteId(2, "minute");
@@ -282,20 +256,8 @@ Deno.test("MetricsAggregationService skips empty periods (no zero-value rows)", 
       timestamp: new Date(minute3Start.getTime() + 10000),
     });
 
-    setup.aggregationService.start();
-
-    // Wait for both minute records to be created (condition-based waiting)
-    // Use longer timeout since aggregation involves multiple DB operations
-    await waitFor(
-      async () => {
-        const mins = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
-        return mins.length >= 2;
-      },
-      "both minute records to be created",
-      10000 // 10 second timeout for safety
-    );
-
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Should have minute records for both minutes only
     // Empty periods are skipped - no zero-value rows
@@ -358,9 +320,8 @@ Deno.test("MetricsAggregationService aggregates minutes into hour", async () => 
       timestamp: new Date(currHourStart.getTime() + 10000), // :00 of next hour
     });
 
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     if (crossesDayBoundary) {
       // When running at 00:xx, the previous hour (23:xx) is on yesterday,
@@ -455,9 +416,8 @@ Deno.test("MetricsAggregationService aggregates hours into day", async () => {
       timestamp: new Date(currDayStart.getTime() + 10000), // 00:00:10
     });
 
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Check day aggregate was created for the previous day
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
@@ -539,9 +499,8 @@ Deno.test("MetricsAggregationService cleans up old metrics of all types", async 
       timestamp: recentDate,
     });
 
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Only the recent day metric should remain - all old metrics deleted
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
@@ -582,9 +541,7 @@ Deno.test("MetricsAggregationService processes multiple minutes in one run", asy
     }
 
     // Run aggregation once
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await setup.aggregationService.stop();
+    await setup.aggregationService.runOnce();
 
     // All executions should be deleted
     const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
@@ -614,9 +571,7 @@ Deno.test("MetricsAggregationService does nothing when no data", async () => {
 
   try {
     // Run with no data
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.aggregationService.stop();
+    await setup.aggregationService.runOnce();
 
     // No errors should occur, no data should be created
     const allMetrics = await setup.ctx.executionMetricsService.getRecent(100);
@@ -667,20 +622,8 @@ Deno.test("MetricsAggregationService stop waits for processing to complete", asy
       });
     }
 
-    // Start and wait for processing to complete (condition-based waiting)
-    setup.aggregationService.start();
-
-    // Wait for minute record to be created
-    await waitFor(
-      async () => {
-        const mins = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
-        return mins.length >= 1;
-      },
-      "minute record to be created",
-      10000 // 10 second timeout for safety
-    );
-
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Processing should have completed
     const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
@@ -735,10 +678,8 @@ Deno.test("MetricsAggregationService processes pending minutes into hours when n
     const execsBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
     expect(execsBefore.length).toBe(0);
 
-    // Run aggregation
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     if (crossesDayBoundary) {
       // When running at 00:xx or 01:xx, getPastHour(2) returns yesterday's hour,
@@ -801,10 +742,8 @@ Deno.test("MetricsAggregationService processes pending hours into days when no e
     const minutesBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
     expect(minutesBefore.length).toBe(0);
 
-    // Run aggregation
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Check day aggregate was created
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
@@ -854,10 +793,8 @@ Deno.test("MetricsAggregationService processes both pending minutes and hours in
     const execsBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
     expect(execsBefore.length).toBe(0);
 
-    // Run aggregation
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    await setup.aggregationService.stop();
+    // Run aggregation once
+    await setup.aggregationService.runOnce();
 
     // Check day aggregate was created from yesterday's hour
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");

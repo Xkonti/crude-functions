@@ -190,8 +190,9 @@ export class RoutesService {
   /**
    * Add a new route to the database.
    * Waits for any in-progress rebuild to complete before modifying.
+   * @returns The created route with its assigned ID
    */
-  async addRoute(route: NewFunctionRoute): Promise<void> {
+  async addRoute(route: NewFunctionRoute): Promise<FunctionRoute> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
@@ -223,7 +224,7 @@ export class RoutesService {
     }
 
     // Insert the route (enabled defaults to 1 in the schema)
-    await this.db.execute(
+    const result = await this.db.execute(
       "INSERT INTO routes (name, description, handler, route, methods, keys) VALUES (?, ?, ?, ?, ?, ?)",
       [
         route.name,
@@ -236,6 +237,13 @@ export class RoutesService {
     );
 
     this.markDirty();
+
+    // Fetch and return the created route
+    const created = await this.getById(Number(result.lastInsertRowId));
+    if (!created) {
+      throw new Error("Failed to retrieve created route");
+    }
+    return created;
   }
 
   /**
@@ -260,8 +268,9 @@ export class RoutesService {
    * Update an existing route by ID.
    * Preserves the route ID to maintain log/metrics associations.
    * Waits for any in-progress rebuild to complete before modifying.
+   * @returns The updated route
    */
-  async updateRoute(id: number, route: NewFunctionRoute): Promise<void> {
+  async updateRoute(id: number, route: NewFunctionRoute): Promise<FunctionRoute> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
@@ -317,6 +326,13 @@ export class RoutesService {
     );
 
     this.markDirty();
+
+    // Fetch and return the updated route
+    const updated = await this.getById(id);
+    if (!updated) {
+      throw new Error("Failed to retrieve updated route");
+    }
+    return updated;
   }
 
   /**
@@ -340,14 +356,15 @@ export class RoutesService {
   /**
    * Set the enabled state of a route by ID.
    * Waits for any in-progress rebuild to complete before modifying.
+   * @returns The updated route
    */
-  async setRouteEnabled(id: number, enabled: boolean): Promise<void> {
+  async setRouteEnabled(id: number, enabled: boolean): Promise<FunctionRoute> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
     // Verify route exists
-    const route = await this.getById(id);
-    if (!route) {
+    const existingRoute = await this.getById(id);
+    if (!existingRoute) {
       throw new Error(`Route with id '${id}' not found`);
     }
 
@@ -358,5 +375,12 @@ export class RoutesService {
     );
 
     this.markDirty();
+
+    // Fetch and return the updated route
+    const updated = await this.getById(id);
+    if (!updated) {
+      throw new Error("Failed to retrieve updated route");
+    }
+    return updated;
   }
 }

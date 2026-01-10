@@ -100,6 +100,14 @@ export class MetricsAggregationService {
   }
 
   /**
+   * Run aggregation once and wait for completion.
+   * Useful for testing and one-off catch-up processing.
+   */
+  async runOnce(): Promise<void> {
+    await this.runAggregation();
+  }
+
+  /**
    * Stop the aggregation timer.
    * Waits for any in-progress aggregation to complete (with timeout).
    */
