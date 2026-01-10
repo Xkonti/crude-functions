@@ -158,10 +158,13 @@ All management endpoints require authentication via session (Web UI) or the `X-A
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/routes` | List all function routes |
-| GET | `/api/routes/:name` | Get a specific route |
-| POST | `/api/routes` | Create a new route |
-| DELETE | `/api/routes/:name` | Delete a route |
+| GET | `/api/functions` | List all functions |
+| GET | `/api/functions/:id` | Get a function by ID |
+| POST | `/api/functions` | Create a new function |
+| PUT | `/api/functions/:id` | Update a function |
+| DELETE | `/api/functions/:id` | Delete a function |
+| PUT | `/api/functions/:id/enable` | Enable a function |
+| PUT | `/api/functions/:id/disable` | Disable a function |
 
 ### Code Files
 

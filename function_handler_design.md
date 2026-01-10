@@ -16,7 +16,7 @@ export default async function (c, ctx) {
 Register it via the API or Web UI:
 
 ```bash
-curl -X POST http://localhost:8000/api/routes \
+curl -X POST http://localhost:8000/api/functions \
   -H "X-API-Key: your-management-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -413,10 +413,10 @@ code/
     validation.ts       # Shared validation helpers
 ```
 
-Reference nested handlers when creating routes via the API:
+Reference nested handlers when creating functions via the API:
 
 ```bash
-curl -X POST http://localhost:8000/api/routes \
+curl -X POST http://localhost:8000/api/functions \
   -H "X-API-Key: your-management-key" \
   -H "Content-Type: application/json" \
   -d '{
