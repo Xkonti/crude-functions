@@ -1,14 +1,15 @@
 import { expect } from "@std/expect";
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createTestApp as createBaseApp } from "../test/openapi_test_app.ts";
 import { createSecretsRoutes } from "./secrets_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { BaseTestContext, SecretsContext } from "../test/types.ts";
 
 /**
- * Creates a Hono app with secrets routes from a TestSetupBuilder context.
+ * Creates an OpenAPIHono app with secrets routes from a TestSetupBuilder context.
  */
-function createTestApp(ctx: BaseTestContext & SecretsContext): Hono {
-  const app = new Hono();
+function createTestApp(ctx: BaseTestContext & SecretsContext): OpenAPIHono {
+  const app = createBaseApp();
   app.route("/api/secrets", createSecretsRoutes(ctx.secretsService));
   return app;
 }
@@ -161,7 +162,7 @@ Deno.test("GET /api/secrets rejects invalid scope", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid scope");
+    expect(json.error).toContain("Invalid enum value");
   } finally {
     await ctx.cleanup();
   }
@@ -240,7 +241,7 @@ Deno.test("GET /api/secrets/:id returns 400 for invalid ID", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid secret ID");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }
@@ -329,7 +330,7 @@ Deno.test("GET /api/secrets/by-name/:name rejects invalid scope", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid scope");
+    expect(json.error).toContain("Invalid enum value");
   } finally {
     await ctx.cleanup();
   }
@@ -530,7 +531,7 @@ Deno.test("POST /api/secrets rejects invalid name", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid secret name");
+    expect(json.error).toContain("Invalid");
   } finally {
     await ctx.cleanup();
   }
@@ -632,7 +633,7 @@ Deno.test("POST /api/secrets rejects invalid scope", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid scope");
+    expect(json.error).toContain("Invalid enum value");
   } finally {
     await ctx.cleanup();
   }
@@ -658,7 +659,7 @@ Deno.test("POST /api/secrets rejects function scope without functionId", async (
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("functionId is required");
+    expect(json.error).toContain("Scope-specific ID is required");
   } finally {
     await ctx.cleanup();
   }
@@ -684,7 +685,7 @@ Deno.test("POST /api/secrets rejects group scope without groupId", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("groupId is required");
+    expect(json.error).toContain("Scope-specific ID is required");
   } finally {
     await ctx.cleanup();
   }
@@ -710,7 +711,7 @@ Deno.test("POST /api/secrets rejects key scope without keyId", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("keyId is required");
+    expect(json.error).toContain("Scope-specific ID is required");
   } finally {
     await ctx.cleanup();
   }
@@ -911,7 +912,7 @@ Deno.test("PUT /api/secrets/:id rejects invalid name", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid secret name");
+    expect(json.error).toContain("Invalid");
   } finally {
     await ctx.cleanup();
   }
@@ -937,7 +938,7 @@ Deno.test("PUT /api/secrets/:id rejects empty value", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("value cannot be empty");
+    expect(json.error).toContain("String must contain at least 1 character");
   } finally {
     await ctx.cleanup();
   }
@@ -981,7 +982,7 @@ Deno.test("PUT /api/secrets/:id returns 400 for invalid ID", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid secret ID");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }
@@ -1079,7 +1080,7 @@ Deno.test("DELETE /api/secrets/:id returns 400 for invalid ID", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid secret ID");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }

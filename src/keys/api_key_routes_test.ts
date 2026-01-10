@@ -123,7 +123,7 @@ Deno.test("POST /api/key-groups rejects invalid group name", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("group name");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }
@@ -934,7 +934,7 @@ Deno.test("PUT /api/keys/:keyId returns 400 for invalid ID", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }
@@ -1001,7 +1001,7 @@ Deno.test("DELETE /api/keys/:keyId returns 400 for invalid ID", async () => {
     expect(res.status).toBe(400);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }

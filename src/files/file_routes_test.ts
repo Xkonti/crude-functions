@@ -84,7 +84,7 @@ Deno.test("GET /api/files returns all files with metadata", async () => {
     );
     expect(file).toBeDefined();
     expect(file.size).toBe(8); // "content1"
-    expect(file.mtime).toBeDefined();
+    expect(file.modifiedAt).toBeDefined();
   } finally {
     await cleanup();
   }

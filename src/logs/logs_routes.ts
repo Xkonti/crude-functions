@@ -1,52 +1,151 @@
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute } from "@hono/zod-openapi";
+import { createOpenAPIApp } from "../openapi_app.ts";
 import type { ConsoleLogService } from "./console_log_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
-import { validateId } from "../validation/common.ts";
 import type { ConsoleLogLevel } from "./types.ts";
+import {
+  LogsQuerySchema,
+  GetLogsResponseSchema,
+  DeleteLogsParamSchema,
+  DeleteLogsResponseSchema,
+} from "../routes_schemas/logs.ts";
+import { ErrorResponseSchema } from "../schemas/responses.ts";
 
 export interface LogsRoutesOptions {
   consoleLogService: ConsoleLogService;
   routesService: RoutesService;
 }
 
-export function createLogsRoutes(options: LogsRoutesOptions): Hono {
+/**
+ * GET /api/logs - Query logs with filtering
+ */
+const getLogsRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Logs"],
+  summary: "Get logs",
+  description:
+    "Retrieve function execution logs with optional filtering by function ID and log level. " +
+    "Supports pagination using cursor-based approach. Logs include console output, errors, and execution lifecycle events.",
+  request: {
+    query: LogsQuerySchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetLogsResponseSchema,
+        },
+      },
+      description: "Logs retrieved successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid query parameters or cursor",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Function not found",
+    },
+  },
+});
+
+/**
+ * DELETE /api/logs/:functionId - Delete logs for specific function
+ */
+const deleteLogsRoute = createRoute({
+  method: "delete",
+  path: "/{functionId}",
+  tags: ["Logs"],
+  summary: "Delete logs for function",
+  description:
+    "Delete all log entries for a specific function. This is a permanent operation that cannot be undone.",
+  request: {
+    params: DeleteLogsParamSchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: DeleteLogsResponseSchema,
+        },
+      },
+      description: "Logs deleted successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid functionId parameter",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Function not found",
+    },
+  },
+});
+
+export function createLogsRoutes(options: LogsRoutesOptions): OpenAPIHono {
   const { consoleLogService, routesService } = options;
-  const routes = new Hono();
+  const routes = createOpenAPIApp();
 
   // GET /api/logs - Query logs with optional filtering
-  routes.get("/", async (c) => {
+  routes.openapi(getLogsRoute, async (c) => {
+    const { functionId: functionIdParam, level: levelParam, limit, cursor } =
+      c.req.valid("query");
+
     // 1. Parse and validate functionId (optional)
-    const functionIdParam = c.req.query("functionId");
     let routeId: number | undefined;
 
     if (functionIdParam) {
-      const parsed = validateId(functionIdParam);
-      if (parsed === null) {
-        return c.json({ error: "Invalid functionId parameter" }, 400);
-      }
-
       // Verify route exists
-      const route = await routesService.getById(parsed);
+      const route = await routesService.getById(functionIdParam);
       if (!route) {
-        return c.json({ error: `Function with id ${parsed} not found` }, 404);
+        return c.json(
+          { error: `Function with id ${functionIdParam} not found` },
+          404,
+        );
       }
 
-      routeId = parsed;
+      routeId = functionIdParam;
     }
 
     // 2. Parse and validate level (optional, comma-separated)
-    const levelParam = c.req.query("level");
     let levels: ConsoleLogLevel[] | undefined;
 
     if (levelParam) {
       const validLevels = new Set<ConsoleLogLevel>([
-        "log", "debug", "info", "warn", "error", "trace",
-        "stdout", "stderr", "exec_start", "exec_end", "exec_reject",
+        "log",
+        "debug",
+        "info",
+        "warn",
+        "error",
+        "trace",
+        "stdout",
+        "stderr",
+        "exec_start",
+        "exec_end",
+        "exec_reject",
       ]);
 
       const requestedLevels = levelParam.split(",").map((l) => l.trim());
-      const invalidLevels = requestedLevels.filter((l) =>
-        !validLevels.has(l as ConsoleLogLevel)
+      const invalidLevels = requestedLevels.filter(
+        (l) => !validLevels.has(l as ConsoleLogLevel),
       );
 
       if (invalidLevels.length > 0) {
@@ -63,20 +162,6 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
 
       levels = requestedLevels as ConsoleLogLevel[];
     }
-
-    // 3. Parse and validate limit
-    const limitParam = c.req.query("limit");
-    const limit = limitParam ? parseInt(limitParam, 10) : 50;
-
-    if (isNaN(limit) || limit < 1 || limit > 1000) {
-      return c.json(
-        { error: "Invalid limit parameter. Must be between 1 and 1000" },
-        400,
-      );
-    }
-
-    // 4. Get cursor (service validates format)
-    const cursor = c.req.query("cursor");
 
     // 5. Query logs
     try {
@@ -99,7 +184,12 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       }
       queryParams.set("limit", String(limit));
 
-      const pagination: Record<string, unknown> = {
+      const pagination: {
+        limit: number;
+        hasMore: boolean;
+        next?: string;
+        prev?: string;
+      } = {
         limit,
         hasMore: result.hasMore,
       };
@@ -116,12 +206,15 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
         pagination.prev = `${baseUrl}?${prevParams.toString()}`;
       }
 
-      return c.json({
-        data: {
-          logs: result.logs,
-          pagination,
+      return c.json(
+        {
+          data: {
+            logs: result.logs,
+            pagination,
+          },
         },
-      });
+        200
+      );
     } catch (error) {
       if (
         error instanceof Error && error.message.includes("Invalid cursor")
@@ -133,12 +226,8 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
   });
 
   // DELETE /api/logs/:functionId - Delete logs for specific function
-  routes.delete("/:functionId", async (c) => {
-    const functionId = validateId(c.req.param("functionId"));
-
-    if (functionId === null) {
-      return c.json({ error: "Invalid functionId parameter" }, 400);
-    }
+  routes.openapi(deleteLogsRoute, async (c) => {
+    const { functionId } = c.req.valid("param");
 
     // Verify route exists
     const route = await routesService.getById(functionId);
@@ -151,12 +240,15 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
 
     const deleted = await consoleLogService.deleteByRouteId(functionId);
 
-    return c.json({
-      data: {
-        deleted,
-        functionId,
+    return c.json(
+      {
+        data: {
+          deleted,
+          functionId,
+        },
       },
-    });
+      200
+    );
   });
 
   return routes;

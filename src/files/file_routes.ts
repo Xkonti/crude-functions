@@ -1,10 +1,26 @@
-import { Hono, type Context } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute } from "@hono/zod-openapi";
+import { createOpenAPIApp } from "../openapi_app.ts";
+import type { Context } from "hono";
 import { FileService } from "./file_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import { normalizePath, validateFilePath } from "../validation/files.ts";
 import { getContentType, isTextContentType } from "./content_type.ts";
 import { base64ToBytes, bytesToBase64 } from "../encryption/utils.ts";
+import {
+  FileMetadataSchema,
+  GetFilesResponseSchema,
+  FilePathParamSchema,
+  FileJsonBodySchema,
+  GetFileJsonResponseSchema,
+  CreateFileResponseSchema,
+  UpsertFileResponseSchema,
+  DeleteFileResponseSchema,
+  BinaryFileSchema,
+  MultipartFileSchema,
+} from "../routes_schemas/files.ts";
+import { ErrorResponseSchema } from "../schemas/responses.ts";
 
 export interface FileRoutesOptions {
   fileService: FileService;
@@ -17,9 +33,235 @@ interface ParseResult {
   status?: 400 | 413;
 }
 
-export function createFileRoutes(options: FileRoutesOptions): Hono {
+/**
+ * GET /api/files - List all files
+ */
+const getFilesRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Files"],
+  summary: "List files",
+  description: "Retrieve all files in the code directory with metadata.",
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetFilesResponseSchema,
+        },
+      },
+      description: "Files retrieved successfully",
+    },
+  },
+});
+
+/**
+ * GET /api/files/:path - Get file content
+ */
+const getFileRoute = createRoute({
+  method: "get",
+  path: "/{path}",
+  tags: ["Files"],
+  summary: "Get file",
+  description: "Retrieve file content. Returns JSON envelope if Accept: application/json, otherwise returns raw file.",
+  request: {
+    params: FilePathParamSchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetFileJsonResponseSchema,
+        },
+        "*/*": {
+          schema: BinaryFileSchema,
+        },
+      },
+      description: "File retrieved successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid file path",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "File not found",
+    },
+  },
+});
+
+/**
+ * POST /api/files/:path - Create file
+ */
+const createFileRoute = createRoute({
+  method: "post",
+  path: "/{path}",
+  tags: ["Files"],
+  summary: "Create file",
+  description: "Create a new file. Returns 409 if file already exists. Supports JSON, multipart, and raw binary uploads.",
+  request: {
+    params: FilePathParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: FileJsonBodySchema,
+        },
+        "multipart/form-data": {
+          schema: MultipartFileSchema,
+        },
+        "application/octet-stream": {
+          schema: BinaryFileSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      content: {
+        "application/json": {
+          schema: CreateFileResponseSchema,
+        },
+      },
+      description: "File created successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid input or path",
+    },
+    409: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "File already exists",
+    },
+    413: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "File size exceeds maximum",
+    },
+  },
+});
+
+/**
+ * PUT /api/files/:path - Create or update file
+ */
+const upsertFileRoute = createRoute({
+  method: "put",
+  path: "/{path}",
+  tags: ["Files"],
+  summary: "Create or update file",
+  description: "Create or update a file (upsert). Supports JSON, multipart, and raw binary uploads.",
+  request: {
+    params: FilePathParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: FileJsonBodySchema,
+        },
+        "multipart/form-data": {
+          schema: MultipartFileSchema,
+        },
+        "application/octet-stream": {
+          schema: BinaryFileSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: UpsertFileResponseSchema,
+        },
+      },
+      description: "File updated successfully",
+    },
+    201: {
+      content: {
+        "application/json": {
+          schema: UpsertFileResponseSchema,
+        },
+      },
+      description: "File created successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid input or path",
+    },
+    413: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "File size exceeds maximum",
+    },
+  },
+});
+
+/**
+ * DELETE /api/files/:path - Delete file
+ */
+const deleteFileRoute = createRoute({
+  method: "delete",
+  path: "/:path{.+}",
+  tags: ["Files"],
+  summary: "Delete file",
+  description: "Permanently delete a file. This action cannot be undone.",
+  request: {
+    params: FilePathParamSchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: DeleteFileResponseSchema,
+        },
+      },
+      description: "File deleted successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid file path",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "File not found",
+    },
+  },
+});
+
+export function createFileRoutes(options: FileRoutesOptions): OpenAPIHono {
   const { fileService, settingsService } = options;
-  const routes = new Hono();
+  const routes = createOpenAPIApp();
 
   // Helper: Get max file size from settings
   async function getMaxFileSize(): Promise<number> {
@@ -69,9 +311,43 @@ export function createFileRoutes(options: FileRoutesOptions): Hono {
       };
     }
 
-    // JSON body (base64 for binary, text for text)
+    // JSON body (base64 for binary, text for text) - use Zod validation
     if (contentType.includes("application/json")) {
-      return await parseJsonBody(c, maxSize);
+      try {
+        const body = await c.req.json();
+        // Manually validate since we can't use c.req.valid for mixed content types
+        const parsed = FileJsonBodySchema.safeParse(body);
+        if (!parsed.success) {
+          return { error: "Invalid JSON body: " + parsed.error.message };
+        }
+
+        const { content, encoding } = parsed.data;
+        if (encoding === "base64") {
+          try {
+            const bytes = base64ToBytes(content);
+            if (bytes.length > maxSize) {
+              return {
+                error: `File size ${bytes.length} exceeds maximum ${maxSize} bytes`,
+                status: 413,
+              };
+            }
+            return { content: bytes };
+          } catch {
+            return { error: "Invalid base64 content" };
+          }
+        } else {
+          const bytes = new TextEncoder().encode(content);
+          if (bytes.length > maxSize) {
+            return {
+              error: `File size ${bytes.length} exceeds maximum ${maxSize} bytes`,
+              status: 413,
+            };
+          }
+          return { content: bytes };
+        }
+      } catch {
+        return { error: "Invalid JSON body" };
+      }
     }
 
     // Multipart form-data
@@ -84,9 +360,15 @@ export function createFileRoutes(options: FileRoutesOptions): Hono {
   }
 
   // GET /api/files - List all files with metadata
-  routes.get("/", async (c) => {
-    const files = await fileService.listFilesWithMetadata();
-    return c.json({ files });
+  routes.openapi(getFilesRoute, async (c) => {
+    const filesRaw = await fileService.listFilesWithMetadata();
+    // Map to API schema format
+    const files = filesRaw.map((f) => ({
+      path: f.path,
+      size: f.size,
+      modifiedAt: f.mtime.toISOString(),
+    }));
+    return c.json({ files }, 200);
   });
 
   // GET /api/files/:path - Get file content
@@ -116,16 +398,16 @@ export function createFileRoutes(options: FileRoutesOptions): Hono {
           content: new TextDecoder().decode(content),
           contentType,
           size: content.length,
-          encoding: "utf-8",
-        });
+          encoding: "utf-8" as const,
+        }, 200);
       } else {
         return c.json({
           path: path!,
           content: bytesToBase64(content),
           contentType,
           size: content.length,
-          encoding: "base64",
-        });
+          encoding: "base64" as const,
+        }, 200);
       }
     }
 
@@ -204,7 +486,7 @@ export function createFileRoutes(options: FileRoutesOptions): Hono {
   });
 
   // DELETE /api/files/:path - Delete file
-  routes.delete("/:path{.+}", async (c) => {
+  routes.openapi(deleteFileRoute, async (c) => {
     const { path, error } = extractPath(c);
     if (error) {
       return c.json({ error }, 400);

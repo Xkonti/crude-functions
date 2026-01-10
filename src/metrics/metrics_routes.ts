@@ -1,10 +1,17 @@
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute } from "@hono/zod-openapi";
+import { createOpenAPIApp } from "../openapi_app.ts";
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { validateId } from "../validation/common.ts";
 import type { MetricType } from "./types.ts";
 import { SettingNames } from "../settings/types.ts";
+import {
+  MetricsQuerySchema,
+  GetMetricsResponseSchema,
+} from "../routes_schemas/metrics.ts";
+import { ErrorResponseSchema } from "../schemas/responses.ts";
 
 export interface MetricsRoutesOptions {
   executionMetricsService: ExecutionMetricsService;
@@ -27,19 +34,65 @@ const RESOLUTION_TO_TYPE: Record<string, MetricType> = {
 
 const VALID_RESOLUTIONS = Object.keys(RESOLUTION_TO_TYPE);
 
-export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
+/**
+ * GET /api/metrics - Query execution metrics
+ */
+const getMetricsRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Metrics"],
+  summary: "Get execution metrics",
+  description:
+    "Retrieve aggregated execution metrics including request counts, durations, and error rates. " +
+    "Metrics can be filtered by function ID and are aggregated by time resolution (minutes, hours, or days). " +
+    "Time ranges are automatically determined based on resolution: 60 minutes for 'minutes', 24 hours for 'hours', " +
+    "and configurable retention period for 'days'.",
+  request: {
+    query: MetricsQuerySchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetMetricsResponseSchema,
+        },
+      },
+      description: "Metrics retrieved successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid resolution or functionId parameter",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Function not found",
+    },
+  },
+});
+
+export function createMetricsRoutes(
+  options: MetricsRoutesOptions
+): OpenAPIHono {
   const { executionMetricsService, routesService, settingsService } = options;
-  const routes = new Hono();
+  const routes = createOpenAPIApp();
 
   // GET /api/metrics - Query metrics with optional functionId and required resolution
-  routes.get("/", async (c) => {
-    // 1. Parse and validate resolution (required)
-    const resolution = c.req.query("resolution");
+  routes.openapi(getMetricsRoute, async (c) => {
+    const { resolution, functionId: functionIdParam } = c.req.valid("query");
 
+    // Validate resolution
     if (!resolution) {
       return c.json(
         { error: "Missing required parameter: resolution" },
-        400,
+        400
       );
     }
 
@@ -50,18 +103,17 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
             VALID_RESOLUTIONS.join(", ")
           }`,
         },
-        400,
+        400
       );
     }
 
     const metricType = RESOLUTION_TO_TYPE[resolution];
 
-    // 2. Parse and validate functionId (optional)
-    const functionIdParam = c.req.query("functionId");
+    // Parse and validate functionId (optional)
     let routeId: number | null = null;
 
     if (functionIdParam) {
-      const parsed = validateId(functionIdParam);
+      const parsed = validateId(String(functionIdParam));
       if (parsed === null) {
         return c.json({ error: "Invalid functionId parameter" }, 400);
       }
@@ -75,7 +127,7 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
       routeId = parsed;
     }
 
-    // 3. Calculate time range based on resolution
+    // Calculate time range based on resolution
     const now = new Date();
     let startTime: Date;
 
@@ -91,13 +143,13 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
       case "days": {
         // Last X days of day-aggregated data (get from settings)
         const retentionDaysStr = await settingsService.getGlobalSetting(
-          SettingNames.METRICS_RETENTION_DAYS,
+          SettingNames.METRICS_RETENTION_DAYS
         );
         const retentionDays = retentionDaysStr
           ? parseInt(retentionDaysStr, 10)
           : 90;
         startTime = new Date(
-          now.getTime() - retentionDays * 24 * 60 * 60 * 1000,
+          now.getTime() - retentionDays * 24 * 60 * 60 * 1000
         );
         break;
       }
@@ -106,21 +158,21 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
         return c.json({ error: "Invalid resolution" }, 400);
     }
 
-    // 4. Query metrics
+    // Query metrics
     const metrics = routeId === null
       ? await executionMetricsService.getGlobalMetricsByTypeAndTimeRange(
         metricType,
         startTime,
-        now,
+        now
       )
       : await executionMetricsService.getByRouteIdTypeAndTimeRange(
         routeId,
         metricType,
         startTime,
-        now,
+        now
       );
 
-    // 5. Calculate summary
+    // Calculate summary
     const summary: MetricsSummary = {
       totalExecutions: 0,
       avgExecutionTime: 0,
@@ -131,23 +183,23 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
     if (metrics.length > 0) {
       summary.totalExecutions = metrics.reduce(
         (sum, m) => sum + m.executionCount,
-        0,
+        0
       );
       summary.maxExecutionTime = Math.max(
-        ...metrics.map((m) => m.maxTimeMs),
+        ...metrics.map((m) => m.maxTimeMs)
       );
 
       // Weighted average
       if (summary.totalExecutions > 0) {
         const weightedSum = metrics.reduce(
           (sum, m) => sum + m.avgTimeMs * m.executionCount,
-          0,
+          0
         );
         summary.avgExecutionTime = weightedSum / summary.totalExecutions;
       }
     }
 
-    // 6. Format response
+    // Format response
     const formattedMetrics = metrics.map((m) => ({
       timestamp: m.timestamp.toISOString(),
       avgTimeMs: m.avgTimeMs,
@@ -155,14 +207,17 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
       executionCount: m.executionCount,
     }));
 
-    return c.json({
-      data: {
-        metrics: formattedMetrics,
-        functionId: routeId,
-        resolution,
-        summary,
+    return c.json(
+      {
+        data: {
+          metrics: formattedMetrics,
+          functionId: routeId,
+          resolution,
+          summary,
+        },
       },
-    });
+      200
+    );
   });
 
   return routes;

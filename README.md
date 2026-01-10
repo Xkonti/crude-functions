@@ -230,6 +230,8 @@ deno task dev
 deno task test
 ```
 
+**API Documentation:** When running in development mode (`DENO_ENV=development`), Swagger UI is available at `/api/docs` for interactive API exploration.
+
 ## Docker Deployment
 
 ### Using Docker Compose

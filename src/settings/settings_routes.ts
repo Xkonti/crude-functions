@@ -1,4 +1,6 @@
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute } from "@hono/zod-openapi";
+import { createOpenAPIApp } from "../openapi_app.ts";
 import type { Context } from "@hono/hono";
 import type { SettingsService } from "./settings_service.ts";
 import {
@@ -9,6 +11,14 @@ import {
   validateSettings,
   requiresUserContext,
 } from "../validation/settings.ts";
+import {
+  SettingsQuerySchema,
+  GetSettingsResponseSchema,
+  UpdateSettingsRequestSchema,
+  UpdateSettingsResponseSchema,
+  SettingsValidationErrorSchema,
+} from "../routes_schemas/settings.ts";
+import { ErrorResponseSchema } from "../schemas/responses.ts";
 
 export interface SettingsRoutesOptions {
   settingsService: SettingsService;
@@ -50,14 +60,98 @@ export interface SettingInfo {
   default: string | null;
 }
 
+/**
+ * GET /api/settings - Get all settings
+ */
+const getSettingsRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Settings"],
+  summary: "Get settings",
+  description:
+    "Retrieve all application settings including log levels, retention policies, and API access groups. " +
+    "Optionally include user-specific settings by providing userId query parameter or authenticating as a user.",
+  request: {
+    query: SettingsQuerySchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetSettingsResponseSchema,
+        },
+      },
+      description: "Settings retrieved successfully",
+    },
+    500: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Failed to fetch settings",
+    },
+  },
+});
+
+/**
+ * PUT /api/settings - Update multiple settings
+ */
+const updateSettingsRoute = createRoute({
+  method: "put",
+  path: "/",
+  tags: ["Settings"],
+  summary: "Update settings",
+  description:
+    "Update application settings such as log levels, metrics retention, and encryption rotation intervals. " +
+    "Settings are validated before being applied. User-specific settings require user context (session or userId query param). " +
+    "All updates are applied atomically.",
+  request: {
+    query: SettingsQuerySchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: UpdateSettingsRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: UpdateSettingsResponseSchema,
+        },
+      },
+      description: "Settings updated successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: SettingsValidationErrorSchema,
+        },
+      },
+      description: "Validation failed or user context required",
+    },
+    500: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Failed to update settings",
+    },
+  },
+});
+
 export function createSettingsRoutes(
   options: SettingsRoutesOptions
-): Hono {
+): OpenAPIHono {
   const { settingsService } = options;
-  const routes = new Hono();
+  const routes = createOpenAPIApp();
 
   // GET /api/settings - Get all settings
-  routes.get("/", async (c) => {
+  routes.openapi(getSettingsRoute, async (c) => {
     const userContext = resolveUserContext(c);
     const result: SettingInfo[] = [];
 
@@ -89,7 +183,7 @@ export function createSettingsRoutes(
         }
       }
 
-      return c.json({ settings: result });
+      return c.json({ settings: result }, 200);
     } catch (error) {
       console.error("Failed to fetch settings:", error);
       return c.json({ error: "Failed to fetch settings" }, 500);
@@ -97,13 +191,8 @@ export function createSettingsRoutes(
   });
 
   // PUT /api/settings - Set multiple settings
-  routes.put("/", async (c) => {
-    let body: { settings?: Record<string, string> };
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
+  routes.openapi(updateSettingsRoute, async (c) => {
+    const body = c.req.valid("json");
 
     if (!body.settings || typeof body.settings !== "object") {
       return c.json(
@@ -159,13 +248,16 @@ export function createSettingsRoutes(
         );
       }
 
-      return c.json({
-        success: true,
-        updated: {
-          global: globalSettings.size,
-          user: userSettings.size,
+      return c.json(
+        {
+          success: true,
+          updated: {
+            global: globalSettings.size,
+            user: userSettings.size,
+          },
         },
-      });
+        200
+      );
     } catch (error) {
       console.error("Failed to update settings:", error);
       return c.json(

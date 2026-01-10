@@ -1,12 +1,14 @@
 import { expect } from "@std/expect";
-import { Hono, type Context } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import type { Context } from "hono";
+import { createTestApp as createBaseApp } from "../test/openapi_test_app.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { createSettingsRoutes, type SettingInfo } from "./settings_routes.ts";
 import { SettingNames } from "./types.ts";
 
 // Helper to create a test app with settings routes
-function createTestApp(ctx: Awaited<ReturnType<typeof TestSetupBuilder.prototype.build>>) {
-  const app = new Hono();
+function createTestApp(ctx: Awaited<ReturnType<typeof TestSetupBuilder.prototype.build>>): OpenAPIHono {
+  const app = createBaseApp();
   app.route("/api/settings", createSettingsRoutes({
     settingsService: ctx.settingsService,
   }));
@@ -17,12 +19,12 @@ function createTestApp(ctx: Awaited<ReturnType<typeof TestSetupBuilder.prototype
 function createTestAppWithSession(
   ctx: Awaited<ReturnType<typeof TestSetupBuilder.prototype.build>>,
   userId: string
-) {
-  const app = new Hono();
+): OpenAPIHono {
+  const app = createBaseApp();
 
   // Mock session middleware - simulates authenticated user
   app.use("*", async (c, next) => {
-    (c as Context).set("user", { id: userId });
+    (c as unknown as Context).set("user", { id: userId });
     await next();
   });
 
@@ -180,7 +182,7 @@ Deno.test("PUT /api/settings rejects missing settings field", async () => {
 
     expect(res.status).toBe(400);
     const data = await res.json();
-    expect(data.error).toContain("Missing");
+    expect(data.error).toContain("Required");
   } finally {
     await ctx.cleanup();
   }

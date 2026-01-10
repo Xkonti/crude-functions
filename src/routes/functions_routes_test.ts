@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createTestApp as createBaseApp } from "../test/openapi_test_app.ts";
 import { createFunctionsRoutes } from "./functions_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { BaseTestContext, RoutesContext } from "../test/types.ts";
@@ -13,8 +14,8 @@ interface TestFunction {
   keys?: (number | string)[];
 }
 
-function createTestApp(ctx: BaseTestContext & RoutesContext): Hono {
-  const app = new Hono();
+function createTestApp(ctx: BaseTestContext & RoutesContext): OpenAPIHono {
+  const app = createBaseApp();
   app.route("/api/functions", createFunctionsRoutes(ctx.routesService));
   return app;
 }

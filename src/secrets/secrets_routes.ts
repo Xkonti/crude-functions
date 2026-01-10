@@ -1,13 +1,24 @@
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute } from "@hono/zod-openapi";
+import { createOpenAPIApp } from "../openapi_app.ts";
 import type { SecretsService } from "./secrets_service.ts";
 import type { Secret, SecretRow } from "./types.ts";
 import { SecretScope } from "./types.ts";
 import {
-  validateSecretName,
-  validateScope,
-  validateSecretValue,
-} from "../validation/secrets.ts";
-import { validateId } from "../validation/common.ts";
+  SecretsQuerySchema,
+  GetSecretsResponseSchema,
+  SecretsByNameQuerySchema,
+  SecretNameParamSchema,
+  GetSecretsByNameResponseSchema,
+  SecretIdParamSchema,
+  SecretSchema,
+  CreateSecretRequestSchema,
+  CreateSecretResponseSchema,
+  UpdateSecretRequestSchema,
+  UpdateSecretResponseSchema,
+  DeleteSecretResponseSchema,
+} from "../routes_schemas/secrets.ts";
+import { ErrorResponseSchema } from "../schemas/responses.ts";
 
 /**
  * Convert numeric scope enum to string
@@ -71,22 +82,276 @@ function normalizeSecret(
   return normalized;
 }
 
-export function createSecretsRoutes(service: SecretsService): Hono {
-  const routes = new Hono();
+/**
+ * GET /api/secrets/by-name/:name - Search secrets by name
+ */
+const getSecretsByNameRoute = createRoute({
+  method: "get",
+  path: "/by-name/{name}",
+  tags: ["Secrets"],
+  summary: "Search secrets by name",
+  description:
+    "Find all secrets with a specific name across all scopes or filtered by scope. " +
+    "Multiple secrets can share the same name if they have different scopes.",
+  request: {
+    params: SecretNameParamSchema,
+    query: SecretsByNameQuerySchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetSecretsByNameResponseSchema,
+        },
+      },
+      description: "Secrets found",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid scope parameter",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "No secrets found with this name",
+    },
+  },
+});
+
+/**
+ * GET /api/secrets - List all secrets with optional filtering
+ */
+const getSecretsRoute = createRoute({
+  method: "get",
+  path: "/",
+  tags: ["Secrets"],
+  summary: "List secrets",
+  description:
+    "Retrieve all secrets with optional filtering by scope, function, group, or key. " +
+    "Secret values are not included by default - set includeValues=true to decrypt and include them.",
+  request: {
+    query: SecretsQuerySchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: GetSecretsResponseSchema,
+        },
+      },
+      description: "Secrets retrieved successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid query parameters",
+    },
+  },
+});
+
+/**
+ * GET /api/secrets/:id - Get secret by ID
+ */
+const getSecretRoute = createRoute({
+  method: "get",
+  path: "/{id}",
+  tags: ["Secrets"],
+  summary: "Get secret",
+  description: "Retrieve a specific secret by ID, including its decrypted value.",
+  request: {
+    params: SecretIdParamSchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: SecretSchema,
+        },
+      },
+      description: "Secret retrieved successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid secret ID",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Secret not found",
+    },
+  },
+});
+
+/**
+ * POST /api/secrets - Create a new secret
+ */
+const createSecretRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["Secrets"],
+  summary: "Create secret",
+  description:
+    "Create a new encrypted secret. Secrets can be scoped to global, function, group, or key level. " +
+    "Scope-specific ID (functionId/groupId/keyId) is required based on the chosen scope.",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: CreateSecretRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      content: {
+        "application/json": {
+          schema: CreateSecretResponseSchema,
+        },
+      },
+      description: "Secret created successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid input or foreign key constraint failed",
+    },
+    409: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Secret with this name already exists at this scope",
+    },
+  },
+});
+
+/**
+ * PUT /api/secrets/:id - Update a secret
+ */
+const updateSecretRoute = createRoute({
+  method: "put",
+  path: "/{id}",
+  tags: ["Secrets"],
+  summary: "Update secret",
+  description:
+    "Update a secret's name, value, or comment. At least one field must be provided. " +
+    "Cannot change the scope or scope ID.",
+  request: {
+    params: SecretIdParamSchema,
+    body: {
+      content: {
+        "application/json": {
+          schema: UpdateSecretRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: UpdateSecretResponseSchema,
+        },
+      },
+      description: "Secret updated successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid input",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Secret not found",
+    },
+    409: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Secret with this name already exists at this scope",
+    },
+  },
+});
+
+/**
+ * DELETE /api/secrets/:id - Delete a secret
+ */
+const deleteSecretRoute = createRoute({
+  method: "delete",
+  path: "/{id}",
+  tags: ["Secrets"],
+  summary: "Delete secret",
+  description: "Permanently delete a secret. This action cannot be undone.",
+  request: {
+    params: SecretIdParamSchema,
+  },
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: DeleteSecretResponseSchema,
+        },
+      },
+      description: "Secret deleted successfully",
+    },
+    400: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Invalid secret ID",
+    },
+    404: {
+      content: {
+        "application/json": {
+          schema: ErrorResponseSchema,
+        },
+      },
+      description: "Secret not found",
+    },
+  },
+});
+
+export function createSecretsRoutes(service: SecretsService): OpenAPIHono {
+  const routes = createOpenAPIApp();
 
   // GET /api/secrets/by-name/:name - Search secrets by name
   // Must be before /:id to avoid name being treated as ID
-  routes.get("/by-name/:name", async (c) => {
-    const name = c.req.param("name");
-    const scope = c.req.query("scope");
-
-    // Validate scope if provided
-    if (scope && !validateScope(scope)) {
-      return c.json(
-        { error: `Invalid scope '${scope}'. Must be one of: global, function, group, key` },
-        400
-      );
-    }
+  routes.openapi(getSecretsByNameRoute, async (c) => {
+    const { name } = c.req.valid("param");
+    const { scope } = c.req.valid("query");
 
     const secrets = await service.getSecretsByName(name, scope);
 
@@ -94,158 +359,88 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       return c.json({ error: `No secrets found with name '${name}'` }, 404);
     }
 
-    return c.json({
-      name,
-      secrets: secrets.map(normalizeSecret),
-    });
+    return c.json(
+      {
+        name,
+        secrets: secrets.map(normalizeSecret) as unknown as Array<{
+          id: number;
+          name: string;
+          comment: string | null;
+          scope: "global" | "function" | "group" | "key";
+          scopeId: number | null;
+          createdAt: string;
+          updatedAt: string;
+          value?: string;
+          decryptionError?: string | null;
+        }>,
+      },
+      200
+    );
   });
 
   // GET /api/secrets - List all secrets with optional filtering
-  routes.get("/", async (c) => {
-    const scope = c.req.query("scope");
-    const functionIdStr = c.req.query("functionId");
-    const groupIdStr = c.req.query("groupId");
-    const keyIdStr = c.req.query("keyId");
-    const includeValuesStr = c.req.query("includeValues");
-
-    // Validate scope
-    if (scope && !validateScope(scope)) {
-      return c.json(
-        { error: `Invalid scope '${scope}'. Must be one of: global, function, group, key` },
-        400
-      );
-    }
-
-    // Parse numeric IDs
-    let functionId: number | undefined;
-    let groupId: number | undefined;
-    let keyId: number | undefined;
-
-    if (functionIdStr) {
-      const parsed = validateId(functionIdStr);
-      if (parsed === null) {
-        return c.json({ error: "Invalid functionId" }, 400);
-      }
-      functionId = parsed;
-    }
-
-    if (groupIdStr) {
-      const parsed = validateId(groupIdStr);
-      if (parsed === null) {
-        return c.json({ error: "Invalid groupId" }, 400);
-      }
-      groupId = parsed;
-    }
-
-    if (keyIdStr) {
-      const parsed = validateId(keyIdStr);
-      if (parsed === null) {
-        return c.json({ error: "Invalid keyId" }, 400);
-      }
-      keyId = parsed;
-    }
+  routes.openapi(getSecretsRoute, async (c) => {
+    const { scope, functionId, groupId, keyId, includeValues } = c.req.valid(
+      "query"
+    );
 
     // Parse includeValues boolean
-    const includeValues = includeValuesStr === "true";
+    const includeValuesBoolean = includeValues === "true";
 
     const secrets = await service.getAllSecrets({
       scope,
       functionId,
       groupId,
       keyId,
-      includeValues,
+      includeValues: includeValuesBoolean,
     });
 
-    return c.json({
-      secrets: secrets.map(normalizeSecret),
-    });
+    return c.json(
+      {
+        secrets: secrets.map(normalizeSecret) as unknown as Array<{
+          id: number;
+          name: string;
+          comment: string | null;
+          scope: "global" | "function" | "group" | "key";
+          scopeId: number | null;
+          createdAt: string;
+          updatedAt: string;
+          value?: string;
+          decryptionError?: string | null;
+        }>,
+      },
+      200
+    );
   });
 
   // GET /api/secrets/:id - Get secret by ID
-  routes.get("/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
-    if (id === null) {
-      return c.json({ error: "Invalid secret ID" }, 400);
-    }
+  routes.openapi(getSecretRoute, async (c) => {
+    const { id } = c.req.valid("param");
 
     const secret = await service.getSecretById(id);
     if (!secret) {
       return c.json({ error: "Secret not found" }, 404);
     }
 
-    return c.json(normalizeSecret(secret));
+    return c.json(
+      normalizeSecret(secret) as unknown as {
+        id: number;
+        name: string;
+        comment: string | null;
+        scope: "global" | "function" | "group" | "key";
+        scopeId: number | null;
+        createdAt: string;
+        updatedAt: string;
+        value?: string;
+        decryptionError?: string | null;
+      },
+      200
+    );
   });
 
   // POST /api/secrets - Create a new secret
-  routes.post("/", async (c) => {
-    let body: {
-      name?: string;
-      value?: string;
-      comment?: string;
-      scope?: string;
-      functionId?: number;
-      groupId?: number;
-      keyId?: number;
-    };
-
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-
-    // Validate required fields
-    if (!body.name) {
-      return c.json({ error: "Missing required field: name" }, 400);
-    }
-
-    if (!validateSecretName(body.name)) {
-      return c.json(
-        { error: "Invalid secret name. Must match pattern [a-zA-Z0-9_-]+" },
-        400
-      );
-    }
-
-    if (!body.value) {
-      return c.json({ error: "Missing required field: value" }, 400);
-    }
-
-    if (!validateSecretValue(body.value)) {
-      return c.json({ error: "Secret value cannot be empty" }, 400);
-    }
-
-    if (!body.scope) {
-      return c.json({ error: "Missing required field: scope" }, 400);
-    }
-
-    if (!validateScope(body.scope)) {
-      return c.json(
-        { error: `Invalid scope '${body.scope}'. Must be one of: global, function, group, key` },
-        400
-      );
-    }
-
-    // Validate scope-specific requirements
-    if (body.scope === "function" && body.functionId === undefined) {
-      return c.json(
-        { error: "functionId is required for function-scoped secrets" },
-        400
-      );
-    }
-
-    if (body.scope === "group" && body.groupId === undefined) {
-      return c.json(
-        { error: "groupId is required for group-scoped secrets" },
-        400
-      );
-    }
-
-    if (body.scope === "key" && body.keyId === undefined) {
-      return c.json(
-        { error: "keyId is required for key-scoped secrets" },
-        400
-      );
-    }
+  routes.openapi(createSecretRoute, async (c) => {
+    const body = c.req.valid("json");
 
     try {
       const id = await service.createSecret({
@@ -283,48 +478,9 @@ export function createSecretsRoutes(service: SecretsService): Hono {
   });
 
   // PUT /api/secrets/:id - Update a secret
-  routes.put("/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
-    if (id === null) {
-      return c.json({ error: "Invalid secret ID" }, 400);
-    }
-
-    let body: {
-      name?: string;
-      value?: string;
-      comment?: string;
-    };
-
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-
-    // Require at least one field
-    if (
-      body.name === undefined &&
-      body.value === undefined &&
-      body.comment === undefined
-    ) {
-      return c.json(
-        { error: "At least one field (name, value, or comment) must be provided" },
-        400
-      );
-    }
-
-    // Validate name if provided
-    if (body.name !== undefined && !validateSecretName(body.name)) {
-      return c.json(
-        { error: "Invalid secret name. Must match pattern [a-zA-Z0-9_-]+" },
-        400
-      );
-    }
-
-    // Validate value if provided
-    if (body.value !== undefined && !validateSecretValue(body.value)) {
-      return c.json({ error: "Secret value cannot be empty" }, 400);
-    }
+  routes.openapi(updateSecretRoute, async (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
 
     try {
       await service.updateSecretById(id, {
@@ -333,7 +489,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
         comment: body.comment,
       });
 
-      return c.json({ success: true });
+      return c.json({ success: true }, 200);
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes("not found")) {
@@ -348,15 +504,12 @@ export function createSecretsRoutes(service: SecretsService): Hono {
   });
 
   // DELETE /api/secrets/:id - Delete a secret
-  routes.delete("/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
-    if (id === null) {
-      return c.json({ error: "Invalid secret ID" }, 400);
-    }
+  routes.openapi(deleteSecretRoute, async (c) => {
+    const { id } = c.req.valid("param");
 
     try {
       await service.deleteSecretById(id);
-      return c.json({ success: true });
+      return c.json({ success: true }, 200);
     } catch (error) {
       if (error instanceof Error && error.message.includes("not found")) {
         return c.json({ error: error.message }, 404);

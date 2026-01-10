@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { createTestApp } from "../test/openapi_test_app.ts";
 import { createLogsRoutes } from "./logs_routes.ts";
 import type { ConsoleLogService } from "./console_log_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
@@ -8,7 +9,7 @@ import type { FunctionRoute } from "../routes/routes_service.ts";
 import type { ConsoleLog, ConsoleLogLevel } from "./types.ts";
 
 interface LogsTestContext {
-  app: Hono;
+  app: OpenAPIHono;
   consoleLogService: ConsoleLogService;
   routesService: RoutesService;
   routes: { route1: FunctionRoute; route2: FunctionRoute };
@@ -43,7 +44,7 @@ async function createTestContext(): Promise<LogsTestContext> {
     throw new Error("Failed to create test routes");
   }
 
-  const app = new Hono();
+  const app = createTestApp();
   app.route("/api/logs", createLogsRoutes({
     consoleLogService: ctx.consoleLogService,
     routesService: ctx.routesService,
@@ -256,7 +257,7 @@ Deno.test("GET /api/logs returns 400 for invalid functionId format", async () =>
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Invalid functionId");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }
@@ -295,7 +296,7 @@ Deno.test("GET /api/logs returns 400 for limit < 1", async () => {
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Invalid limit");
+    expect(json.error).toContain("greater than or equal to 1");
   } finally {
     await ctx.cleanup();
   }
@@ -308,7 +309,7 @@ Deno.test("GET /api/logs returns 400 for limit > 1000", async () => {
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Invalid limit");
+    expect(json.error).toContain("less than or equal to 1000");
   } finally {
     await ctx.cleanup();
   }
@@ -635,7 +636,7 @@ Deno.test("DELETE /api/logs/:functionId returns 400 for invalid functionId forma
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Invalid functionId");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }

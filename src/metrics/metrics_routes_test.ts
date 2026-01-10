@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createTestApp } from "../test/openapi_test_app.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { createMetricsRoutes } from "./metrics_routes.ts";
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
@@ -9,7 +10,7 @@ import type { FunctionRoute } from "../routes/routes_service.ts";
 import type { MetricType } from "./types.ts";
 
 interface MetricsTestContext {
-  app: Hono;
+  app: OpenAPIHono;
   executionMetricsService: ExecutionMetricsService;
   routesService: RoutesService;
   settingsService: SettingsService;
@@ -47,7 +48,7 @@ async function createTestContext(): Promise<MetricsTestContext> {
   }
 
   // Create test app with metrics routes
-  const app = new Hono();
+  const app = createTestApp();
   app.route("/", createMetricsRoutes({
     executionMetricsService: ctx.executionMetricsService,
     routesService: ctx.routesService,
@@ -279,7 +280,7 @@ Deno.test("GET /api/metrics returns 400 for missing resolution parameter", async
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Missing required parameter: resolution");
+    expect(json.error).toContain("Required");
   } finally {
     await ctx.cleanup();
   }
@@ -292,7 +293,7 @@ Deno.test("GET /api/metrics returns 400 for invalid resolution value", async () 
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Invalid resolution parameter");
+    expect(json.error).toContain("Invalid enum value");
   } finally {
     await ctx.cleanup();
   }
@@ -305,7 +306,7 @@ Deno.test("GET /api/metrics returns 400 for invalid functionId format", async ()
     const json = await res.json();
 
     expect(res.status).toBe(400);
-    expect(json.error).toContain("Invalid functionId parameter");
+    expect(json.error).toContain("Expected number");
   } finally {
     await ctx.cleanup();
   }

@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
-import { Hono } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createTestApp as createBaseApp } from "../test/openapi_test_app.ts";
 import { createUserRoutes } from "./user_routes.ts";
 import type { UserService } from "./user_service.ts";
 import type { User } from "./types.ts";
@@ -97,20 +98,20 @@ function createMockUserService(): {
 }
 
 /**
- * Creates a Hono app with user routes using a mock service.
+ * Creates an OpenAPIHono app with user routes using a mock service.
  */
-function createTestApp(service: UserService): Hono {
-  const app = new Hono();
+function createTestApp(service: UserService): OpenAPIHono {
+  const app = createBaseApp();
   app.route("/api/users", createUserRoutes(service));
   return app;
 }
 
 /**
- * Creates a Hono app with user routes and a mocked session user.
+ * Creates an OpenAPIHono app with user routes and a mocked session user.
  * Used for testing self-deletion prevention.
  */
-function createTestAppWithSession(service: UserService, userId: string): Hono {
-  const app = new Hono();
+function createTestAppWithSession(service: UserService, userId: string): OpenAPIHono {
+  const app = createBaseApp();
   app.use("*", async (c, next) => {
     c.set("user" as never, { id: userId } as never);
     await next();
@@ -216,7 +217,7 @@ Deno.test("POST /api/users returns 400 when email is missing", async () => {
 
   expect(res.status).toBe(400);
   const json = await res.json();
-  expect(json.error).toBe("Missing required field: email");
+  expect(json.error).toContain("email");
 });
 
 Deno.test("POST /api/users returns 400 when email is invalid", async () => {
@@ -235,7 +236,7 @@ Deno.test("POST /api/users returns 400 when email is invalid", async () => {
 
   expect(res.status).toBe(400);
   const json = await res.json();
-  expect(json.error).toBe("Invalid email format");
+  expect(json.error).toContain("Invalid email");
 });
 
 Deno.test("POST /api/users returns 400 when password is missing", async () => {
@@ -253,7 +254,7 @@ Deno.test("POST /api/users returns 400 when password is missing", async () => {
 
   expect(res.status).toBe(400);
   const json = await res.json();
-  expect(json.error).toBe("Missing required field: password");
+  expect(json.error).toContain("password");
 });
 
 Deno.test("POST /api/users returns 400 when password is too short", async () => {
@@ -272,7 +273,7 @@ Deno.test("POST /api/users returns 400 when password is too short", async () => 
 
   expect(res.status).toBe(400);
   const json = await res.json();
-  expect(json.error).toBe("Password must be at least 8 characters");
+  expect(json.error).toContain("at least 8 character");
 });
 
 Deno.test("POST /api/users returns 400 when passwordConfirmation is missing", async () => {
@@ -290,7 +291,7 @@ Deno.test("POST /api/users returns 400 when passwordConfirmation is missing", as
 
   expect(res.status).toBe(400);
   const json = await res.json();
-  expect(json.error).toBe("Missing required field: passwordConfirmation");
+  expect(json.error).toContain("passwordConfirmation");
 });
 
 Deno.test("POST /api/users returns 400 when passwords do not match", async () => {
@@ -666,7 +667,7 @@ Deno.test("PUT /api/users/:id returns 400 when password is too short", async () 
 
   expect(res.status).toBe(400);
   const json = await res.json();
-  expect(json.error).toBe("Password must be at least 8 characters");
+  expect(json.error).toContain("at least 8 character");
 });
 
 Deno.test("PUT /api/users/:id returns 400 when passwords do not match", async () => {

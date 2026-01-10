@@ -5,13 +5,19 @@
  * following REST best practices with a resource-oriented design.
  */
 
-import { Hono } from "@hono/hono";
-import type { Context } from "@hono/hono";
+import type { OpenAPIHono } from "@hono/zod-openapi";
+import { createRoute } from "@hono/zod-openapi";
+import { createOpenAPIApp } from "../openapi_app.ts";
 import type { KeyRotationService } from "./key_rotation_service.ts";
 import type { KeyStorageService } from "./key_storage_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import { logger } from "../utils/logger.ts";
+import {
+  RotationStatusSchema,
+  TriggerRotationResponseSchema,
+  RotationErrorSchema,
+} from "../routes_schemas/encryption.ts";
 
 export interface RotationRoutesOptions {
   keyRotationService: KeyRotationService;
@@ -19,8 +25,85 @@ export interface RotationRoutesOptions {
   settingsService: SettingsService;
 }
 
-export function createRotationRoutes(options: RotationRoutesOptions): Hono {
-  const routes = new Hono();
+/**
+ * GET /rotation - Get encryption key rotation status
+ */
+const getRotationStatusRoute = createRoute({
+  method: "get",
+  path: "/rotation",
+  tags: ["Encryption"],
+  summary: "Get rotation status",
+  description:
+    "Retrieve current encryption key rotation status and last rotation timestamp. " +
+    "Includes information about when the last rotation occurred, how many days since, " +
+    "when the next rotation is scheduled, and the current key version.",
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: RotationStatusSchema,
+        },
+      },
+      description: "Rotation status retrieved successfully",
+    },
+    500: {
+      content: {
+        "application/json": {
+          schema: RotationErrorSchema,
+        },
+      },
+      description: "Server error - keys file not found or other internal error",
+    },
+  },
+});
+
+/**
+ * POST /rotation - Manually trigger key rotation
+ */
+const triggerRotationRoute = createRoute({
+  method: "post",
+  path: "/rotation",
+  tags: ["Encryption"],
+  summary: "Trigger key rotation",
+  description:
+    "Manually trigger encryption key rotation to re-encrypt all secrets and API keys. " +
+    "This generates new encryption keys and re-encrypts all sensitive data including secrets, " +
+    "API keys, and settings. The Better Auth secret is also updated, invalidating all sessions. " +
+    "If a rotation is already in progress, returns 409 Conflict. " +
+    "If an incomplete rotation is detected, it will be resumed. " +
+    "Note: This operation can take time depending on the amount of data.",
+  responses: {
+    200: {
+      content: {
+        "application/json": {
+          schema: TriggerRotationResponseSchema,
+        },
+      },
+      description: "Key rotation completed successfully",
+    },
+    409: {
+      content: {
+        "application/json": {
+          schema: RotationErrorSchema,
+        },
+      },
+      description: "Rotation is already in progress",
+    },
+    500: {
+      content: {
+        "application/json": {
+          schema: RotationErrorSchema,
+        },
+      },
+      description: "Server error - rotation failed or keys file not found",
+    },
+  },
+});
+
+export function createRotationRoutes(
+  options: RotationRoutesOptions
+): OpenAPIHono {
+  const routes = createOpenAPIApp();
   const { keyRotationService, keyStorageService, settingsService } = options;
 
   /**
@@ -33,11 +116,8 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
    * - The rotation interval configuration
    * - Current key version
    * - Whether a rotation is currently in progress
-   *
-   * @returns 200 with rotation status
-   * @returns 500 on server error
    */
-  routes.get("/rotation", async (c: Context) => {
+  routes.openapi(getRotationStatusRoute, async (c) => {
     try {
       // Load encryption keys to get rotation timestamps
       const keys = await keyStorageService.loadKeys();
@@ -49,7 +129,9 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
       const intervalSetting = await settingsService.getGlobalSetting(
         SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS
       );
-      const rotationIntervalDays = intervalSetting ? parseInt(intervalSetting, 10) : 90;
+      const rotationIntervalDays = intervalSetting
+        ? parseInt(intervalSetting, 10)
+        : 90;
 
       // Calculate time-based information
       const lastRotation = new Date(keys.last_rotation_finished_at);
@@ -66,20 +148,23 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
       // Check if rotation is currently in progress
       const isInProgress = keyStorageService.isRotationInProgress(keys);
 
-      return c.json({
-        lastRotationAt: keys.last_rotation_finished_at,
-        daysSinceRotation,
-        nextRotationAt: nextRotation.toISOString(),
-        rotationIntervalDays,
-        currentVersion: keys.current_version,
-        isInProgress,
-      });
+      return c.json(
+        {
+          lastRotationAt: keys.last_rotation_finished_at,
+          daysSinceRotation,
+          nextRotationAt: nextRotation.toISOString(),
+          rotationIntervalDays,
+          currentVersion: keys.current_version,
+          isInProgress,
+        },
+        200
+      );
     } catch (error) {
       logger.error("[EncryptionKeyAPI] Failed to get rotation status:", error);
       return c.json(
         {
           error: "Failed to get rotation status",
-          details: error instanceof Error ? error.message : "Unknown error"
+          details: error instanceof Error ? error.message : "Unknown error",
         },
         500
       );
@@ -99,18 +184,17 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
    *
    * Note: This operation can take time depending on the amount of data.
    * The rotation happens synchronously but uses batching to avoid blocking.
-   *
-   * @returns 200 with success message
-   * @returns 409 if rotation is already in progress
-   * @returns 500 on server error
    */
-  routes.post("/rotation", async (c: Context) => {
+  routes.openapi(triggerRotationRoute, async (c) => {
     try {
       await keyRotationService.triggerManualRotation();
-      return c.json({
-        success: true,
-        message: "Key rotation completed successfully",
-      });
+      return c.json(
+        {
+          success: true,
+          message: "Key rotation completed successfully",
+        },
+        200
+      );
     } catch (error) {
       logger.error("[EncryptionKeyAPI] Manual rotation failed:", error);
 
@@ -126,7 +210,8 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
           return c.json(
             {
               error: "Encryption keys not found",
-              details: "The encryption keys file is missing. This is a critical error."
+              details:
+                "The encryption keys file is missing. This is a critical error.",
             },
             500
           );
@@ -134,10 +219,13 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
       }
 
       // Generic error response
-      return c.json({
-        error: "Key rotation failed",
-        details: error instanceof Error ? error.message : "Unknown error",
-      }, 500);
+      return c.json(
+        {
+          error: "Key rotation failed",
+          details: error instanceof Error ? error.message : "Unknown error",
+        },
+        500
+      );
     }
   });
 

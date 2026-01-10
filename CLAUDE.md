@@ -90,8 +90,77 @@ SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`. Acc
 - `/api/keys/*` - API key management (protected)
 - `/api/functions/*` - Function management (protected)
 - `/api/files/*` - Code file management (protected)
+- `/api/docs` - Swagger UI (development mode only)
+- `/api/docs/openapi.json` - OpenAPI specification (development mode only)
 - `/web/*` - Web UI (session auth)
 - `/run/*` - Function execution
+
+### API Routes Pattern
+
+All API routes use **Hono Zod OpenAPI** for type-safe, self-documenting endpoints:
+
+**Schema Organization**:
+- Route schemas in `src/routes_schemas/<domain>.ts`
+- Shared schemas in `src/schemas/common.ts` and `src/schemas/responses.ts`
+- Schemas define both validation and OpenAPI documentation
+
+**Route Definition Pattern**:
+```typescript
+// 1. Define schema in src/routes_schemas/<domain>.ts
+export const CreateFunctionRequestSchema = z.object({
+  name: z.string().regex(/^[a-zA-Z0-9_-]+$/),
+  handler: z.string().min(1),
+  // ... more fields
+}).openapi("CreateFunctionRequest");
+
+// 2. Define route with OpenAPI metadata
+const createFunctionRoute = createRoute({
+  method: "post",
+  path: "/",
+  tags: ["Functions"],
+  summary: "Create function",
+  description: "Create a new function route with handler...",
+  request: {
+    body: {
+      content: {
+        "application/json": {
+          schema: CreateFunctionRequestSchema,
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      content: { "application/json": { schema: CreateFunctionResponseSchema } },
+      description: "Function created successfully",
+    },
+    400: { /* ... */ },
+  },
+});
+
+// 3. Register route with handler in createXRoutes() function
+export function createFunctionsRoutes(service: RoutesService): OpenAPIHono {
+  const routes = new OpenAPIHono();
+
+  routes.openapi(createFunctionRoute, async (c) => {
+    const body = c.req.valid("json"); // Validated by Zod
+    // Implementation...
+    return c.json({ function: created }, 201);
+  });
+
+  return routes;
+}
+```
+
+**Key Benefits**:
+- Request/response validation enforced at compile time and runtime
+- OpenAPI spec auto-generated from schemas (no drift)
+- Swagger UI at `/api/docs` (development mode only)
+- Type-safe `c.req.valid("json")`, `c.req.valid("param")`, `c.req.valid("query")`
+
+**Special Cases**:
+- Files routes: Binary/multipart uploads documented in OpenAPI but parsed manually
+- Web UI routes: Still use plain Hono (no API documentation needed)
 
 ## Function Handlers
 

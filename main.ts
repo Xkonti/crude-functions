@@ -1,5 +1,6 @@
-import { Hono } from "@hono/hono";
+import { swaggerUI } from "@hono/swagger-ui";
 import "@std/dotenv/load";
+import { createOpenAPIApp } from "./src/openapi_app.ts";
 
 // Install environment isolation IMMEDIATELY after dotenv loads.
 // This must happen before any handlers load to ensure they see the proxy.
@@ -112,7 +113,7 @@ const hashService = new HashService({
 });
 console.log("✓ Hash service initialized");
 
-const app = new Hono();
+const app = createOpenAPIApp();
 
 // Initialize database
 // The database connection remains open for the application's lifetime and is
@@ -360,6 +361,63 @@ app.route("/web", createWebRoutes({
   encryptionService,
   settingsService,
 }));
+
+// OpenAPI documentation (dev mode only) - must come after all API routes are registered
+const isDevelopment = Deno.env.get("DENO_ENV") === "development";
+if (isDevelopment) {
+  // Generate OpenAPI spec from registered routes
+  app.doc("/api/docs/openapi.json", {
+    openapi: "3.0.3",
+    info: {
+      title: "Crude Functions API",
+      version: "1.0.0",
+      description:
+        "Management API for Crude Functions - a serverless function router. " +
+        "All endpoints require authentication via session cookie (web UI) or X-API-Key header (programmatic access).",
+    },
+    tags: [
+      {
+        name: "Functions",
+        description: "Manage serverless function routes and deployments",
+      },
+      {
+        name: "Files",
+        description: "Manage code files in the functions directory",
+      },
+      {
+        name: "API Keys",
+        description: "Manage API key groups and individual keys for authentication",
+      },
+      {
+        name: "Secrets",
+        description: "Manage encrypted secrets with hierarchical scoping",
+      },
+      {
+        name: "Users",
+        description: "Manage user accounts and authentication",
+      },
+      {
+        name: "Logs",
+        description: "View and manage function execution logs",
+      },
+      {
+        name: "Metrics",
+        description: "View function execution metrics and statistics",
+      },
+      {
+        name: "Settings",
+        description: "Configure application settings and preferences",
+      },
+      {
+        name: "Encryption",
+        description: "Manage encryption keys and rotation policies",
+      },
+    ],
+  });
+
+  // Serve Swagger UI
+  app.get("/api/docs", swaggerUI({ url: "/api/docs/openapi.json" }));
+}
 
 // Dynamic function router - catch all /run/* requests
 app.all("/run/*", (c) => functionRouter.handle(c));
