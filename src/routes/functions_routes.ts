@@ -11,28 +11,31 @@ import {
 } from "../validation/routes.ts";
 import { validateId } from "../validation/common.ts";
 
-export function createRoutesRoutes(service: RoutesService): Hono {
+export function createFunctionsRoutes(service: RoutesService): Hono {
   const routes = new Hono();
 
-  // GET /api/routes - List all routes
+  // GET /api/functions - List all functions
   routes.get("/", async (c) => {
-    const allRoutes = await service.getAll();
-    return c.json({ routes: allRoutes });
+    const allFunctions = await service.getAll();
+    return c.json({ functions: allFunctions });
   });
 
-  // GET /api/routes/:name - Get route by name
-  routes.get("/:name", async (c) => {
-    const name = c.req.param("name");
-    const route = await service.getByName(name);
-
-    if (!route) {
-      return c.json({ error: `Route '${name}' not found` }, 404);
+  // GET /api/functions/:id - Get function by ID
+  routes.get("/:id", async (c) => {
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
+      return c.json({ error: "Invalid function ID" }, 400);
     }
 
-    return c.json({ route });
+    const func = await service.getById(id);
+    if (!func) {
+      return c.json({ error: `Function with id '${id}' not found` }, 404);
+    }
+
+    return c.json({ function: func });
   });
 
-  // POST /api/routes - Add new route
+  // POST /api/functions - Create new function (returns created resource)
   routes.post("/", async (c) => {
     let body: Partial<FunctionRoute>;
     try {
@@ -67,7 +70,7 @@ export function createRoutesRoutes(service: RoutesService): Hono {
       }
     }
 
-    const newRoute: NewFunctionRoute = {
+    const newFunction: NewFunctionRoute = {
       name: body.name,
       handler: body.handler,
       route: body.route,
@@ -77,8 +80,8 @@ export function createRoutesRoutes(service: RoutesService): Hono {
     };
 
     try {
-      await service.addRoute(newRoute);
-      return c.json({ success: true }, 201);
+      const created = await service.addRoute(newFunction);
+      return c.json({ function: created }, 201);
     } catch (error) {
       if (error instanceof Error && error.message.includes("already exists")) {
         return c.json({ error: error.message }, 409);
@@ -87,11 +90,11 @@ export function createRoutesRoutes(service: RoutesService): Hono {
     }
   });
 
-  // PUT /api/routes/:id - Update route by ID
+  // PUT /api/functions/:id - Update function (returns updated resource)
   routes.put("/:id", async (c) => {
     const id = validateId(c.req.param("id"));
     if (id === null) {
-      return c.json({ error: "Invalid route ID" }, 400);
+      return c.json({ error: "Invalid function ID" }, 400);
     }
 
     let body: Partial<FunctionRoute>;
@@ -127,7 +130,7 @@ export function createRoutesRoutes(service: RoutesService): Hono {
       }
     }
 
-    const updatedRoute: NewFunctionRoute = {
+    const updatedFunction: NewFunctionRoute = {
       name: body.name,
       handler: body.handler,
       route: body.route,
@@ -137,8 +140,8 @@ export function createRoutesRoutes(service: RoutesService): Hono {
     };
 
     try {
-      await service.updateRoute(id, updatedRoute);
-      return c.json({ success: true });
+      const updated = await service.updateRoute(id, updatedFunction);
+      return c.json({ function: updated });
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes("not found")) {
@@ -152,53 +155,50 @@ export function createRoutesRoutes(service: RoutesService): Hono {
     }
   });
 
-  // DELETE /api/routes/:identifier - Delete route by name or ID
-  routes.delete("/:identifier", async (c) => {
-    const identifier = c.req.param("identifier");
-
-    // Try parsing as ID first (with full validation)
-    const id = validateId(identifier);
-
-    if (id !== null) {
-      // Delete by ID
-      const existing = await service.getById(id);
-      if (!existing) {
-        return c.json({ error: `Route with id '${id}' not found` }, 404);
-      }
-      await service.removeRouteById(id);
-    } else {
-      // Delete by name (backwards compatibility)
-      const existing = await service.getByName(identifier);
-      if (!existing) {
-        return c.json({ error: `Route '${identifier}' not found` }, 404);
-      }
-      await service.removeRoute(identifier);
-    }
-
-    return c.json({ success: true });
-  });
-
-  // PUT /api/routes/:id/enabled - Set route enabled/disabled state
-  routes.put("/:id/enabled", async (c) => {
+  // DELETE /api/functions/:id - Delete function (returns 204 No Content)
+  routes.delete("/:id", async (c) => {
     const id = validateId(c.req.param("id"));
     if (id === null) {
-      return c.json({ error: "Invalid route ID" }, 400);
+      return c.json({ error: "Invalid function ID" }, 400);
     }
 
-    let body: { enabled?: boolean };
+    const existing = await service.getById(id);
+    if (!existing) {
+      return c.json({ error: `Function with id '${id}' not found` }, 404);
+    }
+
+    await service.removeRouteById(id);
+    return c.body(null, 204);
+  });
+
+  // PUT /api/functions/:id/enable - Enable function (idempotent)
+  routes.put("/:id/enable", async (c) => {
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
+      return c.json({ error: "Invalid function ID" }, 400);
+    }
+
     try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
+      const updated = await service.setRouteEnabled(id, true);
+      return c.json({ function: updated });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("not found")) {
+        return c.json({ error: error.message }, 404);
+      }
+      throw error;
     }
+  });
 
-    if (typeof body.enabled !== "boolean") {
-      return c.json({ error: "Missing or invalid 'enabled' field (must be boolean)" }, 400);
+  // PUT /api/functions/:id/disable - Disable function (idempotent)
+  routes.put("/:id/disable", async (c) => {
+    const id = validateId(c.req.param("id"));
+    if (id === null) {
+      return c.json({ error: "Invalid function ID" }, 400);
     }
 
     try {
-      await service.setRouteEnabled(id, body.enabled);
-      return c.json({ success: true, enabled: body.enabled });
+      const updated = await service.setRouteEnabled(id, false);
+      return c.json({ function: updated });
     } catch (error) {
       if (error instanceof Error && error.message.includes("not found")) {
         return c.json({ error: error.message }, 404);

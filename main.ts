@@ -21,7 +21,7 @@ import { createHybridAuthMiddleware } from "./src/auth/auth_middleware.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { createApiKeyRoutes, createApiKeyGroupRoutes } from "./src/keys/api_key_routes.ts";
 import { RoutesService } from "./src/routes/routes_service.ts";
-import { createRoutesRoutes } from "./src/routes/routes_routes.ts";
+import { createFunctionsRoutes } from "./src/routes/functions_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
 import { createFileRoutes } from "./src/files/file_routes.ts";
@@ -287,9 +287,9 @@ app.use("/api/keys/*", hybridAuth);
 app.use("/api/keys", hybridAuth);
 app.route("/api/keys", createApiKeyRoutes(apiKeyService));
 
-app.use("/api/routes/*", hybridAuth);
-app.use("/api/routes", hybridAuth);
-app.route("/api/routes", createRoutesRoutes(routesService));
+app.use("/api/functions/*", hybridAuth);
+app.use("/api/functions", hybridAuth);
+app.route("/api/functions", createFunctionsRoutes(routesService));
 
 // Initialize file service
 const fileService = new FileService({

@@ -1531,27 +1531,24 @@ export function createFunctionsPages(
             toggleEl.style.cursor = 'wait';
 
             try {
-              const response = await fetch('/api/routes/' + id + '/enabled', {
-                method: 'PUT',
-                headers: {
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ enabled: newEnabled })
-              });
+              const endpoint = newEnabled
+                ? '/api/functions/' + id + '/enable'
+                : '/api/functions/' + id + '/disable';
+              const response = await fetch(endpoint, { method: 'PUT' });
 
               if (!response.ok) {
-                throw new Error('Failed to update route');
+                throw new Error('Failed to update function');
               }
 
               const data = await response.json();
 
               // Update UI
-              toggleEl.textContent = data.enabled ? '✅' : '❌';
-              toggleEl.title = 'Click to ' + (data.enabled ? 'disable' : 'enable');
+              toggleEl.textContent = data.function.enabled ? '✅' : '❌';
+              toggleEl.title = 'Click to ' + (data.function.enabled ? 'disable' : 'enable');
               toggleEl.style.cursor = 'pointer';
             } catch (error) {
-              console.error('Error toggling route:', error);
-              alert('Failed to toggle route. Please try again.');
+              console.error('Error toggling function:', error);
+              alert('Failed to toggle function. Please try again.');
               toggleEl.textContent = originalContent;
               toggleEl.style.cursor = 'pointer';
             }
