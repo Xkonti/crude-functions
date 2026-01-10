@@ -58,32 +58,6 @@ function isPastHourOnDifferentDay(hoursAgo: number): boolean {
 
 type MetricsTestContext = BaseTestContext & MetricsContext;
 
-/**
- * Wait for a condition to be true, with timeout.
- * Uses exponential backoff to reduce database contention.
- */
-async function waitFor<T>(
-  condition: () => T | Promise<T>,
-  description: string,
-  timeoutMs = 5000
-): Promise<T> {
-  const startTime = Date.now();
-  let delay = 50; // Start with 50ms
-  const maxDelay = 500; // Cap at 500ms
-
-  while (true) {
-    const result = await condition();
-    if (result) return result;
-
-    if (Date.now() - startTime > timeoutMs) {
-      throw new Error(`Timeout waiting for ${description} after ${timeoutMs}ms`);
-    }
-
-    await new Promise((r) => setTimeout(r, delay));
-    delay = Math.min(delay * 1.5, maxDelay); // Exponential backoff
-  }
-}
-
 interface TestSetup {
   aggregationService: MetricsAggregationService;
   ctx: MetricsTestContext;
