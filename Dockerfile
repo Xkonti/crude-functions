@@ -1,5 +1,7 @@
-# Use official Deno image
-FROM denoland/deno:2.6.3
+# Base image can be overridden for hardened variant:
+# docker build --build-arg BASE_IMAGE=dhi.io/deno:2 .
+ARG BASE_IMAGE=denoland/deno:2.6.4
+FROM ${BASE_IMAGE}
 
 # Set working directory
 WORKDIR /app

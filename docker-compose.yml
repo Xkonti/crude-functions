@@ -1,7 +1,9 @@
 # This compose file is for demonstration only, do not use in prod.
 services:
   app:
-    image: xkonti/crude-functions:latest
+    # Hardened image (recommended): near-zero CVEs, no shell
+    # For debugging, use: xkonti/crude-functions:latest
+    image: xkonti/crude-functions:hardened
     ports:
       - 8000:8000
     # Environment variables (optional)
