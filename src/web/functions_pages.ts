@@ -1432,11 +1432,35 @@ export function createFunctionsPages(
 ): Hono {
   const routes = new Hono();
 
+  // Helper function to render key group names for a function route
+  async function renderKeyGroupNames(keyIds: number[] | undefined): Promise<string> {
+    if (!keyIds || keyIds.length === 0) {
+      return "<em>none</em>";
+    }
+
+    const groupNames = await Promise.all(
+      keyIds.map(async (id) => {
+        const group = await apiKeyService.getGroupById(id);
+        return group ? group.name : `Unknown(${id})`;
+      })
+    );
+
+    return escapeHtml(groupNames.join(", "));
+  }
+
   // List all functions
   routes.get("/", async (c) => {
     const success = c.req.query("success");
     const error = c.req.query("error");
     const allRoutes = await routesService.getAll();
+
+    // Pre-render key group names for all routes
+    const routesWithGroupNames = await Promise.all(
+      allRoutes.map(async (route) => ({
+        ...route,
+        keyGroupNames: await renderKeyGroupNames(route.keys),
+      }))
+    );
 
     const content = `
       <style>
@@ -1471,7 +1495,7 @@ export function createFunctionsPages(
         ${buttonLink("/web/functions/create", "Create New Function")}
       </p>
       ${
-        allRoutes.length === 0
+        routesWithGroupNames.length === 0
           ? "<p>No functions registered.</p>"
           : `
         <table>
@@ -1487,7 +1511,7 @@ export function createFunctionsPages(
             </tr>
           </thead>
           <tbody>
-            ${allRoutes
+            ${routesWithGroupNames
               .map(
                 (fn) => `
               <tr id="route-row-${fn.id}">
@@ -1502,7 +1526,7 @@ export function createFunctionsPages(
                 <td><strong>${escapeHtml(fn.name)}</strong></td>
                 <td><code>${escapeHtml(fn.route)}</code></td>
                 <td>${renderMethodBadges(fn.methods)}</td>
-                <td>${fn.keys ? escapeHtml(fn.keys.join(", ")) : "<em>none</em>"}</td>
+                <td>${fn.keyGroupNames}</td>
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
                   <a href="/web/functions/logs/${fn.id}" title="Logs" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📝</a>
