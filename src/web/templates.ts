@@ -109,16 +109,6 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
     }
     .actions { white-space: nowrap; }
     .actions a, .actions button { margin-right: 0.5rem; }
-    .methods { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-    .method-badge {
-      display: inline-block;
-      padding: 0.1rem 0.4rem;
-      font-size: 0.75rem;
-      font-weight: bold;
-      border-radius: 0.25rem;
-      background: var(--pico-secondary-background);
-      color: var(--pico-secondary);
-    }
     .key-group { margin-bottom: 1.5rem; }
     .key-group h3 { margin-bottom: 0.5rem; }
     nav ul { margin-bottom: 0; }

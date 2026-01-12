@@ -55,8 +55,8 @@ interface MetricsSummary {
 
 function renderMethodBadges(methods: string[]): string {
   return methods
-    .map((m) => `<span class="method-badge">${escapeHtml(m)}</span>`)
-    .join(" ");
+    .map((m) => escapeHtml(m))
+    .join(", ");
 }
 
 /**
@@ -1501,7 +1501,7 @@ export function createFunctionsPages(
                 </td>
                 <td><strong>${escapeHtml(fn.name)}</strong></td>
                 <td><code>${escapeHtml(fn.route)}</code></td>
-                <td><div class="methods">${renderMethodBadges(fn.methods)}</div></td>
+                <td>${renderMethodBadges(fn.methods)}</td>
                 <td>${fn.keys ? escapeHtml(fn.keys.join(", ")) : "<em>none</em>"}</td>
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
