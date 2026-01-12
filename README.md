@@ -232,6 +232,42 @@ deno task test
 
 ## Docker Deployment
 
+### Image Variants
+
+Two image variants are available:
+
+| Variant | Image Tag | Base | Use Case |
+|---------|-----------|------|----------|
+| **Hardened** | `hardened`, `x.y.z-hardened` | `dhi.io/deno:2` | Production (recommended) |
+| **Standard** | `latest`, `x.y.z` | `denoland/deno` | Development, debugging |
+
+**Hardened variant** (default in examples):
+
+- Near-zero CVEs, minimal attack surface
+- SLSA Level 3 provenance, signed SBOM
+- No shell or package manager
+- Runs as non-root user
+
+**Hardened image limitations for function handlers:**
+
+- ❌ Shell commands (`Deno.Command()`, subprocess spawning) will fail
+- ❌ NPM packages with native bindings or lifecycle scripts won't work
+- ❌ Direct FFI access to system libraries (libc, libm, etc.) mostly unavailable
+- ✅ Pure TypeScript/JavaScript, JSR packages, and most NPM packages work fine
+
+**Standard variant**:
+
+- Full Debian base with shell access
+- Easier debugging in production
+- Use when you need to exec into container
+
+To switch variants, change the image tag:
+
+```yaml
+image: xkonti/crude-functions:latest      # Standard
+image: xkonti/crude-functions:hardened    # Hardened (recommended)
+```
+
 ### Using Docker Compose
 
 Create a `docker-compose.yml`:
@@ -239,7 +275,9 @@ Create a `docker-compose.yml`:
 ```yaml
 services:
   app:
-    image: xkonti/crude-functions:latest
+    # Hardened image (recommended): near-zero CVEs, no shell
+    # For debugging, use: xkonti/crude-functions:latest
+    image: xkonti/crude-functions:hardened
     ports:
       - 8000:8000
     # Environment variables (optional)
@@ -271,6 +309,7 @@ docker compose up -d
 **Optional:** Set `BETTER_AUTH_BASE_URL` if deploying behind a reverse proxy with complex routing. Otherwise, it will auto-detect from incoming requests.
 
 On first run:
+
 - Database is created at `./data/database.db`
 - Encryption keys are generated at `./data/encryption-keys.json`
 - Navigate to `http://localhost:8000/web/setup` to create your first user account
@@ -282,7 +321,8 @@ docker run -d \
   -p 8000:8000 \
   -v ./data:/app/data \
   -v ./code:/app/code \
-  xkonti/crude-functions:latest
+  xkonti/crude-functions:hardened
+# For debugging: xkonti/crude-functions:latest
 # Optional: -e BETTER_AUTH_BASE_URL=https://your-domain.com
 ```
 
@@ -291,7 +331,12 @@ On first run, navigate to `http://localhost:8000/web/setup` to create your admin
 ### Building from Source
 
 ```bash
+# Standard image
 docker build -t crude-functions .
+
+# Hardened image (requires dhi.io login)
+docker login dhi.io
+docker build --build-arg BASE_IMAGE=dhi.io/deno:2 -t crude-functions:hardened .
 ```
 
 ## Hot Reload
