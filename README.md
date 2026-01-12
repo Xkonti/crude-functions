@@ -242,17 +242,27 @@ Two image variants are available:
 | **Standard** | `latest`, `x.y.z` | `denoland/deno` | Development, debugging |
 
 **Hardened variant** (default in examples):
+
 - Near-zero CVEs, minimal attack surface
 - SLSA Level 3 provenance, signed SBOM
 - No shell or package manager
 - Runs as non-root user
 
+**Hardened image limitations for function handlers:**
+
+- ❌ Shell commands (`Deno.Command()`, subprocess spawning) will fail
+- ❌ NPM packages with native bindings or lifecycle scripts won't work
+- ❌ Direct FFI access to system libraries (libc, libm, etc.) mostly unavailable
+- ✅ Pure TypeScript/JavaScript, JSR packages, and most NPM packages work fine
+
 **Standard variant**:
+
 - Full Debian base with shell access
 - Easier debugging in production
 - Use when you need to exec into container
 
 To switch variants, change the image tag:
+
 ```yaml
 image: xkonti/crude-functions:latest      # Standard
 image: xkonti/crude-functions:hardened    # Hardened (recommended)
@@ -299,6 +309,7 @@ docker compose up -d
 **Optional:** Set `BETTER_AUTH_BASE_URL` if deploying behind a reverse proxy with complex routing. Otherwise, it will auto-detect from incoming requests.
 
 On first run:
+
 - Database is created at `./data/database.db`
 - Encryption keys are generated at `./data/encryption-keys.json`
 - Navigate to `http://localhost:8000/web/setup` to create your first user account
