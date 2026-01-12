@@ -118,15 +118,7 @@ Table names interpolated directly into SQL queries using template strings. While
 
 **Impact:** Not currently exploitable but dangerous pattern - security vulnerability if refactored.
 
-#### 12. Key Generation Failure Leaves Service in Inconsistent State
-
-**Location:** `src/encryption/key_rotation_service.ts:197-200`
-
-Key generation uses external `openssl` command. If openssl not installed or fails, error propagates and failure counter increments. After 5 consecutive failures, service auto-stops permanently with no alerting.
-
-**Impact:** Service fails safely but becomes permanently disabled until manual restart.
-
-#### 13. No Handling of Database Connection Loss During Rotation
+#### 12. No Handling of Database Connection Loss During Rotation
 
 **Location:** `src/encryption/key_rotation_service.ts:234-276, 334-337, 364-369`
 

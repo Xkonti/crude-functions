@@ -40,7 +40,7 @@ interface TestContext {
 /**
  * Creates a test context for key rotation tests.
  * Uses TestSetupBuilder for database/migrations, then creates custom encryption
- * services with mock key generator to avoid spawning openssl processes.
+ * services with mock key generator for deterministic/predictable test keys.
  *
  * Follows the "Simple Helper Functions" pattern from the testing skill for
  * tests requiring custom service configuration.
@@ -54,7 +54,7 @@ async function createTestContext(
     .withEncryption()
     .build();
 
-  // Create custom key storage with mock key generator (avoids spawning openssl)
+  // Create custom key storage with mock key generator for deterministic test keys
   const keyFilePath = `${baseCtx.tempDir}/custom-encryption-keys.json`;
   const keyStorage = new KeyStorageService({
     keyFilePath,

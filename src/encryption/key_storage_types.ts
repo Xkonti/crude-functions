@@ -35,7 +35,7 @@ export interface KeyStorageServiceOptions {
 
   /**
    * Optional custom key generator function for testing.
-   * When provided, this replaces the openssl-based key generation.
+   * When provided, allows injecting deterministic/predictable keys for tests.
    * Should return a base64-encoded 32-byte key.
    */
   keyGenerator?: () => Promise<string>;

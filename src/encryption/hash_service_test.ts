@@ -1,8 +1,7 @@
 import { expect } from "@std/expect";
 import { HashService } from "./hash_service.ts";
 
-// Test hash key (32 bytes base64-encoded)
-// Generated via: openssl rand -base64 32
+// Test hash key (any valid 32-byte base64 string works)
 const TEST_HASH_KEY = "aGFzaGtleWhhc2hrZXloYXNoa2V5aGFzaGtleWhhc2g=";
 
 Deno.test("HashService - HMAC-SHA256 consistency", async () => {

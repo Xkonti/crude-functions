@@ -144,31 +144,21 @@ export class KeyStorageService {
 
   /**
    * Generate a new 256-bit encryption key.
-   * Uses custom key generator if provided, otherwise uses openssl.
+   * Uses custom key generator if provided, otherwise uses Web Crypto API.
    * @returns Base64-encoded 32-byte key.
    */
-  async generateKey(): Promise<string> {
+  generateKey(): Promise<string> {
     // Use custom generator if provided (for testing)
     if (this.customKeyGenerator) {
       return this.customKeyGenerator();
     }
 
-    const command = new Deno.Command("openssl", {
-      args: ["rand", "-base64", "32"],
-      stdout: "piped",
-      stderr: "piped",
-    });
+    // Generate 32 bytes (256 bits) of cryptographically secure random data
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
 
-    const { code, stdout, stderr } = await command.output();
-
-    if (code !== 0) {
-      const errorText = new TextDecoder().decode(stderr);
-      throw new Error(`Failed to generate key: ${errorText}`);
-    }
-
-    // Remove trailing newline from openssl output
-    const key = new TextDecoder().decode(stdout).trim();
-    return key;
+    // Convert to base64
+    return Promise.resolve(btoa(String.fromCharCode(...bytes)));
   }
 
   /**
