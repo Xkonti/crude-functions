@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { FileService } from "../files/file_service.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
 import { getContentType, isTextContentType } from "../files/content_type.ts";
 import {
   layout,
@@ -13,7 +14,7 @@ import {
 
 const MAX_EDITABLE_SIZE = 1024 * 1024; // 1 MB
 
-export function createCodePages(fileService: FileService): Hono {
+export function createCodePages(fileService: FileService, settingsService: SettingsService): Hono {
   const routes = new Hono();
 
   // List all files
@@ -62,7 +63,7 @@ export function createCodePages(fileService: FileService): Hono {
       `
       }
     `;
-    return c.html(layout("Code Files", content, getLayoutUser(c)));
+    return c.html(await layout("Code Files", content, getLayoutUser(c), settingsService));
   });
 
   // Edit file form
@@ -208,7 +209,7 @@ export function createCodePages(fileService: FileService): Hono {
       `;
     }
 
-    return c.html(layout(`Edit: ${path}`, pageContent, getLayoutUser(c)));
+    return c.html(await layout(`Edit: ${path}`, pageContent, getLayoutUser(c), settingsService));
   });
 
   // Delete confirmation
@@ -262,11 +263,11 @@ export function createCodePages(fileService: FileService): Hono {
         });
       </script>
     `;
-    return c.html(layout("Delete File", pageContent, getLayoutUser(c)));
+    return c.html(await layout("Delete File", pageContent, getLayoutUser(c), settingsService));
   });
 
   // Upload form
-  routes.get("/upload", (c) => {
+  routes.get("/upload", async (c) => {
     const error = c.req.query("error");
 
     const content = `
@@ -393,7 +394,7 @@ export function createCodePages(fileService: FileService): Hono {
         });
       </script>
     `;
-    return c.html(layout("Upload File", content, getLayoutUser(c)));
+    return c.html(await layout("Upload File", content, getLayoutUser(c), settingsService));
   });
 
   return routes;

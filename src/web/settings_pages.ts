@@ -32,7 +32,7 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
 
     if (tab === "user") {
       const content = renderUserSettingsTab();
-      return c.html(layout("User Settings", content, getLayoutUser(c)));
+      return c.html(await layout("User Settings", content, getLayoutUser(c), settingsService));
     }
 
     // Load all global settings
@@ -46,7 +46,7 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
     const availableGroups = await apiKeyService.getGroups();
 
     const content = renderServerSettingsTab(settingsData, availableGroups, success, error);
-    return c.html(layout("Server Settings", content, getLayoutUser(c)));
+    return c.html(await layout("Server Settings", content, getLayoutUser(c), settingsService));
   });
 
   // Redirect routes for clean URLs
@@ -76,10 +76,11 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
       }
 
       return c.html(
-        layout(
+        await layout(
           "Server Settings",
           renderServerSettingsTab(settingsData, availableGroups, undefined, errors.join(". ")),
-          getLayoutUser(c)
+          getLayoutUser(c),
+          settingsService
         ),
         400
       );

@@ -52,7 +52,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   routes.use("/*", createSessionAuthMiddleware({ auth }));
 
   // Dashboard
-  routes.get("/", (c) => {
+  routes.get("/", async (c) => {
     const content = `
       <h1>Dashboard</h1>
       <div class="grid">
@@ -86,16 +86,16 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
         </article>
       </div>
     `;
-    return c.html(layout("Dashboard", content, getLayoutUser(c)));
+    return c.html(await layout("Dashboard", content, getLayoutUser(c), settingsService));
   });
 
   // Mount sub-routers
-  routes.route("/password", createPasswordPages());
-  routes.route("/users", createUsersPages({ userService }));
-  routes.route("/code", createCodePages(fileService));
+  routes.route("/password", createPasswordPages(settingsService));
+  routes.route("/users", createUsersPages({ userService, settingsService }));
+  routes.route("/code", createCodePages(fileService, settingsService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService));
-  routes.route("/keys", createKeysPages(apiKeyService, secretsService));
-  routes.route("/secrets", createSecretsPages({ db, encryptionService }));
+  routes.route("/keys", createKeysPages(apiKeyService, secretsService, settingsService));
+  routes.route("/secrets", createSecretsPages({ db, encryptionService, settingsService }));
   routes.route("/settings", createSettingsPages({ settingsService, apiKeyService }));
 
   return routes;

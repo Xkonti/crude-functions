@@ -1,6 +1,7 @@
 import { Hono } from "@hono/hono";
 import type { DatabaseService } from "../database/database_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 import {
   layout,
@@ -21,6 +22,7 @@ import {
 export interface SecretsPagesOptions {
   db: DatabaseService;
   encryptionService: IEncryptionService;
+  settingsService: SettingsService;
 }
 
 /**
@@ -29,7 +31,7 @@ export interface SecretsPagesOptions {
  * Provides CRUD operations for global-scope secrets with encryption.
  */
 export function createSecretsPages(options: SecretsPagesOptions): Hono {
-  const { db, encryptionService } = options;
+  const { db, encryptionService, settingsService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
@@ -108,7 +110,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
       `
       }
     `;
-    return c.html(layout("Global Secrets", content, getLayoutUser(c)));
+    return c.html(await layout("Global Secrets", content, getLayoutUser(c), settingsService));
   });
 
   // GET /create - Create secret form
@@ -118,7 +120,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
       layout(
         "Create Secret",
         renderCreateForm("/web/secrets/create", {}, error),
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -141,7 +143,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
         layout(
           "Create Secret",
           renderCreateForm("/web/secrets/create", secretData, errors.join(". ")),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -165,7 +167,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
         layout(
           "Create Secret",
           renderCreateForm("/web/secrets/create", secretData, message),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -197,7 +199,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
       layout(
         `Edit: ${secret.name}`,
         renderEditForm(`/web/secrets/edit/${id}`, secret, error),
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -242,7 +244,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
             { ...secret, ...editData },
             errors.join(". ")
           ),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -270,7 +272,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
             { ...secret, ...editData },
             message
           ),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -302,7 +304,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
         `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
         `/web/secrets/delete/${id}`,
         "/web/secrets",
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
