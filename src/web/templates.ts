@@ -1,3 +1,6 @@
+import type { SettingsService } from "../settings/settings_service.ts";
+import { SettingNames, GlobalSettingDefaults } from "../settings/types.ts";
+
 /**
  * Escapes HTML special characters to prevent XSS attacks.
  */
@@ -74,7 +77,16 @@ export function getLayoutUser(c: any): LayoutUser | undefined {
 /**
  * Wraps content in a full HTML page with PicoCSS styling.
  */
-export function layout(title: string, content: string, user?: LayoutUser): string {
+export async function layout(
+  title: string,
+  content: string,
+  user: LayoutUser | undefined,
+  settingsService: SettingsService
+): Promise<string> {
+  // Fetch server name setting, with fallback to default if not found
+  const serverName = await settingsService.getGlobalSetting(SettingNames.SERVER_NAME)
+    ?? GlobalSettingDefaults[SettingNames.SERVER_NAME];
+
   const userDropdown = user
     ? `
         <li class="user-dropdown">
@@ -92,33 +104,23 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${escapeHtml(title)} - Crude Functions</title>
+  <title>${escapeHtml(title)} - ${escapeHtml(serverName)}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
     /* Compact Pico CSS overrides */
     :root {
-      --pico-font-size: 87.5%;
+      --pico-font-size: 92.5%;
       --pico-line-height: 1.25;
       --pico-form-element-spacing-vertical: 0.5rem;
       --pico-form-element-spacing-horizontal: 1.0rem;
     }
     @media (min-width: 576px) {
       :root {
-        --pico-font-size: 87.5%;
+        --pico-font-size: 92.5%;
       }
     }
     .actions { white-space: nowrap; }
     .actions a, .actions button { margin-right: 0.5rem; }
-    .methods { display: flex; gap: 0.25rem; flex-wrap: wrap; }
-    .method-badge {
-      display: inline-block;
-      padding: 0.1rem 0.4rem;
-      font-size: 0.75rem;
-      font-weight: bold;
-      border-radius: 0.25rem;
-      background: var(--pico-secondary-background);
-      color: var(--pico-secondary);
-    }
     .key-group { margin-bottom: 1.5rem; }
     .key-group h3 { margin-bottom: 0.5rem; }
     nav ul { margin-bottom: 0; }
@@ -201,7 +203,7 @@ export function layout(title: string, content: string, user?: LayoutUser): strin
 <body>
   <main class="container">
     <nav>
-      <ul><li><strong><a href="/web">Crude Functions</a></strong></li></ul>
+      <ul><li><strong><a href="/web">${escapeHtml(serverName)}</a></strong></li></ul>
       <ul>
         <li><a href="/web/code" title="Code Files">📁</a></li>
         <li><a href="/web/functions" title="Functions">⚡</a></li>
@@ -241,14 +243,15 @@ export function flashMessages(
 /**
  * Creates a confirmation page for delete actions.
  */
-export function confirmPage(
+export async function confirmPage(
   title: string,
   message: string,
   actionUrl: string,
   cancelUrl: string,
-  user?: LayoutUser
-): string {
-  return layout(
+  user: LayoutUser | undefined,
+  settingsService: SettingsService
+): Promise<string> {
+  return await layout(
     title,
     `
     <h1>${escapeHtml(title)}</h1>
@@ -262,7 +265,8 @@ export function confirmPage(
       </footer>
     </article>
   `,
-    user
+    user,
+    settingsService
   );
 }
 

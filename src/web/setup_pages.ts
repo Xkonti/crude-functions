@@ -41,14 +41,14 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
   <style>
     /* Compact Pico CSS overrides */
     :root {
-      --pico-font-size: 87.5%;
+      --pico-font-size: 92.5%;
       --pico-line-height: 1.25;
       --pico-form-element-spacing-vertical: 0.5rem;
       --pico-form-element-spacing-horizontal: 1.0rem;
     }
     @media (min-width: 576px) {
       :root {
-        --pico-font-size: 87.5%;
+        --pico-font-size: 92.5%;
       }
     }
     .alert-error {

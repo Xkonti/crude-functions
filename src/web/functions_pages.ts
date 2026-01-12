@@ -55,8 +55,8 @@ interface MetricsSummary {
 
 function renderMethodBadges(methods: string[]): string {
   return methods
-    .map((m) => `<span class="method-badge">${escapeHtml(m)}</span>`)
-    .join(" ");
+    .map((m) => escapeHtml(m))
+    .join(", ");
 }
 
 /**
@@ -1432,11 +1432,35 @@ export function createFunctionsPages(
 ): Hono {
   const routes = new Hono();
 
+  // Helper function to render key group names for a function route
+  async function renderKeyGroupNames(keyIds: number[] | undefined): Promise<string> {
+    if (!keyIds || keyIds.length === 0) {
+      return "<em>none</em>";
+    }
+
+    const groupNames = await Promise.all(
+      keyIds.map(async (id) => {
+        const group = await apiKeyService.getGroupById(id);
+        return group ? group.name : `Unknown(${id})`;
+      })
+    );
+
+    return escapeHtml(groupNames.join(", "));
+  }
+
   // List all functions
   routes.get("/", async (c) => {
     const success = c.req.query("success");
     const error = c.req.query("error");
     const allRoutes = await routesService.getAll();
+
+    // Pre-render key group names for all routes
+    const routesWithGroupNames = await Promise.all(
+      allRoutes.map(async (route) => ({
+        ...route,
+        keyGroupNames: await renderKeyGroupNames(route.keys),
+      }))
+    );
 
     const content = `
       <style>
@@ -1471,7 +1495,7 @@ export function createFunctionsPages(
         ${buttonLink("/web/functions/create", "Create New Function")}
       </p>
       ${
-        allRoutes.length === 0
+        routesWithGroupNames.length === 0
           ? "<p>No functions registered.</p>"
           : `
         <table>
@@ -1487,7 +1511,7 @@ export function createFunctionsPages(
             </tr>
           </thead>
           <tbody>
-            ${allRoutes
+            ${routesWithGroupNames
               .map(
                 (fn) => `
               <tr id="route-row-${fn.id}">
@@ -1501,8 +1525,8 @@ export function createFunctionsPages(
                 </td>
                 <td><strong>${escapeHtml(fn.name)}</strong></td>
                 <td><code>${escapeHtml(fn.route)}</code></td>
-                <td><div class="methods">${renderMethodBadges(fn.methods)}</div></td>
-                <td>${fn.keys ? escapeHtml(fn.keys.join(", ")) : "<em>none</em>"}</td>
+                <td>${renderMethodBadges(fn.methods)}</td>
+                <td>${fn.keyGroupNames}</td>
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
                   <a href="/web/functions/logs/${fn.id}" title="Logs" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📝</a>
@@ -1557,14 +1581,14 @@ export function createFunctionsPages(
       `
       }
     `;
-    return c.html(layout("Functions", content, getLayoutUser(c)));
+    return c.html(await layout("Functions", content, getLayoutUser(c), settingsService));
   });
 
   // Create form
   routes.get("/create", async (c) => {
     const error = c.req.query("error");
     const groups = await apiKeyService.getGroups();
-    return c.html(layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error), getLayoutUser(c)));
+    return c.html(await layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error), getLayoutUser(c), settingsService));
   });
 
   // Handle create
@@ -1581,7 +1605,7 @@ export function createFunctionsPages(
 
     if (errors.length > 0) {
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". ")), getLayoutUser(c)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". ")), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -1592,7 +1616,7 @@ export function createFunctionsPages(
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create function";
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message), getLayoutUser(c)),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -1617,7 +1641,7 @@ export function createFunctionsPages(
       layout(
         `Edit: ${route.name}`,
         renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error),
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -1655,7 +1679,7 @@ export function createFunctionsPages(
         layout(
           `Edit: ${existingRoute.name}`,
           renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, errors.join(". ")),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -1672,7 +1696,7 @@ export function createFunctionsPages(
         layout(
           `Edit: ${existingRoute.name}`,
           renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, message),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -1720,7 +1744,7 @@ export function createFunctionsPages(
         `Are you sure you want to delete the function "${route.name}"? This action cannot be undone.`,
         `/web/functions/delete/${id}`,
         "/web/functions",
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -1784,7 +1808,7 @@ export function createFunctionsPages(
       oldestLogId,
       hasMore: logs.length === limit,
     });
-    return c.html(layout(`Logs: ${route.name}`, content, getLayoutUser(c)));
+    return c.html(await layout(`Logs: ${route.name}`, content, getLayoutUser(c), settingsService));
   });
 
   // View global (server-wide) metrics
@@ -1825,7 +1849,7 @@ export function createFunctionsPages(
       allFunctions
     );
 
-    return c.html(layout("Metrics: Server Stats", content, getLayoutUser(c)));
+    return c.html(await layout("Metrics: Server Stats", content, getLayoutUser(c), settingsService));
   });
 
   // View metrics for a function
@@ -1876,7 +1900,7 @@ export function createFunctionsPages(
       allFunctions
     );
 
-    return c.html(layout(`Metrics: ${route.name}`, content, getLayoutUser(c)));
+    return c.html(await layout(`Metrics: ${route.name}`, content, getLayoutUser(c), settingsService));
   });
 
   // ============== Function Secrets Management ==============
@@ -1928,7 +1952,7 @@ export function createFunctionsPages(
     `;
 
     return c.html(
-      layout(`Secrets: ${route.name}`, content, getLayoutUser(c))
+      layout(`Secrets: ${route.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -1963,7 +1987,7 @@ export function createFunctionsPages(
     `;
 
     return c.html(
-      layout(`Create Secret: ${route.name}`, content, getLayoutUser(c))
+      layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -2008,7 +2032,7 @@ export function createFunctionsPages(
         ${renderFunctionSecretCreateForm(functionId, secretData, errors.join(". "))}
       `;
       return c.html(
-        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c)),
+        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -2038,7 +2062,7 @@ export function createFunctionsPages(
         ${renderFunctionSecretCreateForm(functionId, secretData, message)}
       `;
       return c.html(
-        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c)),
+        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -2088,7 +2112,7 @@ export function createFunctionsPages(
     `;
 
     return c.html(
-      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -2150,7 +2174,7 @@ export function createFunctionsPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -2184,7 +2208,7 @@ export function createFunctionsPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -2227,7 +2251,7 @@ export function createFunctionsPages(
         `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>" from function "${escapeHtml(route.name)}"? This action cannot be undone.`,
         `/web/functions/secrets/${functionId}/delete/${secretId}`,
         `/web/functions/secrets/${functionId}`,
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });

@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { UserService } from "../users/user_service.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
 import {
   layout,
   escapeHtml,
@@ -24,6 +25,7 @@ interface SessionUser {
  */
 export interface UsersPagesOptions {
   userService: UserService;
+  settingsService: SettingsService;
 }
 
 /**
@@ -32,7 +34,7 @@ export interface UsersPagesOptions {
  * Provides CRUD operations for user management.
  */
 export function createUsersPages(options: UsersPagesOptions): Hono {
-  const { userService } = options;
+  const { userService, settingsService } = options;
   const routes = new Hono();
 
   /**
@@ -93,13 +95,13 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       `
       }
     `;
-    return c.html(layout("Users", content, getLayoutUser(c)));
+    return c.html(await layout("Users", content, getLayoutUser(c), settingsService));
   });
 
   // GET /create - Create user form
-  routes.get("/create", (c) => {
+  routes.get("/create", async (c) => {
     const error = c.req.query("error");
-    return c.html(layout("Create User", renderUserForm("/web/users/create", {}, error), getLayoutUser(c)));
+    return c.html(await layout("Create User", renderUserForm("/web/users/create", {}, error), getLayoutUser(c), settingsService));
   });
 
   // POST /create - Handle user creation
@@ -115,7 +117,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
 
     if (errors.length > 0) {
       return c.html(
-        layout("Create User", renderUserForm("/web/users/create", userData, errors.join(". ")), getLayoutUser(c)),
+        layout("Create User", renderUserForm("/web/users/create", userData, errors.join(". ")), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -133,7 +135,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create user";
       return c.html(
-        layout("Create User", renderUserForm("/web/users/create", userData, message), getLayoutUser(c)),
+        layout("Create User", renderUserForm("/web/users/create", userData, message), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -154,7 +156,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       layout(
         `Edit: ${user.email}`,
         renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, user, error),
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -185,7 +187,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
         layout(
           `Edit: ${user.email}`,
           renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, { ...user, ...editData }, errors.join(". ")),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -205,7 +207,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
         layout(
           `Edit: ${user.email}`,
           renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, { ...user, ...editData }, message),
-          getLayoutUser(c)
+          getLayoutUser(c), settingsService
         ),
         400
       );
@@ -234,7 +236,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
         `Are you sure you want to delete the user "${user.email}"? This action cannot be undone.`,
         `/web/users/delete/${encodeURIComponent(userId)}`,
         "/web/users",
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });

@@ -26,6 +26,9 @@ export const SettingNames = {
 
   // Files
   FILES_MAX_SIZE_BYTES: "files.max-size-bytes",
+
+  // General
+  SERVER_NAME: "server.name",
 } as const;
 
 /**
@@ -53,6 +56,7 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS]: "100",
   [SettingNames.API_ACCESS_GROUPS]: "",
   [SettingNames.FILES_MAX_SIZE_BYTES]: "52428800", // 50 MB
+  [SettingNames.SERVER_NAME]: "Crude Functions",
 };
 
 /**
@@ -66,7 +70,7 @@ export interface SettingMetadata {
   options?: readonly string[];
   min?: number;
   max?: number;
-  category: "Logging" | "Metrics" | "Encryption" | "Security";
+  category: "General" | "Logging" | "Metrics" | "Encryption" | "Security";
 }
 
 /**
@@ -197,12 +201,22 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     max: 524288000,
     category: "Security",
   },
+  [SettingNames.SERVER_NAME]: {
+    name: SettingNames.SERVER_NAME,
+    label: "Server Name",
+    description: "Display name shown in the web UI title and navigation",
+    inputType: "text",
+    category: "General",
+  },
 };
 
 /**
  * Settings grouped by category for UI display.
  */
 export const SettingsByCategory = {
+  General: [
+    SettingNames.SERVER_NAME,
+  ],
   Logging: [
     SettingNames.LOG_LEVEL,
     SettingNames.LOG_TRIMMING_INTERVAL_SECONDS,

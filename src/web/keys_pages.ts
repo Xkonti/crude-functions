@@ -3,6 +3,7 @@ import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
 import {
   layout,
   escapeHtml,
@@ -18,7 +19,8 @@ import {
 
 export function createKeysPages(
   apiKeyService: ApiKeyService,
-  secretsService: SecretsService
+  secretsService: SecretsService,
+  settingsService: SettingsService
 ): Hono {
   const routes = new Hono();
 
@@ -128,11 +130,11 @@ export function createKeysPages(
 
       ${secretScripts()}
     `;
-    return c.html(layout("API Keys", content, getLayoutUser(c)));
+    return c.html(await layout("API Keys", content, getLayoutUser(c), settingsService));
   });
 
   // Create group form
-  routes.get("/create-group", (c) => {
+  routes.get("/create-group", async (c) => {
     const error = c.req.query("error");
 
     const content = `
@@ -154,7 +156,7 @@ export function createKeysPages(
         </div>
       </form>
     `;
-    return c.html(layout("Create API Key Group", content, getLayoutUser(c)));
+    return c.html(await layout("Create API Key Group", content, getLayoutUser(c), settingsService));
   });
 
   // Handle create group
@@ -231,7 +233,7 @@ export function createKeysPages(
         </div>
       </form>
     `;
-    return c.html(layout(`Edit Group: ${group.name}`, content, getLayoutUser(c)));
+    return c.html(await layout(`Edit Group: ${group.name}`, content, getLayoutUser(c), settingsService));
   });
 
   // Handle edit group
@@ -333,7 +335,7 @@ export function createKeysPages(
         }
       </script>
     `;
-    return c.html(layout("Create API Key", content, getLayoutUser(c)));
+    return c.html(await layout("Create API Key", content, getLayoutUser(c), settingsService));
   });
 
   // Handle create
@@ -434,7 +436,7 @@ export function createKeysPages(
         `Are you sure you want to delete the key with ID ${id}? This action cannot be undone.`,
         `/web/keys/delete?id=${id}`,
         "/web/keys",
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -499,7 +501,7 @@ export function createKeysPages(
         `Are you sure you want to delete the group "${group.name}"? This action cannot be undone.`,
         `/web/keys/delete-group?id=${groupId}`,
         "/web/keys",
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -596,7 +598,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Secrets: ${group.name}`, content, getLayoutUser(c))
+      layout(`Secrets: ${group.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -631,7 +633,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Create Secret: ${group.name}`, content, getLayoutUser(c))
+      layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -676,7 +678,7 @@ export function createKeysPages(
         ${renderGroupSecretCreateForm(groupId, secretData, errors.join(". "))}
       `;
       return c.html(
-        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c)),
+        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -706,7 +708,7 @@ export function createKeysPages(
         ${renderGroupSecretCreateForm(groupId, secretData, message)}
       `;
       return c.html(
-        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c)),
+        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -756,7 +758,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -818,7 +820,7 @@ export function createKeysPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -852,7 +854,7 @@ export function createKeysPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c)),
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
         400
       );
     }
@@ -895,7 +897,7 @@ export function createKeysPages(
         `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
         `/web/keys/secrets/${groupId}/delete/${secretId}`,
         `/web/keys/secrets/${groupId}`,
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
@@ -999,7 +1001,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Secrets: ${keyDisplay}`, content, getLayoutUser(c))
+      layout(`Secrets: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -1036,7 +1038,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c))
+      layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -1076,7 +1078,7 @@ export function createKeysPages(
         ${renderKeySecretCreateForm(keyId, secretData, errors.join(", "))}
       `;
       return c.html(
-        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c))
+        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
       );
     }
 
@@ -1105,7 +1107,7 @@ export function createKeysPages(
         ${renderKeySecretCreateForm(keyId, secretData, message)}
       `;
       return c.html(
-        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c))
+        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
       );
     }
   });
@@ -1151,7 +1153,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
     );
   });
 
@@ -1199,7 +1201,7 @@ export function createKeysPages(
         ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, errors.join(", "))}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
       );
     }
 
@@ -1228,7 +1230,7 @@ export function createKeysPages(
         ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, message)}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c))
+        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
       );
     }
   });
@@ -1269,7 +1271,7 @@ export function createKeysPages(
         `Are you sure you want to delete the secret <strong>${escapeHtml(secret.name)}</strong>? This action cannot be undone.`,
         `/web/keys/${keyId}/secrets/delete/${secretId}`,
         `/web/keys/${keyId}/secrets`,
-        getLayoutUser(c)
+        getLayoutUser(c), settingsService
       )
     );
   });
