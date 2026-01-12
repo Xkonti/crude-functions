@@ -1,79 +1,183 @@
 # Crude Functions
 
-A minimal, single-container serverless-style function router built on Deno. Functions are TypeScript files that get dynamically loaded and executed as HTTP endpoints.
+Crude Functions is a minimal, self-hosted serverless function platform that runs in a single Docker container. Write TypeScript functions, deploy them as HTTP endpoints, manage everything through a web UI or API. That's it.
 
-**Target use case:** Internal network services with low-to-moderate traffic (~5-50 req/s).
+**Philosophy:** Simple, pragmatic, and designed for internal use. No complex deployment pipelines, no sandboxing theater, no scaling nonsense. You want to run some functions on your network? Done.
+
+**Target use case:** Internal network services with low-to-moderate traffic. Think internal APIs, webhooks, automation scripts, or small tools for your team.
 
 🚨 ENTIRELY VIBE CODED INCLUDING THIS DOCUMENT 🚨
 
+## Who Should Use This?
+
+You should use Crude Functions if you:
+
+- Want a simple way to deploy and manage serverless-style functions internally
+- Trust the code you're running (no sandboxing - this is for internal use)
+- Don't need massive scale or complex orchestration
+- Want to avoid cloud vendor lock-in for internal tooling
+- Value simplicity over enterprise features
+
+You should NOT use this if you:
+
+- Need to run untrusted code (no sandbox)
+- Expect high traffic
+- Want a production-ready public API platform
+- Need multi-tenancy or advanced isolation
+
 ## Features
 
-- **Minimal footprint:** Single Deno process, ~15-30MB RAM idle
+- **Minimal footprint:** Single Deno process, ~25MB RAM idle
 - **Zero-downtime deploys:** Hot-reload functions without restarting the server
 - **Simple function authoring:** Register a function by specifying handler file location
 - **No build step:** Deno runs TypeScript directly
 - **API-based deployment:** Programmatically add/update functions via HTTP
+- Secrets management with multiple scopes to keep them out of your code.
 - **Web UI:** Browser-based management interface
 - **API key authentication:** Flexible key-based access control
+- Encryption at rest for API keys and secrets
 
-## Quick Start
+## Installation
 
 ### Prerequisites
 
-- [Deno](https://deno.land/) v2.0+
+- Docker and/or Docker Compose
 
-### Running Locally
+### Docker Compose
 
-```bash
-# Clone the repository
-git clone <repo-url>
-cd crude-functions
+Create a `docker-compose.yml` file:
 
-# Run the server
-deno task dev
+```yaml
+services:
+  app:
+    image: xkonti/crude-functions:latest-hardened
+    ports:
+      - 8000:8000
+    volumes:
+      # Database and encryption keys
+      - ./data:/app/data
+      # Your function code
+      - ./code:/app/code
+    restart: unless-stopped
 ```
 
-The server starts on port 8000 by default. The database is automatically created at `./data/database.db` on first run.
+Create directories and start:
 
-**First-time setup:** Navigate to `http://localhost:8000/web/setup` to create your first admin user. After setup, you can create API keys via the API Keys page in the web UI.
+```bash
+mkdir -p data code
+docker compose up -d
+```
+
+That's it. The server is running on `http://localhost:8000`.
+
+**Image variants:**
+
+- `standard` - Full Debian base with shell. Use this for debugging or if you need to exec into the container or execute shell commands from within your functions.
+- `hardened` - Uses [Docker Hardened Image](https://dhi.io) - Near-zero CVEs, no shell, runs as non-root. Use this for production.
+
+### Docker Run
+
+```bash
+mkdir -p data code
+docker run -d \
+  -p 8000:8000 \
+  -v ./data:/app/data \
+  -v ./code:/app/code \
+  --name crude-functions \
+  xkonti/crude-functions:latest-hardened
+```
+
+### First-Time Setup
+
+On first run, Crude Functions will:
+
+1. Create SQLite database at `./data/database.db`
+2. Generate encryption keys at `./data/encryption-keys.json`
+3. Enable the setup page for admin user creation
+
+**Create your admin user:**
+
+1. Navigate to the web interface: `http://localhost:8000/web`
+2. Enter your email and password
+3. Click "Create Account"
+
+**Important:** The setup page is automatically disabled after the first user is created. If you need to add more users later, use the Users page in the web UI.
 
 ## Configuration
 
 ### Environment Variables
 
+Crude Functions needs minimal configuration. Most settings are managed through the web UI.
+
+**Optional environment variables:**
+
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
-| `BETTER_AUTH_BASE_URL` | Base URL for redirects and callbacks (optional, auto-detected if not set) | Auto-detected |
+| `BETTER_AUTH_BASE_URL` | Base URL for auth redirects | Auto-detected |
 
-**Note:** Most settings (log level, metrics, encryption, API access groups) are configured via the web UI Settings page and stored in the database. Encryption keys are auto-generated on first startup and stored in `./data/encryption-keys.json`.
+**When to set `BETTER_AUTH_BASE_URL`:**
 
-### Directory Structure
+- Behind a reverse proxy with complex routing
+- Auto-detection fails (rare)
+- Format: `https://your-domain.com` or `http://localhost:8000`
+
+**All other settings** (logging, metrics, encryption, API access) are configured via the web UI Settings page and stored in the database.
+
+## Directory Structure
 
 ```
 crude-functions/
 ├── data/
-│   ├── database.db           # SQLite database (routes, keys, users, secrets, logs, metrics)
-│   └── encryption-keys.json  # Auto-generated encryption keys (created on first run)
-├── code/                     # Your function handlers
-│   └── *.ts
-├── migrations/               # Database schema migrations
-└── main.ts
+│   ├── database.db           # SQLite database (everything is here)
+│   └── encryption-keys.json  # Auto-generated encryption keys
+└── code/                     # Your function handlers (TypeScript files)
+    ├── hello.ts              # Example function
+    └── utils/                # Shared code (import with relative paths)
+        └── helpers.ts
 ```
 
-### API Keys
+**Important:**
 
-API keys are stored in the SQLite database and managed via the API or Web UI.
+- `data/` - Keep this backed up. If you lose `encryption-keys.json`, you cannot decrypt secrets or API keys.
+- `code/` - Your function code. Organize however you want. Use subdirectories, shared utilities, whatever works.
 
-- **Key groups:** lowercase `a-z`, `0-9`, `_`, `-`
-- **Key values:** `a-z`, `A-Z`, `0-9`, `_`, `-`
-- **Descriptions:** Optional metadata for each key
+## Your First Function
 
-The `management` key group is created automatically on first startup and grants access to management endpoints (API). Add keys to this group via the Web UI after creating your first admin user. You can configure which groups have API access via the Settings page.
+Let's deploy a simple function.
 
-### Function Routes
+### Step 1: Create the Handler File
 
-Routes are stored in the SQLite database and managed via the API or Web UI. Each route defines:
+Create `code/hello.ts`:
+
+```typescript
+export default async function (c, ctx) {
+  return c.json({
+    message: "Hello from Crude Functions!",
+    timestamp: new Date().toISOString(),
+    requestId: ctx.requestId,
+  });
+}
+```
+
+**What's happening:**
+
+- `c` is the Hono context - use it for request/response handling
+- `ctx` is the function context - contains request metadata, parameters, secrets, etc.
+
+### Step 2: Register the Route
+
+Navigate to `http://localhost:8000/web/functions` and:
+
+1. Click "Add Function"
+2. Fill in:
+   - **Name:** `hello-world`
+   - **Description:** "My first function"
+   - **Handler:** `hello.ts` (path relative to `code/` directory)
+   - **Route:** `/hello`
+   - **Methods:** `GET`
+   - **API Keys:** Leave empty for now (public access)
+3. Click "Create"
 
 | Field | Required | Description |
 |-------|----------|-------------|
@@ -84,75 +188,87 @@ Routes are stored in the SQLite database and managed via the API or Web UI. Each
 | `description` | No | Human-readable description |
 | `keys` | No | Array of key groups required for access |
 
-Example route (via API):
+### Step 3: Test Your Function
+
+```bash
+curl http://localhost:8000/run/hello
+```
+
+You should see:
 
 ```json
 {
-  "name": "hello-world",
-  "description": "A simple greeting endpoint",
-  "handler": "hello.ts",
-  "route": "/hello",
-  "methods": ["GET"],
-  "keys": ["api"]
+  "message": "Hello from Crude Functions!",
+  "timestamp": "2026-01-12T10:30:00.000Z",
+  "requestId": "..."
 }
 ```
 
-## Writing Function Handlers
+**Hot reload:** Edit `code/hello.ts` and save. Changes take effect immediately - no restart needed.
 
-Create TypeScript files in the `code/` directory. Each handler exports a default function that receives a Hono context (`c`) and function context (`ctx`):
+TODO: For more details on how to write function handlers, please red the ... .md
+
+## Adding External Dependencies
+
+Functions can import external packages using full specifiers:
 
 ```typescript
-// code/hello.ts
-// Import other files from code/ using relative paths
-import { greet } from "./utils/greetings.ts";
-
-// Import external packages using full specifiers (npm:, jsr:, or URLs)
+// NPM packages
 import { camelCase } from "npm:lodash-es";
+import { format } from "npm:date-fns";
+
+// JSR packages
+import { parse } from "jsr:@std/yaml";
+
+// URLs
+import { z } from "https://deno.land/x/zod/mod.ts";
+
+// Local imports (relative paths)
+import { greet } from "./utils/helpers.ts";
 
 export default async function (c, ctx) {
-  return c.json({
-    message: camelCase(greet("world")),
-    params: ctx.params,
-    query: ctx.query,
-  });
+  const name = camelCase("john doe");
+  return c.json({ name });
 }
 ```
 
-### Function Context (`ctx`)
+**Note:** Deno downloads and caches dependencies on first import. This happens inside the container - no separate build step.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `ctx.params` | `Record<string, string>` | Path parameters (e.g., `{ id: "123" }`) |
-| `ctx.query` | `Record<string, string>` | Query string parameters |
-| `ctx.requestId` | `string` | Unique request ID for tracing |
-| `ctx.requestedAt` | `Date` | Request timestamp |
-| `ctx.authenticatedKeyGroup` | `string?` | API key group used (if route requires auth) |
-| `ctx.route` | `RouteInfo` | Route configuration (name, handler, methods, etc.) |
-| `ctx.getSecret(name, scope?)` | `Promise<string \| undefined>` | Get secret value with hierarchical resolution (key > group > function > global) |
-| `ctx.getCompleteSecret(name)` | `Promise<CompleteSecret \| undefined>` | Get secret with all scope values |
+## API keys
 
-**Secrets:** Functions can access encrypted secrets scoped to key, group, function, or global levels. See [function_handler_design.md](./function_handler_design.md) for details.
+TODO: Explanation of the concept of API key group and the api key itself. How are those groups used.
 
-### Hono Context (`c`)
+### Using Secrets
 
-Use `c` for request/response handling:
+Store sensitive data (connection strings, API tokens) in Secrets. Depending on your needs there are 4 scopes of secrets:
+
+- **Global** - Available to all functions
+- **Function** - Specific to one function (by name)
+- **Group** - Specific to an API key group
+- **Key** - Specific to an API key ID
+
+In most cases using the globally-scoped secrets is enough, but the additional scopes provide extra flexibility and security if needed. Scopes are hierarchical: key > group > function > global. More specific scopes override general ones. This makes it possible to change the value of a secret that the function handler will receive depending on which API key was used, etc.
+
+1. Go to global secrets management page: `http://localhost:8000/web/secrets`
+2. Add a secret (e.g., name: `DATABASE_URL`, scope: global)
+3. Access in your function:
 
 ```typescript
-// Read request
-const body = await c.req.json();
-const header = c.req.header("Authorization");
+export default async function (c, ctx) {
+  const dbUrl = await ctx.getSecret("DATABASE_URL");
 
-// Send response
-return c.json({ data }, 200);
-return c.text("Hello");
-return c.redirect("/other");
+  if (!dbUrl) {
+    return c.json({ error: "Database URL not configured" }, 500);
+  }
+
+  // Use dbUrl to connect...
+  return c.json({ status: "connected" });
+}
 ```
-
-For detailed documentation on writing handlers, see [function_handler_design.md](./function_handler_design.md).
 
 ## API Endpoints
 
-All management endpoints require authentication via session (Web UI) or the `X-API-Key` header with a key from an authorized access group (configurable in Settings).
+All management endpoints require authentication via session (Web UI) or the `X-API-Key` header with a key from an authorized API key group (configurable in Settings, by default it's the `management`).
 
 ### Functions
 
@@ -201,33 +317,9 @@ curl -X POST -H "X-API-Key: your-api-key" \
   -H "Content-Type: application/json" \
   -d '{"name": "John"}' \
   http://localhost:8000/run/users
-```
 
-## Web UI
-
-Access the management interface at `/web`.
-
-**First-time setup:** Navigate to `/web/setup` to create your first user account. Sign-up is automatically disabled after the first user is created.
-
-**Authentication:** After setup, log in with your email and password. Sessions are valid for 7 days.
-
-### Pages
-
-- `/web` - Dashboard with links to all sections
-- `/web/code` - Manage code files (upload, edit, delete)
-- `/web/functions` - Manage function routes and view execution logs/metrics
-- `/web/keys` - Manage API key groups and keys
-- `/web/secrets` - Manage encrypted secrets (global, function, group, key scopes)
-- `/web/users` - Manage user accounts and roles
-
-## Development
-
-```bash
-# Run with hot reload
-deno task dev
-
-# Run tests
-deno task test
+# API key in query param (avoid)
+curl http://localhost:8000/run/hello?api_key=your-api-key
 ```
 
 ## Docker Deployment
@@ -236,10 +328,8 @@ deno task test
 
 Two image variants are available:
 
-| Variant | Image Tag | Base | Use Case |
-|---------|-----------|------|----------|
-| **Hardened** | `hardened`, `x.y.z-hardened` | `dhi.io/deno:2` | Production (recommended) |
-| **Standard** | `latest`, `x.y.z` | `denoland/deno` | Development, debugging |
+- `standard` - Full Debian base with shell. Use this for debugging or if you need to exec into the container or execute shell commands from within your functions.
+- `hardened` - Uses [Docker Hardened Image](https://dhi.io) - Near-zero CVEs, no shell, runs as non-root. Use this for production.
 
 **Hardened variant** (default in examples):
 
@@ -265,95 +355,36 @@ To switch variants, change the image tag:
 
 ```yaml
 image: xkonti/crude-functions:latest      # Standard
-image: xkonti/crude-functions:hardened    # Hardened (recommended)
+image: xkonti/crude-functions:latest-hardened    # Hardened (recommended)
 ```
 
-### Using Docker Compose
+These images follow the semver conventions and one can specify more specific versions of the image, for example:
 
-Create a `docker-compose.yml`:
-
-```yaml
-services:
-  app:
-    # Hardened image (recommended): near-zero CVEs, no shell
-    # For debugging, use: xkonti/crude-functions:latest
-    image: xkonti/crude-functions:hardened
-    ports:
-      - 8000:8000
-    # Environment variables (optional)
-    # environment:
-    #   # Better Auth configuration
-    #   # Auto-detects from request headers if not set
-    #   # Set explicitly when behind reverse proxy: https://your-domain.com
-    #   - BETTER_AUTH_BASE_URL=http://localhost:8000
-    #
-    # Note: All settings (log level, metrics, encryption, API access groups)
-    # are configured via the web UI Settings page and stored in the database.
-    # On first run, create an admin user via the web UI setup page,
-    # then manage API keys through the API Keys page.
-    volumes:
-      # Mount the data directory for SQLite database and encryption keys
-      - ./data:/app/data
-      # Mount the code directory for function handlers
-      - ./code:/app/code
-    restart: unless-stopped
-```
-
-Create your directories and start:
-
-```bash
-mkdir -p data code
-docker compose up -d
-```
-
-**Optional:** Set `BETTER_AUTH_BASE_URL` if deploying behind a reverse proxy with complex routing. Otherwise, it will auto-detect from incoming requests.
-
-On first run:
-
-- Database is created at `./data/database.db`
-- Encryption keys are generated at `./data/encryption-keys.json`
-- Navigate to `http://localhost:8000/web/setup` to create your first user account
-
-### Using Docker Run
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  -v ./data:/app/data \
-  -v ./code:/app/code \
-  xkonti/crude-functions:hardened
-# For debugging: xkonti/crude-functions:latest
-# Optional: -e BETTER_AUTH_BASE_URL=https://your-domain.com
-```
-
-On first run, navigate to `http://localhost:8000/web/setup` to create your admin user.
-
-### Building from Source
-
-```bash
-# Standard image
-docker build -t crude-functions .
-
-# Hardened image (requires dhi.io login)
-docker login dhi.io
-docker build --build-arg BASE_IMAGE=dhi.io/deno:2 -t crude-functions:hardened .
-```
-
-## Hot Reload
-
-The server automatically reloads function handlers when their files are modified. Routes and API keys stored in the database are immediately available after changes via the API or Web UI - no server restart required.
+- `:0.4.3`/`:0.4.3-hardened`
+- `:0.4`/`:0.4-hardened`
+- `:0`/`:0-hardened`
 
 ## Security Considerations
 
 - This is designed for **internal network use** with trusted code
 - No sandboxing - functions have full Deno permissions
-- Basic process isolation prevents handlers from calling `process.exit()` or changing working directory
-- Environment isolation provides handlers with empty `Deno.env` and `process.env` by default
+- Basic process isolation prevents obvious _oopsies_ and doesn't provide any real security
+- Environment isolation provides handlers with empty `Deno.env` and `process.env` - these can be populated within each function execution if needed
 - API keys and secrets are encrypted with AES-256-GCM
 - Encryption keys are auto-generated and stored in `./data/encryption-keys.json`
 - Automatic key rotation with configurable intervals
 - Use behind a reverse proxy for TLS termination
 - **Important:** Keep `./data/encryption-keys.json` backed up and secure - loss means encrypted data cannot be recovered
+
+## Development
+
+```bash
+# Run with hot reload
+deno task dev
+
+# Run tests
+deno task test
+```
 
 ## License
 
