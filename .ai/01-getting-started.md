@@ -6,14 +6,13 @@ Crude Functions is a minimal, self-hosted serverless function platform that runs
 
 **Philosophy:** Simple, pragmatic, and designed for internal use. No complex deployment pipelines, no sandboxing theater, no scaling nonsense. You want to run some functions on your network? Done.
 
-**Target use case:** Internal network services with low-to-moderate traffic (~5-50 req/s). Think internal APIs, webhooks, automation scripts, or small tools for your team.
+**Target use case:** Internal network services with low-to-moderate traffic. Think internal APIs, webhooks, automation scripts, or small tools for your team.
 
 ## Who Should Use This?
 
 You should use Crude Functions if you:
 
 - Want a simple way to deploy and manage serverless-style functions internally
-- Are comfortable with Docker and basic web development
 - Trust the code you're running (no sandboxing - this is for internal use)
 - Don't need massive scale or complex orchestration
 - Want to avoid cloud vendor lock-in for internal tooling
@@ -22,7 +21,7 @@ You should use Crude Functions if you:
 You should NOT use this if you:
 
 - Need to run untrusted code (no sandbox)
-- Expect high traffic (>50 req/s sustained)
+- Expect high traffic
 - Want a production-ready public API platform
 - Need multi-tenancy or advanced isolation
 
@@ -30,19 +29,16 @@ You should NOT use this if you:
 
 ### Prerequisites
 
-- Docker and Docker Compose (recommended)
-- OR Deno 2.0+ for native installation
+- Docker and/or Docker Compose
 
-### Option 1: Docker Compose (Recommended)
+### Docker Compose
 
 Create a `docker-compose.yml` file:
 
 ```yaml
 services:
   app:
-    # Hardened image recommended for production
-    # Use 'latest' for development/debugging
-    image: xkonti/crude-functions:hardened
+    image: xkonti/crude-functions:latest-hardened
     ports:
       - 8000:8000
     volumes:
@@ -51,9 +47,6 @@ services:
       # Your function code
       - ./code:/app/code
     restart: unless-stopped
-    # Optional environment variables
-    # environment:
-    #   - BETTER_AUTH_BASE_URL=http://localhost:8000
 ```
 
 Create directories and start:
@@ -67,10 +60,10 @@ That's it. The server is running on `http://localhost:8000`.
 
 **Image variants:**
 
-- `hardened` - Near-zero CVEs, no shell, runs as non-root. Use this for production.
-- `latest` - Full Debian base with shell. Use this for debugging or if you need to exec into the container.
+- `hardened` - Uses [Docker Hardened Image](https://dhi.io) - Near-zero CVEs, no shell, runs as non-root. Use this for production.
+- `standard` - Full Debian base with shell. Use this for debugging or if you need to exec into the container.
 
-### Option 2: Docker Run
+### Docker Run
 
 ```bash
 mkdir -p data code
@@ -79,20 +72,8 @@ docker run -d \
   -v ./data:/app/data \
   -v ./code:/app/code \
   --name crude-functions \
-  xkonti/crude-functions:hardened
+  xkonti/crude-functions:latest-hardened
 ```
-
-### Option 3: Native Deno
-
-If you want to run without Docker:
-
-```bash
-git clone <repo-url>
-cd crude-functions
-deno task dev
-```
-
-The server starts on port 8000. Database and encryption keys are created in `./data/` on first run.
 
 ## First-Time Setup
 
@@ -100,11 +81,11 @@ On first run, Crude Functions will:
 
 1. Create SQLite database at `./data/database.db`
 2. Generate encryption keys at `./data/encryption-keys.json`
-3. Enable the setup page at `/web/setup`
+3. Enable the setup page for admin user creation
 
 **Create your admin user:**
 
-1. Navigate to `http://localhost:8000/web/setup`
+1. Navigate to the web interface: `http://localhost:8000/web`
 2. Enter your email and password
 3. Click "Create Account"
 
@@ -130,17 +111,6 @@ Crude Functions needs minimal configuration. Most settings are managed through t
 - Format: `https://your-domain.com` or `http://localhost:8000`
 
 **All other settings** (logging, metrics, encryption, API access) are configured via the web UI Settings page and stored in the database.
-
-### .env File (Optional)
-
-If running with Docker Compose or native Deno, you can create a `.env` file:
-
-```bash
-PORT=8000
-# BETTER_AUTH_BASE_URL=http://localhost:8000
-```
-
-Docker Compose automatically loads `.env` files. For Docker run, use `-e` flags or `--env-file`.
 
 ## Directory Structure
 
