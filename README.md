@@ -206,7 +206,7 @@ You should see:
 
 **Hot reload:** Edit `code/hello.ts` and save. Changes take effect immediately - no restart needed.
 
-TODO: For more details on how to write function handlers, please red the ... .md
+For more details on writing function handlers, see [Writing Functions](.ai/02-writing-functions.md).
 
 ## Adding External Dependencies
 
@@ -236,7 +236,56 @@ export default async function (c, ctx) {
 
 ## API keys
 
-TODO: Explanation of the concept of API key group and the api key itself. How are those groups used.
+API keys are organized into **groups** for access control and logical separation.
+
+**Groups** are containers that hold multiple API keys. Each group has:
+
+- A unique name (lowercase alphanumeric with dashes/underscores)
+- Optional description
+- One or more API keys
+
+**Individual API keys** within a group have:
+
+- A name (unique within the group)
+- A value (the actual credential used in `X-API-Key` header)
+- Optional description
+
+### How Groups Are Used
+
+**1. Protecting Functions**
+
+When creating a function route, specify which key groups can access it:
+
+```json
+{
+  "route": "/admin/users",
+  "keys": ["admin", "backend-service"]
+}
+```
+
+Only API keys from the `admin` or `backend-service` groups can execute this function. Other keys get a 403.
+
+**2. Management API Access**
+
+The `api.access-groups` setting (configurable in Settings page) controls which key groups can access `/api/*` endpoints. Default: only the built-in `management` group.
+
+**3. Scoped Secrets**
+
+Secrets can be scoped to a specific group. This lets different callers use different credentials:
+
+- Global secret `DATABASE_URL` = `postgresql://shared-db`
+- Group-scoped secret `DATABASE_URL` for group `mobile-app` = `postgresql://readonly-db`
+
+When a function is called with an API key from `mobile-app`, it gets the readonly database URL. Other keys get the shared one.
+
+### Creating Groups and Keys
+
+1. Go to `http://localhost:8000/web/keys`
+2. Create a group (e.g., `mobile-app`)
+3. Add API keys to the group
+4. Use those keys in function routes or for API access
+
+**Built-in group:** The `management` group is created automatically and cannot be deleted. Use it for platform administration.
 
 ### Using Secrets
 
@@ -268,7 +317,25 @@ export default async function (c, ctx) {
 
 ## API Endpoints
 
-All management endpoints require authentication via session (Web UI) or the `X-API-Key` header with a key from an authorized API key group (configurable in Settings, by default it's the `management`).
+Crude Functions provides a comprehensive REST API for programmatic management.
+
+**Authentication:**
+
+- All `/api/*` endpoints require authentication via session cookie (web UI) OR `X-API-Key` header
+- The `X-API-Key` must belong to an authorized group (configurable in Settings, default: `management` group)
+- Exception: `/api/auth/*` (handles own auth)
+
+**Base URL:** `http://localhost:8000` (adjust for your deployment)
+
+### Authentication
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET/POST | `/api/auth/*` | Better Auth endpoints for login, signup, sessions |
+
+Better Auth handles authentication flows. See [Better Auth documentation](https://www.better-auth.com/docs) for details.
+
+**Note:** The `/web` UI uses session authentication. Management endpoints (`/api/*`) accept either session cookies OR the `X-API-Key` header.
 
 ### Functions
 
@@ -287,19 +354,175 @@ All management endpoints require authentication via session (Web UI) or the `X-A
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/api/files` | List all files in code directory |
-| GET | `/api/files/content?path=...` | Get file content |
-| POST | `/api/files` | Create or update a file |
-| DELETE | `/api/files` | Delete a file |
+| GET | `/api/files/:path` | Get file content |
+| POST | `/api/files/:path` | Create a new file |
+| PUT | `/api/files/:path` | Create or update a file |
+| DELETE | `/api/files/:path` | Delete a file |
+
+**Note:** File paths are URL-encoded. The GET endpoint supports content negotiation - use `Accept: application/json` for JSON envelope response with metadata.
+
+### API Key Groups
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/key-groups` | List all API key groups |
+| GET | `/api/key-groups/:groupId` | Get a specific group by ID |
+| POST | `/api/key-groups` | Create a new API key group |
+| PUT | `/api/key-groups/:groupId` | Update a group's description |
+| DELETE | `/api/key-groups/:groupId` | Delete an empty group |
+
+**Note:** The `management` group cannot be deleted. Groups must be empty before deletion.
 
 ### API Keys
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/keys` | List all key groups |
-| GET | `/api/keys/:group` | Get keys for a group |
-| POST | `/api/keys/:group` | Add a new key |
-| DELETE | `/api/keys/:group` | Delete all keys for a group |
-| DELETE | `/api/keys/by-id/:id` | Delete a key by ID |
+| GET | `/api/keys` | List all API keys (optional ?groupId filter) |
+| GET | `/api/keys/:keyId` | Get a specific API key by ID |
+| POST | `/api/keys` | Create a new API key |
+| PUT | `/api/keys/:keyId` | Update an API key |
+| DELETE | `/api/keys/:keyId` | Delete an API key |
+
+### Secrets
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/secrets` | List all secrets (with optional filtering) |
+| GET | `/api/secrets/:id` | Get a secret by ID |
+| GET | `/api/secrets/by-name/:name` | Search secrets by name |
+| POST | `/api/secrets` | Create a new secret |
+| PUT | `/api/secrets/:id` | Update a secret |
+| DELETE | `/api/secrets/:id` | Delete a secret |
+
+**Query parameters for listing:**
+
+- `scope` - Filter by scope (global, function, group, key)
+- `functionId` - Filter by function ID
+- `groupId` - Filter by key group ID
+- `keyId` - Filter by API key ID
+- `includeValues=true` - Include decrypted values (default: false)
+
+**Creating a secret:**
+
+```bash
+curl -X POST \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "DATABASE_URL",
+    "value": "postgresql://...",
+    "scope": "global",
+    "comment": "Main database connection"
+  }' \
+  http://localhost:8000/api/secrets
+```
+
+**Scopes:** Secrets support hierarchical scopes (key > group > function > global). More specific scopes override general ones.
+
+### User Management
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/users` | List all users |
+| GET | `/api/users/:id` | Get a user by ID |
+| POST | `/api/users` | Create a new user |
+| PUT | `/api/users/:id` | Update a user (password, roles) |
+| DELETE | `/api/users/:id` | Delete a user |
+
+**Note:** Cannot delete your own account. First user created has permanent admin access.
+
+### Logs
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/logs` | Query logs with pagination and filtering |
+| DELETE | `/api/logs/:functionId` | Delete all logs for a function |
+
+**Query parameters:**
+
+- `functionId` - Filter by function ID (omit for all functions)
+- `level` - Filter by log level (comma-separated: log, debug, info, warn, error, trace)
+- `limit` - Results per page (1-1000, default: 50)
+- `cursor` - Pagination cursor from previous response
+
+**Response includes pagination:**
+
+```json
+{
+  "data": {
+    "logs": [...],
+    "pagination": {
+      "limit": 50,
+      "hasMore": true,
+      "next": "/api/logs?limit=50&cursor=..."
+    }
+  }
+}
+```
+
+### Metrics
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/metrics` | Query aggregated execution metrics |
+
+**Required query parameter:**
+
+- `resolution` - Time resolution: `minutes` (last 60), `hours` (last 24), or `days` (configurable retention)
+
+**Optional query parameter:**
+
+- `functionId` - Filter by function ID (omit for global metrics)
+
+**Example:**
+
+```bash
+curl -H "X-API-Key: your-key" \
+  "http://localhost:8000/api/metrics?resolution=hours&functionId=1"
+```
+
+Returns time-series data with execution counts, avg/max execution times, and summary statistics.
+
+### Settings
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/settings` | Get all settings (global + user if authenticated) |
+| PUT | `/api/settings` | Update multiple settings atomically |
+
+**Updating settings:**
+
+```bash
+curl -X PUT \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "settings": {
+      "log.level": "info",
+      "metrics.retention-days": "30"
+    }
+  }' \
+  http://localhost:8000/api/settings
+```
+
+Settings are managed through the web UI. See the Settings page for available options.
+
+### Encryption Keys
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/encryption-keys/rotation` | Get key rotation status |
+| POST | `/api/encryption-keys/rotation` | Manually trigger key rotation |
+
+**Rotation status includes:**
+
+- Last rotation timestamp
+- Days since last rotation
+- Next scheduled rotation
+- Current key version
+- Whether rotation is in progress
+
+**Manual rotation:** Re-encrypts all secrets, API keys, and settings. Can take time with large datasets.
 
 ### Function Execution
 

@@ -268,9 +268,6 @@ const functionRouter = new FunctionRouter({
   codeDirectory: "./code",
 });
 
-// Public endpoints
-app.get("/ping", (c) => c.json({ pong: true }));
-
 // Better Auth handler - handles /api/auth/* endpoints
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
