@@ -70,7 +70,7 @@ export function createKeysPages(
                     <div>
                       ${groupInfo ? `<a href="/web/keys/secrets/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Manage Secrets">🔐</a>` : ""}
                       ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
-                      <a href="/web/keys/create?group=${encodeURIComponent(groupName)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>
+                      ${groupInfo ? `<a href="/web/keys/create?group=${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>` : ""}
                       ${
                         groupName !== "management" && groupInfo
                           ? `<a href="/web/keys/delete-group?id=${groupInfo.id}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
@@ -272,7 +272,16 @@ export function createKeysPages(
 
   // Create key form
   routes.get("/create", async (c) => {
-    const preselectedGroup = c.req.query("group") ?? "";
+    const preselectedGroupIdStr = c.req.query("group") ?? "";
+    let preselectedGroup: ApiKeyGroup | null = null;
+
+    if (preselectedGroupIdStr) {
+      const groupId = parseInt(preselectedGroupIdStr, 10);
+      if (!isNaN(groupId)) {
+        preselectedGroup = await apiKeyService.getGroupById(groupId);
+      }
+    }
+
     const error = c.req.query("error");
     const groups = await apiKeyService.getGroups();
 
@@ -284,11 +293,12 @@ export function createKeysPages(
           Key Group
           ${
             preselectedGroup
-              ? `<input type="text" name="group" value="${escapeHtml(preselectedGroup)}" readonly>
-                 <small>Adding to existing group</small>`
-              : `<select name="group" required>
+              ? `<input type="text" name="groupName" value="${escapeHtml(preselectedGroup.name)}" readonly>
+                 <input type="hidden" name="groupId" value="${preselectedGroup.id}">
+                 <small>Adding to group: ${escapeHtml(preselectedGroup.name)}</small>`
+              : `<select name="groupId" required>
                    <option value="">-- Select a group or create new --</option>
-                   ${groups.map((g) => `<option value="${escapeHtml(g.name)}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
+                   ${groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
                    <option value="__new__">+ Create new group...</option>
                  </select>
                  <small>Select an existing group or create a new one</small>`
@@ -325,7 +335,7 @@ export function createKeysPages(
         </div>
       </form>
       <script>
-        const groupSelect = document.querySelector('select[name="group"]');
+        const groupSelect = document.querySelector('select[name="groupId"]');
         const newGroupDiv = document.getElementById('new-group-name');
         const newGroupInput = document.querySelector('input[name="newGroupName"]');
         if (groupSelect && newGroupDiv && newGroupInput) {
@@ -347,21 +357,24 @@ export function createKeysPages(
 
   // Handle create
   routes.post("/create", async (c) => {
-    let body: { group?: string; newGroupName?: string; name?: string; value?: string; description?: string };
+    let body: { groupId?: string; newGroupName?: string; name?: string; value?: string; description?: string };
     try {
       body = (await c.req.parseBody()) as typeof body;
     } catch {
       return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid form data"));
     }
 
-    let group = (body.group as string | undefined)?.trim().toLowerCase() ?? "";
+    let groupIdStr = (body.groupId as string | undefined)?.trim() ?? "";
     const newGroupName = (body.newGroupName as string | undefined)?.trim().toLowerCase() ?? "";
     const name = (body.name as string | undefined)?.trim().toLowerCase() ?? "";
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
 
+    let groupId: number;
+    let groupName: string;
+
     // Handle "create new group" option
-    if (group === "__new__") {
+    if (groupIdStr === "__new__") {
       if (!newGroupName) {
         return c.redirect("/web/keys/create?error=" + encodeURIComponent("New group name is required"));
       }
@@ -371,55 +384,67 @@ export function createKeysPages(
             encodeURIComponent("Invalid new group name format (use lowercase a-z, 0-9, -, _)")
         );
       }
-      group = newGroupName;
+
+      try {
+        groupId = await apiKeyService.createGroup(newGroupName);
+        groupName = newGroupName;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Failed to create group";
+        return c.redirect(`/web/keys/create?error=` + encodeURIComponent(message));
+      }
+    } else {
+      // Use existing group
+      const parsedGroupId = parseInt(groupIdStr, 10);
+      if (isNaN(parsedGroupId)) {
+        return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid group selection"));
+      }
+
+      const group = await apiKeyService.getGroupById(parsedGroupId);
+      if (!group) {
+        return c.redirect("/web/keys/create?error=" + encodeURIComponent("Selected group not found"));
+      }
+
+      groupId = parsedGroupId;
+      groupName = group.name;
     }
 
-    if (!group) {
-      return c.redirect("/web/keys/create?error=" + encodeURIComponent("Key group is required"));
-    }
-
-    if (!validateKeyGroup(group)) {
-      return c.redirect(
-        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
-          encodeURIComponent("Invalid key group format (use lowercase a-z, 0-9, -, _)")
-      );
-    }
-
+    // Validate key name
     if (!name) {
       return c.redirect(
-        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+        `/web/keys/create?group=${groupId}&error=` +
           encodeURIComponent("Key name is required")
       );
     }
 
     if (!validateKeyName(name)) {
       return c.redirect(
-        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+        `/web/keys/create?group=${groupId}&error=` +
           encodeURIComponent("Invalid key name format (use lowercase a-z, 0-9, -, _)")
       );
     }
 
+    // Validate key value
     if (!value) {
       return c.redirect(
-        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+        `/web/keys/create?group=${groupId}&error=` +
           encodeURIComponent("Key value is required")
       );
     }
 
     if (!validateKeyValue(value)) {
       return c.redirect(
-        `/web/keys/create?group=${encodeURIComponent(group)}&error=` +
+        `/web/keys/create?group=${groupId}&error=` +
           encodeURIComponent("Invalid key value format (use a-z, A-Z, 0-9, -, _)")
       );
     }
 
     try {
-      await apiKeyService.addKey(group, name, value, description);
-      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key '${name}' created for group: ${group}`));
+      await apiKeyService.addKeyToGroup(groupId, name, value, description);
+      return c.redirect("/web/keys?success=" + encodeURIComponent(`Key '${name}' created for group: ${groupName}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create key";
       return c.redirect(
-        `/web/keys/create?group=${encodeURIComponent(group)}&error=` + encodeURIComponent(message)
+        `/web/keys/create?group=${groupId}&error=` + encodeURIComponent(message)
       );
     }
   });
