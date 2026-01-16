@@ -3,8 +3,6 @@ title: First-Time Setup
 description: Initial configuration and admin user creation
 ---
 
-# First-Time Setup
-
 After deploying Crude Functions for the first time, you'll need to create an admin user and configure initial settings. This guide walks through the essential first-time setup steps.
 
 ## What Happens on First Run
@@ -38,62 +36,7 @@ If deploying remotely, replace `localhost:8000` with your server's address.
 2. Create a strong password (minimum 8 characters)
 3. Click "Create Account"
 
-![Creating admin user](../../../assets/screenshots/admin-signup.png)
-
-### What Happens Behind the Scenes
-
-When you create the first user:
-
-- The account is created with the `permanent` role
-- This role cannot be deleted and cannot have the role removed
-- The sign-up page is **automatically disabled** for security
-- A `management` API key group is created automatically
-
-**Important:** After this first user is created, you cannot use the sign-up page again. Additional users must be added through the Users page in the web UI.
-
-## Understanding BETTER_AUTH_BASE_URL
-
-In most deployments, Crude Functions auto-detects the correct base URL for authentication redirects. However, you may need to set `BETTER_AUTH_BASE_URL` in these scenarios:
-
-**When to set it:**
-
-- Deploying behind a reverse proxy with complex routing
-- Auto-detection fails (rare)
-- Using a custom domain or non-standard port mapping
-
-**How to set it:**
-
-Add to your `docker-compose.yml`:
-
-```yaml
-services:
-  app:
-    image: xkonti/crude-functions:latest-hardened
-    ports:
-      - 8000:8000
-    environment:
-      - BETTER_AUTH_BASE_URL=https://functions.yourdomain.com
-    volumes:
-      - ./data:/app/data
-      - ./code:/app/code
-```
-
-Or with `docker run`:
-
-```bash
-docker run -d \
-  -p 8000:8000 \
-  -e BETTER_AUTH_BASE_URL=https://functions.yourdomain.com \
-  -v ./data:/app/data \
-  -v ./code:/app/code \
-  xkonti/crude-functions:latest-hardened
-```
-
-**Format:**
-
-- `https://your-domain.com` (with HTTPS in production)
-- `http://localhost:8000` (local development)
-- No trailing slash
+**Important:** After this first user is created, you cannot use the sign-up page again. Additional users must be added through the *Users* page in the web UI.
 
 ## Initial Settings Overview
 
