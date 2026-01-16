@@ -93,16 +93,15 @@ Now that we have our handler file, we need to register it as a function route. Y
 
 You should see your new function in the functions list with a green "Enabled" status.
 
+![Created function listed in table](../../../assets/screenshots/hello-world-function.png)
+
 ### Option B: Using the API
 
 If you prefer programmatic deployment, you can use the management API:
 
 ```bash
-# First, get a management API key from the web UI at /web/keys
-# The key should be in the 'management' group
-
 curl -X POST http://localhost:8000/api/functions \
-  -H "X-API-Key: your-management-key" \
+  -H "X-API-Key: your-management-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "name": "hello-world",
@@ -117,8 +116,6 @@ curl -X POST http://localhost:8000/api/functions \
 
 Your function is now live. Let's test it.
 
-### Using curl
-
 ```bash
 curl http://localhost:8000/run/hello
 ```
@@ -128,25 +125,9 @@ You should see a JSON response like:
 ```json
 {
   "message": "Hello from Crude Functions!",
-  "timestamp": "2026-01-12T10:30:00.000Z",
-  "requestId": "550e8400-e29b-41d4-a716-446655440000"
+  "timestamp": "2026-01-16T05:07:24.475Z",
+  "requestId": "dc791018-0edf-4b15-a8e0-e6d81bd78ff6"
 }
-```
-
-### Using your browser
-
-Simply visit `http://localhost:8000/run/hello` in your browser. You'll see the same JSON response.
-
-### Using an HTTP client
-
-If you use tools like Postman, Insomnia, or HTTPie:
-
-```bash
-# HTTPie
-http GET localhost:8000/run/hello
-
-# Postman/Insomnia
-# Just create a GET request to http://localhost:8000/run/hello
 ```
 
 ## Step 4: View Logs
@@ -154,17 +135,17 @@ http GET localhost:8000/run/hello
 Crude Functions automatically captures all console output from your functions.
 
 1. Go to `http://localhost:8000/web/functions`
-2. Click on your "hello-world" function
-3. Switch to the "Logs" tab
+2. Click the 📝 button on the function entry
 
-You won't see any logs yet because our function doesn't use `console.log()`. Let's add some logging.
+The only thing you'll see are the `EXET_START` and `EXEC_END` events because our function doesn't write anything to the output. Let's add some logging.
+
+![Table with start/end execution logs](../../../assets/screenshots/hello-world-no-logs.png)
 
 ## Step 5: Add Logging and Hot-Reload
 
 Edit your `hello.ts` file to add some console output:
 
 ```typescript
-// code/hello.ts
 export default async function (c, ctx) {
   console.log(`Hello endpoint called - Request ID: ${ctx.requestId}`);
   console.log(`Query parameters:`, ctx.query);
@@ -195,8 +176,8 @@ Response with query parameters:
 ```json
 {
   "message": "Hello from Crude Functions!",
-  "timestamp": "2026-01-12T10:32:15.000Z",
-  "requestId": "660e8400-e29b-41d4-a716-446655440001",
+  "timestamp": "2026-01-16T05:17:41.122Z",
+  "requestId": "5455e7d9-2e3d-4267-95cb-691eeb090f16",
   "query": {
     "name": "Alice",
     "role": "developer"
@@ -208,10 +189,7 @@ Response with query parameters:
 
 Go back to the web UI and refresh the Logs tab. You should now see entries like:
 
-```
-[2026-01-12 10:32:15] [LOG] Hello endpoint called - Request ID: 660e8400-e29b-41d4-a716-446655440001
-[2026-01-12 10:32:15] [LOG] Query parameters: { name: "Alice", role: "developer" }
-```
+![Table with logs](../../../assets/screenshots/hello-world-with-logs.png)
 
 ## Step 6: Handle Path Parameters
 
@@ -220,8 +198,8 @@ Let's make our function more dynamic by accepting a path parameter.
 ### Update the route
 
 1. Go to `http://localhost:8000/web/functions`
-2. Click "Edit" on your hello-world function
-3. Change the **Route** to `/hello/:name`
+2. Click ✏️ on your `hello-world` function
+3. Change the **Route Path** to `/hello/:name`
 4. Click "Save"
 
 ### Update the handler
@@ -229,7 +207,6 @@ Let's make our function more dynamic by accepting a path parameter.
 Edit `hello.ts` to use the path parameter:
 
 ```typescript
-// code/hello.ts
 export default async function (c, ctx) {
   const name = ctx.params.name || "Guest";
 
@@ -263,13 +240,12 @@ Functions can handle multiple HTTP methods. Let's add POST support.
 ### Update the route
 
 1. Edit your function in the web UI
-2. Change **Methods** to include both `GET` and `POST` (hold Ctrl/Cmd to select multiple)
+2. Change **HTTP Methods** to include both `GET` and `POST`
 3. Save
 
-### Update the handler to handle both methods
+### Update the handler to handle both methods differently
 
 ```typescript
-// code/hello.ts
 export default async function (c, ctx) {
   const method = c.req.method;
 
@@ -296,7 +272,8 @@ export default async function (c, ctx) {
     }, 201);
   }
 
-  // Method not allowed
+  // Return error, even though Crude Functions won't let those requests
+  // into the handler if methods are not allowed in function definition.
   return c.json({ error: "Method not allowed" }, 405);
 }
 ```
@@ -319,7 +296,7 @@ Response:
     "name": "Alice",
     "role": "developer"
   },
-  "timestamp": "2026-01-12T10:35:00.000Z"
+  "timestamp": "2026-01-16T05:26:53.224Z"
 }
 ```
 
@@ -327,17 +304,17 @@ Response:
 
 Crude Functions tracks execution metrics for every function call.
 
-1. Go to `http://localhost:8000/web/functions`
-2. Click on your hello-world function
-3. Switch to the "Metrics" tab
+1. Go to the functions management page in the Web UI
+2. Click on the 📊 button your hello-world function to view it's metrics
 
 You'll see charts showing:
 
-- **Request count** - Number of executions over time
 - **Execution time** - Average and maximum response times
-- **Error rates** - Failed requests (if any)
+- **Request count** - Number of executions over time
 
 The metrics are aggregated by minute, hour, and day depending on the time range you select.
+
+![Metrics view for hello-world function](../../../assets/screenshots/hello-world-metrics.png)
 
 ## Next Steps
 
@@ -347,10 +324,10 @@ Congratulations! You've created, deployed, and tested your first function. Here'
 
 Protect your function with API keys:
 
-1. Go to `http://localhost:8000/web/keys`
+1. Go to the API key management page
 2. Create a new key group (e.g., `api`)
 3. Add an API key to the group
-4. Edit your function and add the group name to the "API Keys" field
+4. Edit your function select the new group in the **Required API Key Groups** section
 5. Test with authentication:
 
 ```bash
@@ -366,7 +343,6 @@ curl -H "X-API-Key: your-key-value" http://localhost:8000/run/hello/Alice
 Add external dependencies to your function:
 
 ```typescript
-// code/hello.ts
 import { format } from "npm:date-fns";
 import { camelCase } from "npm:lodash-es";
 
@@ -384,18 +360,24 @@ export default async function (c, ctx) {
 
 Deno will automatically download and cache the packages on first import.
 
+```json
+{
+  "message": "Hello, someone!",
+  "timestamp": "Jan 16, 2026, 12:33:30 AM"
+}
+```
+
 ### Work with Secrets
 
 Store sensitive data like API keys securely:
 
 1. Go to `http://localhost:8000/web/secrets`
-2. Add a secret with scope "global":
+2. Add a global secret:
    - **Name**: `GREETING_PREFIX`
    - **Value**: `Welcome to Crude Functions`
 3. Update your handler:
 
 ```typescript
-// code/hello.ts
 export default async function (c, ctx) {
   const prefix = await ctx.getSecret("GREETING_PREFIX") || "Hello";
   const name = ctx.params.name || "Guest";
@@ -407,12 +389,20 @@ export default async function (c, ctx) {
 }
 ```
 
+Result:
+
+```json
+{
+  "message": "Welcome to Crude Functions, someone!",
+  "timestamp": "2026-01-16T05:36:15.041Z"
+}
+```
+
 ### Create Shared Utilities
 
-Organize your code with shared modules:
+Organize your code with shared modules by adding a new `lib/formatters.ts` file:
 
 ```typescript
-// code/lib/formatters.ts
 export function formatGreeting(name: string): string {
   return `Hello, ${name.trim()}!`;
 }
@@ -420,8 +410,11 @@ export function formatGreeting(name: string): string {
 export function getTimestamp(): string {
   return new Date().toISOString();
 }
+```
 
-// code/hello.ts
+Then update the `hello.ts` to use it:
+
+```ts
 import { formatGreeting, getTimestamp } from "./lib/formatters.ts";
 
 export default async function (c, ctx) {
@@ -436,48 +429,5 @@ export default async function (c, ctx) {
 
 ### Learn More
 
-- [API Reference](/api) - Complete API documentation
+- [API Reference](/reference/api) - Complete API documentation
 - [Writing Functions Guide](/guides/writing-functions) - Deep dive into handler capabilities
-- [Deployment Guide](/guides/deployment) - Production deployment best practices
-- [Security Guide](/guides/security) - Security considerations and best practices
-
-## Troubleshooting
-
-### "Function not found" error
-
-- Make sure the handler file exists in the `code/` directory
-- Check that the handler path in the function configuration is correct (relative to `code/`)
-- Verify the route is enabled in the web UI
-
-### Changes not taking effect
-
-- Save the file and wait a moment (hot-reload checks file modification time)
-- Check container logs for any errors: `docker compose logs -f`
-- Verify the volume mount in docker-compose.yml is correct
-
-### "Module not found" error
-
-- External packages must use full specifiers (`npm:package`, `jsr:package`, or full URLs)
-- Local imports must use relative paths with `.ts` extension
-- Check for typos in import statements
-
-### Function returns 500 error
-
-- Check the function logs in the web UI
-- Look at container logs: `docker compose logs -f`
-- Add try-catch blocks and console.error() statements to debug
-
-## Summary
-
-You've learned how to:
-
-- ✅ Create a handler file with the correct structure
-- ✅ Register a function via the Web UI or API
-- ✅ Test functions with curl and browsers
-- ✅ View execution logs in real-time
-- ✅ Experience hot-reload in action
-- ✅ Handle path parameters and query strings
-- ✅ Support multiple HTTP methods
-- ✅ Monitor execution metrics
-
-You're now ready to build more complex functions. Start simple, iterate quickly, and take advantage of hot-reload to rapidly develop your internal APIs.
