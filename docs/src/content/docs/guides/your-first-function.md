@@ -1,6 +1,6 @@
 ---
 title: Your First Function
-description: Quick tutorial for creating and deploying your first function
+description: Tutorial for creating and deploying your first function
 ---
 
 This tutorial walks you through creating, deploying, and testing your first function in Crude Functions. You'll learn the complete workflow from writing code to calling your endpoint.
@@ -8,6 +8,7 @@ This tutorial walks you through creating, deploying, and testing your first func
 ## What We'll Build
 
 A simple "Hello World" function that:
+
 - Responds with JSON
 - Shows the current timestamp
 - Includes request metadata
@@ -16,6 +17,7 @@ A simple "Hello World" function that:
 ## Prerequisites
 
 Before starting, make sure you have:
+
 - Crude Functions running at `http://localhost:8000`
 - Completed the initial setup (created your admin account)
 - Access to the web UI or API
@@ -24,12 +26,13 @@ If you haven't installed Crude Functions yet, see the [Getting Started](/guides/
 
 ## Step 1: Create the Handler File
 
-Every function in Crude Functions is a TypeScript file in the `code/` directory. Let's create our first handler.
+Every function in Crude Functions is a JavaScript or TypeScript file in the `code/` directory. Let's create our first handler.
 
-Create a file called `hello.ts` in your `code/` directory:
+Go to the 📁 code management page at `http://localhost:8000/web/code` and click `Upload New File` button.
+
+Create a file called `hello.ts` with the following code:
 
 ```typescript
-// code/hello.ts
 export default async function (c, ctx) {
   return c.json({
     message: "Hello from Crude Functions!",
@@ -39,48 +42,54 @@ export default async function (c, ctx) {
 }
 ```
 
+![File upload dialog](../../../assets/screenshots/create-new-file.png)
+
 ### Understanding the Handler Structure
 
-Every handler receives exactly two parameters:
+Every function handler receives exactly two parameters:
 
 | Parameter | Type | Purpose |
 |-----------|------|---------|
-| `c` | Hono Context | Request/response handling (like Express `req`/`res`) |
+| `c` | [Hono Context](https://hono.dev/docs/api/context) | Request/response handling (like Express `req`/`res`) |
 | `ctx` | Function Context | Route metadata, params, query, secrets, request ID |
 
 **The `c` parameter** lets you:
+
 - Read request data (`c.req.json()`, `c.req.header()`, etc.)
 - Send responses (`c.json()`, `c.text()`, `c.html()`, `c.redirect()`)
 
 **The `ctx` parameter** provides:
+
 - `ctx.params` - Path parameters (e.g., `/users/:id`)
 - `ctx.query` - Query string parameters
 - `ctx.requestId` - Unique request identifier
-- `ctx.requestedAt` - Request timestamp
 - `ctx.authenticatedKeyGroup` - API key group (if authenticated)
 - `ctx.getSecret()` - Access to secrets
 - `ctx.route` - Route configuration details
+- and [more...](/guides/writing-functions)
 
 ## Step 2: Register the Route
 
-Now that we have our handler file, we need to register it as a route. You can do this via the Web UI or API.
+Now that we have our handler file, we need to register it as a function route. You can do this from the Web UI or via the API.
 
 ### Option A: Using the Web UI
 
-1. Navigate to `http://localhost:8000/web/functions`
-2. Click the "Add Function" button
+1. Navigate to `http://localhost:8000/web/functions` (the ⚡ tab)
+2. Click the "Create New Function" button
 3. Fill in the form:
 
 | Field | Value | Description |
 |-------|-------|-------------|
 | **Name** | `hello-world` | Unique identifier for the function |
-| **Description** | "My first function" | Human-readable description (optional) |
-| **Handler** | `hello.ts` | Path to handler file relative to `code/` directory |
+| **Description** | `My first function` | Human-readable description (optional) |
+| **Handler** | `hello.ts` | Path to handler file - same as in the file management page |
 | **Route** | `/hello` | URL path where function will be accessible |
-| **Methods** | `GET` | HTTP methods allowed (select from dropdown) |
+| **Methods** | `GET` | HTTP methods allowed |
 | **API Keys** | *(leave empty)* | No authentication required for now |
 
 4. Click "Create"
+
+![Function Creation Dialog](../../../assets/screenshots/create-new-function.png)
 
 You should see your new function in the functions list with a green "Enabled" status.
 
@@ -323,6 +332,7 @@ Crude Functions tracks execution metrics for every function call.
 3. Switch to the "Metrics" tab
 
 You'll see charts showing:
+
 - **Request count** - Number of executions over time
 - **Execution time** - Average and maximum response times
 - **Error rates** - Failed requests (if any)

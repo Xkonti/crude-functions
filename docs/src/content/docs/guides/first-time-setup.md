@@ -98,7 +98,6 @@ Now that initial setup is complete:
 1. **Create your first function** - See [Writing Functions](/guides/writing-functions)
 2. **Explore the web UI** - Familiarize yourself with all pages
 3. **Set up backups** - Automate backups of the `data/` directory
-4. **Review security** - See [Authentication & Security](/guides/authentication)
 
 ## Troubleshooting
 
