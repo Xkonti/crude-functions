@@ -152,9 +152,9 @@ export function createKeysPages(
           Description
           <input type="text" name="description" placeholder="Optional description for this group">
         </label>
-        <div class="grid">
-          <button type="submit">Create Group</button>
-          <a href="/web/keys" role="button" class="secondary">Cancel</a>
+        <div class="grid" style="margin-bottom: 0;">
+          <button type="submit" style="margin-bottom: 0;">Create Group</button>
+          <a href="/web/keys" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
     `;
@@ -229,9 +229,9 @@ export function createKeysPages(
           Description
           <input type="text" name="description" value="${escapeHtml(group.description ?? "")}" placeholder="Optional description for this group">
         </label>
-        <div class="grid">
-          <button type="submit">Save Changes</button>
-          <a href="/web/keys" role="button" class="secondary">Cancel</a>
+        <div class="grid" style="margin-bottom: 0;">
+          <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+          <a href="/web/keys" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
     `;
@@ -329,9 +329,9 @@ export function createKeysPages(
           Description
           <input type="text" name="description" placeholder="Optional description">
         </label>
-        <div class="grid">
-          <button type="submit">Create Key</button>
-          <a href="/web/keys" role="button" class="secondary">Cancel</a>
+        <div class="grid" style="margin-bottom: 0;">
+          <button type="submit" style="margin-bottom: 0;">Create Key</button>
+          <a href="/web/keys" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
       <script>
@@ -1445,7 +1445,6 @@ function renderGroupSecretCreateForm(
                     rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
           ${generateValueButton(`group-secret-value-${groupId}`)}
         </div>
-        <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
         Comment
@@ -1453,9 +1452,9 @@ function renderGroupSecretCreateForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create Secret</button>
-        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create Secret</button>
+        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
     ${valueGeneratorScripts()}
@@ -1486,7 +1485,6 @@ function renderGroupSecretEditForm(
                     rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
           ${generateValueButton(`group-secret-edit-${groupId}-${secret.id}`)}
         </div>
-        <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
         Comment
@@ -1494,9 +1492,9 @@ function renderGroupSecretEditForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/keys/secrets/${groupId}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
     ${valueGeneratorScripts()}
@@ -1591,7 +1589,6 @@ function renderKeySecretCreateForm(
                     rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
           ${generateValueButton(`key-secret-value-${keyId}`)}
         </div>
-        <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
         Comment
@@ -1599,9 +1596,9 @@ function renderKeySecretCreateForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create Secret</button>
-        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create Secret</button>
+        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
     ${valueGeneratorScripts()}
@@ -1632,7 +1629,6 @@ function renderKeySecretEditForm(
                     rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
           ${generateValueButton(`key-secret-edit-${keyId}-${secret.id}`)}
         </div>
-        <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
         Comment
@@ -1640,9 +1636,9 @@ function renderKeySecretEditForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/keys/${keyId}/secrets" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
     ${valueGeneratorScripts()}

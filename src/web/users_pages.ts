@@ -302,9 +302,9 @@ function renderUserForm(
                placeholder="e.g., userMgmt or permanent,userMgmt" />
         <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create User</button>
-        <a href="/web/users" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create User</button>
+        <a href="/web/users" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
   `;
@@ -343,9 +343,9 @@ function renderEditForm(
                placeholder="e.g., userMgmt or permanent,userMgmt" />
         <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/users" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/users" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
   `;

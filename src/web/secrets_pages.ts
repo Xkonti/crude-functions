@@ -374,7 +374,6 @@ function renderCreateForm(
                     rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
           ${generateValueButton('global-secret-value')}
         </div>
-        <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
         Comment
@@ -382,9 +381,9 @@ function renderCreateForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create Secret</button>
-        <a href="/web/secrets" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create Secret</button>
+        <a href="/web/secrets" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
     ${valueGeneratorScripts()}
@@ -416,7 +415,6 @@ function renderEditForm(
                     rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
           ${generateValueButton('global-secret-edit')}
         </div>
-        <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
         Comment
@@ -424,9 +422,9 @@ function renderEditForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/secrets" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/secrets" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
     ${valueGeneratorScripts()}
