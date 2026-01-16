@@ -30,7 +30,7 @@ http://localhost:8000/web
 
 If deploying remotely, replace `localhost:8000` with your server's address.
 
-![Web UI login page](./screenshots/first-login.png)
+![Web UI login page](../../../assets/screenshots/first-login.png)
 
 ### Complete the Sign-Up Form
 
@@ -38,7 +38,7 @@ If deploying remotely, replace `localhost:8000` with your server's address.
 2. Create a strong password (minimum 8 characters)
 3. Click "Create Account"
 
-![Creating admin user](./screenshots/admin-signup.png)
+![Creating admin user](../../../assets/screenshots/admin-signup.png)
 
 ### What Happens Behind the Scenes
 
@@ -101,7 +101,7 @@ After logging in, visit the Settings page to review default configuration:
 
 Navigate to: `http://localhost:8000/web/settings`
 
-![Settings overview](./screenshots/settings-page.png)
+![Settings overview](../../../assets/screenshots/settings-page.png)
 
 ### Key Settings to Review
 
@@ -136,7 +136,7 @@ To use the management API programmatically, you'll need an API key.
 
 Go to: `http://localhost:8000/web/keys`
 
-![API keys page](./screenshots/api-keys-page.png)
+![API keys page](../../../assets/screenshots/api-keys-page.png)
 
 ### Find the Management Group
 
@@ -148,7 +148,7 @@ The `management` group is created automatically on first startup. This is the de
 4. Optional: Add a description
 5. Click "Create"
 
-![Creating an API key](./screenshots/create-api-key.png)
+![Creating an API key](../../../assets/screenshots/create-api-key.png)
 
 ### Copy Your API Key
 
@@ -156,7 +156,7 @@ The `management` group is created automatically on first startup. This is the de
 
 The web UI will show partial keys (last 6 characters) after creation for security.
 
-![API key created](./screenshots/api-key-created.png)
+![API key created](../../../assets/screenshots/api-key-created.png)
 
 ### Test Your API Key
 
@@ -177,7 +177,7 @@ Since sign-up is disabled after the first user, add new users through the Users 
 
 Go to: `http://localhost:8000/web/users`
 
-![Users management page](./screenshots/users-page.png)
+![Users management page](../../../assets/screenshots/users-page.png)
 
 ### Create a New User
 
@@ -188,7 +188,7 @@ Go to: `http://localhost:8000/web/users`
 5. Optional: Assign roles (comma-separated)
 6. Click "Create"
 
-![Adding a new user](./screenshots/add-user.png)
+![Adding a new user](../../../assets/screenshots/add-user.png)
 
 ### User Roles
 

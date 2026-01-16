@@ -71,7 +71,7 @@ export default async function (c, ctx) {
 }
 ```
 
-![Upload file form](/screenshots/code-upload.png)
+![Upload file form](../../../assets/screenshots/code-upload.png)
 
 **Path rules:**
 
@@ -96,7 +96,7 @@ export default async function (c, ctx) {
 - Download the file instead
 - Upload a replacement file using the file picker
 
-![Edit file interface](/screenshots/code-edit.png)
+![Edit file interface](../../../assets/screenshots/code-edit.png)
 
 ### Deleting a File
 

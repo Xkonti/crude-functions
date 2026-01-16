@@ -82,7 +82,7 @@ On first startup, Crude Functions automatically creates the `management` group:
    - **Description**: Optional (e.g., "Keys for mobile application")
 4. Click "Create"
 
-![Screenshot: Create Key Group form](/screenshots/keys-create-group.png)
+![Screenshot: Create Key Group form](../../../assets/screenshots/keys-create-group.png)
 
 ### Via API
 
@@ -137,7 +137,7 @@ Group names must follow these rules:
 5. Click "Generate"
 6. **Copy the generated key immediately** - It won't be shown in full again
 
-![Screenshot: Generate API Key form](/screenshots/keys-generate.png)
+![Screenshot: Generate API Key form](../../../assets/screenshots/keys-generate.png)
 
 The generated key will look like: `K5jQm8xPl3nRt7wVy2zAh6bDf9gHj4kMp1qSu0vXc8eYi3oN`
 
@@ -231,7 +231,7 @@ This route requires a valid API key from **either** group 2 **or** group 3.
    - Select one or more groups for protected routes
 4. Click "Save"
 
-![Screenshot: Function route protection settings](/screenshots/functions-protect.png)
+![Screenshot: Function route protection settings](../../../assets/screenshots/functions-protect.png)
 
 ### Via API
 
@@ -546,7 +546,7 @@ curl http://localhost:8000/api/key-groups \
 3. Keys are listed with names and partial values (last 6 characters)
 4. Click "Show" to reveal full key value
 
-![Screenshot: Keys list with partial values](/screenshots/keys-list.png)
+![Screenshot: Keys list with partial values](../../../assets/screenshots/keys-list.png)
 
 **Via API:**
 
