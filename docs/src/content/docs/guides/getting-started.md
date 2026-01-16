@@ -16,14 +16,14 @@ Crude Functions is a minimal, self-hosted serverless function platform that runs
 You should use Crude Functions if you:
 
 - Want a simple way to deploy and manage serverless-style functions internally
-- Trust the code you're running (no sandboxing - this is for internal use)
+- Trust the code you're running (no sandboxing)
 - Don't need massive scale or complex orchestration
 - Want to avoid cloud vendor lock-in for internal tooling
 - Value simplicity over enterprise features
 
 You should NOT use this if you:
 
-- Need to run untrusted code (no sandbox)
+- Need to run untrusted code (no sandboxing)
 - Expect high traffic
 - Want a production-ready public API platform
 - Need multi-tenancy or advanced isolation
@@ -33,9 +33,9 @@ You should NOT use this if you:
 - **Minimal footprint:** Single Deno process, ~25MB RAM idle
 - **Zero-downtime deploys:** Hot-reload functions without restarting the server
 - **Simple function authoring:** Register a function by specifying handler file location
-- **No build step:** Deno runs TypeScript directly
+- **No build step:** Deno runs TypeScript directly and downloads external packages on-the-go
 - **API-based deployment:** Programmatically add/update functions via HTTP
-- Secrets management with multiple scopes to keep them out of your code.
+- **Secrets management** with multiple scopes to keep them out of your code.
 - **Web UI:** Browser-based management interface
 - **API key authentication:** Flexible key-based access control
-- Encryption at rest for API keys and secrets
+- **Encryption at rest** for API keys and secrets
