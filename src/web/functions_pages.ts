@@ -1178,9 +1178,9 @@ function renderFunctionForm(
         </p>
       </div>
       `}
-      <div class="grid">
-        <button type="submit">${isEdit ? "Save Changes" : "Create Function"}</button>
-        <a href="/web/functions" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">${isEdit ? "Save Changes" : "Create Function"}</button>
+        <a href="/web/functions" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
 
@@ -1377,9 +1377,9 @@ function renderFunctionSecretCreateForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create Secret</button>
-        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create Secret</button>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
   `;
@@ -1414,9 +1414,9 @@ function renderFunctionSecretEditForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
   `;
