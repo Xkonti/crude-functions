@@ -71,9 +71,9 @@ docker compose up -d
 
 The server should be running on `http://localhost:8000`.
 
-## Understanding BETTER_AUTH_BASE_URL
+## Understanding AUTH_BASE_URL
 
-In most deployments, Crude Functions auto-detects the correct base URL for authentication redirects. However, you may need to set `BETTER_AUTH_BASE_URL` in these scenarios:
+In most deployments, Crude Functions auto-detects the correct base URL for authentication redirects. However, you may need to set `AUTH_BASE_URL` in these scenarios:
 
 **When to set it:**
 
@@ -92,7 +92,7 @@ services:
     ports:
       - 8000:8000
     environment:
-      - BETTER_AUTH_BASE_URL=https://functions.yourdomain.com
+      - AUTH_BASE_URL=https://functions.yourdomain.com
     volumes:
       - ./data:/app/data
       - ./code:/app/code
@@ -104,7 +104,7 @@ Or with `docker run`:
 ```bash
 docker run -d \
   -p 8000:8000 \
-  -e BETTER_AUTH_BASE_URL=https://functions.yourdomain.com \
+  -e AUTH_BASE_URL=https://functions.yourdomain.com \
   -v ./data:/app/data \
   -v ./code:/app/code \
   --name crude-functions \

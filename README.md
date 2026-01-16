@@ -114,9 +114,9 @@ Crude Functions needs minimal configuration. Most settings are managed through t
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
-| `BETTER_AUTH_BASE_URL` | Base URL for auth redirects | Auto-detected |
+| `AUTH_BASE_URL` | Base URL for auth redirects | Auto-detected |
 
-**When to set `BETTER_AUTH_BASE_URL`:**
+**When to set `AUTH_BASE_URL`:**
 
 - Behind a reverse proxy with complex routing
 - Auto-detection fails (rare)

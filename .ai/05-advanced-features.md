@@ -884,10 +884,10 @@ server {
 }
 ```
 
-Set `BETTER_AUTH_BASE_URL` environment variable:
+Set `AUTH_BASE_URL` environment variable:
 
 ```bash
-BETTER_AUTH_BASE_URL=https://functions.example.com
+AUTH_BASE_URL=https://functions.example.com
 ```
 
 ### CI/CD Pipeline
@@ -1096,7 +1096,7 @@ curl -X GET "$BASE_URL/api/metrics?resolution=hours" \
 
 ```bash
 PORT=8000
-BETTER_AUTH_BASE_URL=http://localhost:8000  # Optional, for OAuth
+AUTH_BASE_URL=http://localhost:8000  # Optional, for OAuth
 ```
 
 ### Database Settings

@@ -237,7 +237,7 @@ Clear browser cookies:
 3. Delete all cookies for `localhost:8000`
 4. Refresh and try logging in again
 
-Check BETTER_AUTH_BASE_URL is correct:
+Check AUTH_BASE_URL is correct:
 
 ```bash
 # View logs for auth redirects
@@ -253,7 +253,7 @@ services:
   app:
     image: xkonti/crude-functions:latest-hardened
     environment:
-      - BETTER_AUTH_BASE_URL=https://functions.company.com
+      - AUTH_BASE_URL=https://functions.company.com
     ports:
       - 8000:8000
     volumes:

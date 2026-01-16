@@ -17,7 +17,7 @@ Crude Functions has two types of configuration:
 **Environment variables** require a server restart to take effect:
 
 - `PORT`
-- `BETTER_AUTH_BASE_URL`
+- `AUTH_BASE_URL`
 
 **Database settings** take effect immediately or after a short delay (no restart needed):
 
@@ -35,7 +35,7 @@ Environment variables are set in your `.env` file or docker-compose.yml. Crude F
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
 | `PORT` | HTTP server port | `8000` | No |
-| `BETTER_AUTH_BASE_URL` | Base URL for authentication redirects | Auto-detected | No |
+| `AUTH_BASE_URL` | Base URL for authentication redirects | Auto-detected | No |
 
 ### PORT
 
@@ -67,7 +67,7 @@ services:
       - 3000:3000  # Map host:container
 ```
 
-### BETTER_AUTH_BASE_URL
+### AUTH_BASE_URL
 
 The base URL used for authentication redirects and callbacks. Better Auth uses this to construct redirect URLs during login/logout flows.
 
@@ -88,13 +88,13 @@ The base URL used for authentication redirects and callbacks. Better Auth uses t
 # .env
 
 # Production behind reverse proxy
-BETTER_AUTH_BASE_URL=https://functions.company.com
+AUTH_BASE_URL=https://functions.company.com
 
 # Development
-BETTER_AUTH_BASE_URL=http://localhost:8000
+AUTH_BASE_URL=http://localhost:8000
 
 # Ngrok tunnel
-BETTER_AUTH_BASE_URL=https://abc123.ngrok.io
+AUTH_BASE_URL=https://abc123.ngrok.io
 ```
 
 **Auto-detection behavior:**
@@ -531,7 +531,7 @@ On first startup, Crude Functions automatically creates all settings with defaul
 ```bash
 # .env
 PORT=3000
-BETTER_AUTH_BASE_URL=http://localhost:3000
+AUTH_BASE_URL=http://localhost:3000
 
 # Settings via API
 curl -X PUT \
@@ -552,7 +552,7 @@ curl -X PUT \
 ```bash
 # .env
 PORT=8000
-BETTER_AUTH_BASE_URL=https://functions.company.com
+AUTH_BASE_URL=https://functions.company.com
 
 # Settings via API
 curl -X PUT \

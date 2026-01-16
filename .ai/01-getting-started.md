@@ -102,9 +102,9 @@ Crude Functions needs minimal configuration. Most settings are managed through t
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | HTTP server port | `8000` |
-| `BETTER_AUTH_BASE_URL` | Base URL for auth redirects | Auto-detected |
+| `AUTH_BASE_URL` | Base URL for auth redirects | Auto-detected |
 
-**When to set `BETTER_AUTH_BASE_URL`:**
+**When to set `AUTH_BASE_URL`:**
 
 - Behind a reverse proxy with complex routing
 - Auto-detection fails (rare)
@@ -468,11 +468,11 @@ server {
 }
 ```
 
-Set `BETTER_AUTH_BASE_URL` in your docker-compose.yml:
+Set `AUTH_BASE_URL` in your docker-compose.yml:
 
 ```yaml
 environment:
-  - BETTER_AUTH_BASE_URL=http://functions.internal.company.com
+  - AUTH_BASE_URL=http://functions.internal.company.com
 ```
 
 ### Caddy Example
@@ -483,7 +483,7 @@ functions.internal.company.com {
 }
 ```
 
-Caddy automatically sets forwarding headers. No need to set `BETTER_AUTH_BASE_URL` unless auto-detection fails.
+Caddy automatically sets forwarding headers. No need to set `AUTH_BASE_URL` unless auto-detection fails.
 
 ## Monitoring and Logs
 
