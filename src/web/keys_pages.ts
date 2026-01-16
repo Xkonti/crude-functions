@@ -15,6 +15,8 @@ import {
   secretScripts,
   parseSecretFormData,
   parseSecretEditFormData,
+  generateValueButton,
+  valueGeneratorScripts,
 } from "./templates.ts";
 
 export function createKeysPages(
@@ -306,7 +308,11 @@ export function createKeysPages(
         </label>
         <label>
           Key Value
-          <input type="text" name="value" required placeholder="your-secret-key-value">
+          <div style="display: flex; align-items: center;">
+            <input type="text" id="key-value-input" name="value" required
+                   placeholder="your-secret-key-value" style="flex: 1;">
+            ${generateValueButton('key-value-input')}
+          </div>
           <small>Letters, numbers, dashes, and underscores only</small>
         </label>
         <label>
@@ -334,6 +340,7 @@ export function createKeysPages(
           });
         }
       </script>
+      ${valueGeneratorScripts()}
     `;
     return c.html(await layout("Create API Key", content, getLayoutUser(c), settingsService));
   });
@@ -1407,9 +1414,12 @@ function renderGroupSecretCreateForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="group-secret-value-${groupId}" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
+          ${generateValueButton(`group-secret-value-${groupId}`)}
+        </div>
         <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
@@ -1423,6 +1433,7 @@ function renderGroupSecretCreateForm(
         <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 
@@ -1444,9 +1455,12 @@ function renderGroupSecretEditForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(secret.value)}</textarea>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="group-secret-edit-${groupId}-${secret.id}" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
+          ${generateValueButton(`group-secret-edit-${groupId}-${secret.id}`)}
+        </div>
         <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
@@ -1460,6 +1474,7 @@ function renderGroupSecretEditForm(
         <a href="/web/keys/secrets/${groupId}" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 
@@ -1545,9 +1560,12 @@ function renderKeySecretCreateForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="key-secret-value-${keyId}" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
+          ${generateValueButton(`key-secret-value-${keyId}`)}
+        </div>
         <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
@@ -1561,6 +1579,7 @@ function renderKeySecretCreateForm(
         <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 
@@ -1582,9 +1601,12 @@ function renderKeySecretEditForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(secret.value)}</textarea>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="key-secret-edit-${keyId}-${secret.id}" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
+          ${generateValueButton(`key-secret-edit-${keyId}-${secret.id}`)}
+        </div>
         <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
@@ -1598,5 +1620,6 @@ function renderKeySecretEditForm(
         <a href="/web/keys/${keyId}/secrets" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }

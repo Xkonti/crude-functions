@@ -14,6 +14,8 @@ import {
   secretScripts,
   parseSecretFormData,
   parseSecretEditFormData,
+  generateValueButton,
+  valueGeneratorScripts,
 } from "./templates.ts";
 
 /**
@@ -366,9 +368,12 @@ function renderCreateForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="global-secret-value" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
+          ${generateValueButton('global-secret-value')}
+        </div>
         <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
@@ -382,6 +387,7 @@ function renderCreateForm(
         <a href="/web/secrets" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 
@@ -404,9 +410,12 @@ function renderEditForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(secret.value)}</textarea>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="global-secret-edit" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
+          ${generateValueButton('global-secret-edit')}
+        </div>
         <small>Encrypted at rest using AES-256-GCM</small>
       </label>
       <label>
@@ -420,6 +429,7 @@ function renderEditForm(
         <a href="/web/secrets" role="button" class="secondary">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 
