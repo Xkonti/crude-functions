@@ -73,7 +73,7 @@ The server should be running on `http://localhost:8000`.
 
 ## Understanding AUTH_BASE_URL
 
-In most deployments, Crude Functions auto-detects the correct base URL for authentication redirects. However, you may need to set `AUTH_BASE_URL` in these scenarios:
+In most deployments, Crude Functions auto-detects the correct base URL for authentication redirects. However, you may need to set `AUTH_BASE_URL` environment variable in these scenarios:
 
 **When to set it:**
 

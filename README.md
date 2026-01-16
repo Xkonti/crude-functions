@@ -607,6 +607,15 @@ deno task dev
 
 # Run tests
 deno task test
+
+# Build the standard container image locally
+docker build -t crude-functions:test .
+
+# Build the hardened container image locally
+docker build --build-arg BASE_IMAGE=dhi.io/deno:2 -t crude-functions:test-hardened .
+
+# Run the local container without persisting
+
 ```
 
 ## License
