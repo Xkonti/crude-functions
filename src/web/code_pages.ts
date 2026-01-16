@@ -293,9 +293,9 @@ export function createCodePages(fileService: FileService, settingsService: Setti
           Content
           <textarea name="content" id="content-input" rows="15" style="font-family: monospace;"></textarea>
         </label>
-        <div class="grid">
-          <button type="submit" id="upload-btn">Upload</button>
-          <a href="/web/code" role="button" class="secondary">Cancel</a>
+        <div class="grid" style="margin-bottom: 0;">
+          <button type="submit" id="upload-btn" style="margin-bottom: 0;">Upload</button>
+          <a href="/web/code" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
       <script>
