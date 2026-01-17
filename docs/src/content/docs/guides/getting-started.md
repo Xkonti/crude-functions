@@ -1,39 +1,47 @@
 ---
 title: Getting Started
-description: Crude Functions overview
+description: Get Crude Functions running in minutes
 ---
 
-Crude Functions is a minimal, self-hosted serverless function platform that runs in a single Docker container. Write TypeScript functions, deploy them as HTTP endpoints, manage everything through a web UI or API. That's it.
+This guide walks you through deploying Crude Functions and creating your first serverless endpoint. By the end, you'll have a working function responding to HTTP requests.
 
-**Philosophy:** Simple, pragmatic, and designed for internal use. No complex deployment pipelines, no sandboxing theater, no scaling nonsense. You want to run some functions on your network? Done.
+## Prerequisites
 
-**Target use case:** Internal network services with low-to-moderate traffic. Think internal APIs, webhooks, automation scripts, or small tools for your team.
+- **Docker** installed on your machine
+- A **server or local machine** to host the container
+- Basic **TypeScript** familiarity (helpful but not required)
 
-## Who Should Use This?
+## Quick Start
 
-You should use Crude Functions if you:
+### 1. Deploy
 
-- Want a simple way to deploy and manage serverless-style functions internally
-- Trust the code you're running (no sandboxing)
-- Don't need massive scale or complex orchestration
-- Want to avoid cloud vendor lock-in for internal tooling
-- Value simplicity over enterprise features
+Run the Docker container and configure your base URL.
 
-You should NOT use this if you:
+**What you'll do:** Pull the image, set environment variables, and start the container. Takes about 2 minutes.
 
-- Need to run untrusted code (no sandboxing)
-- Expect high traffic
-- Want a production-ready public API platform
-- Need multi-tenancy or advanced isolation
+[Go to Deployment](./deployment)
 
-## Features
+### 2. First-Time Setup
 
-- **Minimal footprint:** Single Deno process, ~25MB RAM idle
-- **Zero-downtime deploys:** Hot-reload functions without restarting the server
-- **Simple function authoring:** Register a function by specifying handler file location
-- **No build step:** Deno runs TypeScript directly and downloads external packages on-the-go
-- **API-based deployment:** Programmatically add/update functions via HTTP
-- **Secrets management** with multiple scopes to keep them out of your code.
-- **Web UI:** Browser-based management interface
-- **API key authentication:** Flexible key-based access control
-- **Encryption at rest** for API keys and secrets
+Create your admin account and generate an API key.
+
+**What you'll do:** Access the web UI, create the first user, and set up API access for managing functions programmatically.
+
+[Go to First-Time Setup](./first-time-setup)
+
+### 3. Your First Function
+
+Write a handler, register a route, and test it.
+
+**What you'll do:** Create a TypeScript function, register it as an HTTP endpoint, and call it. Covers the basics of parameters, POST requests, and logging.
+
+[Go to Your First Function](./your-first-function)
+
+## What's Next
+
+Once you have a function running, explore these topics:
+
+- [API Keys](./api-keys) - Protect your functions with key-based authentication
+- [Secrets](./secrets) - Manage sensitive configuration securely
+- [Logs](./logs) - Monitor function execution and debug issues
+- [Metrics](./metrics) - Track performance and execution counts
