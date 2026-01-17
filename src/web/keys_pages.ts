@@ -364,7 +364,7 @@ export function createKeysPages(
       return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid form data"));
     }
 
-    let groupIdStr = (body.groupId as string | undefined)?.trim() ?? "";
+    const groupIdStr = (body.groupId as string | undefined)?.trim() ?? "";
     const newGroupName = (body.newGroupName as string | undefined)?.trim().toLowerCase() ?? "";
     const name = (body.name as string | undefined)?.trim().toLowerCase() ?? "";
     const value = (body.value as string | undefined)?.trim() ?? "";
