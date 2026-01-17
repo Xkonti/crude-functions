@@ -18,11 +18,6 @@ export default defineConfig({
 						{ label: 'First-Time Setup', slug: 'guides/first-time-setup' },
 						{ label: 'Your First Function', slug: 'guides/your-first-function' },
 
-						// Working with Functions
-						{ label: 'Writing Functions', slug: 'guides/writing-functions' },
-						{ label: 'Managing Code', slug: 'guides/managing-code' },
-						{ label: 'Managing Functions', slug: 'guides/managing-functions' },
-
 						// Security
 						{ label: 'API Keys', slug: 'guides/api-keys' },
 						{ label: 'Secrets', slug: 'guides/secrets' },

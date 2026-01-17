@@ -90,38 +90,3 @@ data/
 ### Critical: Back Up Your Encryption Keys
 
 **If you lose `encryption-keys.json`, you lose access to all encrypted data permanently.** Store the backup in a secure location separate from your server.
-
-## Next Steps
-
-Now that initial setup is complete:
-
-1. **Create your first function** - See [Writing Functions](/guides/writing-functions)
-2. **Explore the web UI** - Familiarize yourself with all pages
-3. **Set up backups** - Automate backups of the `data/` directory
-
-## Troubleshooting
-
-### Can't Access Web UI
-
-- Verify the container is running: `docker compose ps`
-- Check logs: `docker compose logs`
-- Ensure port 8000 is not blocked by firewall
-- Ensure no other application is using port 8000 or remap it
-
-### Can't Create First User
-
-- Review logs for auth errors: `docker compose logs`
-- Check database permissions: `./data/` directory must be writable
-- Verify `encryption-keys.json` was created
-
-### Sign-Up Page Still Shows After Creating User
-
-- Verify the user was actually created (check Users page after logging in)
-- Check database: The sign-up page disables automatically when users exist
-- Review logs for database write errors
-
-### Lost Encryption Keys File
-
-- Restore from backup immediately
-- If no backup exists, all encrypted data (API keys, secrets) is permanently lost
-- You'll need to regenerate all API keys and secrets from scratch

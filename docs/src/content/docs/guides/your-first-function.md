@@ -426,8 +426,3 @@ export default async function (c, ctx) {
   });
 }
 ```
-
-### Learn More
-
-- [API Reference](/reference/api) - Complete API documentation
-- [Writing Functions Guide](/guides/writing-functions) - Deep dive into handler capabilities
