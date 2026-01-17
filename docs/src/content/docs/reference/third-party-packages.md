@@ -3,7 +3,7 @@ title: Third-Party Packages
 description: How to import and use external packages in your function handlers
 ---
 
-Function handlers in Crude Functions run on Deno, which uses URL-based imports. This guide covers how to import external packages from NPM, JSR, and other sources.
+Function handlers in Crude Functions run on Deno, which uses URL-based imports. This page covers how to import external packages from NPM, JSR, and other sources.
 
 ## Import Types
 
