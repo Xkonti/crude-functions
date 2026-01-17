@@ -1,6 +1,6 @@
 # Crude Functions
 
-![Crude Functions](https://raw.githubusercontent.com/Xkonti/crude-functions/main/docs/public/logo.svg)
+![Crude Functions Logo](https://raw.githubusercontent.com/Xkonti/crude-functions/main/docs/public/logo.svg)
 
 [Documentation](https://crude-functions.xkonti.tech) | [GitHub Repository](https://github.com/Xkonti/crude-functions)
 
