@@ -48,6 +48,26 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   // Mount auth pages (login/logout - no auth required)
   routes.route("/", createAuthPages({ auth, userService }));
 
+  // Serve favicon (public - no auth required)
+  routes.get("/favicon.ico", async (c) => {
+    try {
+      const faviconPath = new URL("../../docs/public/favicon.svg", import.meta.url);
+      const content = await Deno.readFile(faviconPath);
+
+      return new Response(content, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/svg+xml",
+          "Content-Length": String(content.length),
+          "Cache-Control": "public, max-age=3600",
+        },
+      });
+    } catch (error) {
+      console.error("Failed to serve favicon:", error);
+      return c.text("Favicon not found", 404);
+    }
+  });
+
   // Apply session auth to all other web routes
   routes.use("/*", createSessionAuthMiddleware({ auth }));
 
