@@ -15,6 +15,7 @@ Every function execution automatically records:
 - **Timestamp** - When the metrics were recorded (UTC)
 
 These metrics are collected for:
+
 - **Per-function metrics** - Track individual function performance
 - **Global metrics** - Aggregate performance across all functions
 
@@ -25,45 +26,22 @@ These metrics are collected for:
 Metrics are aggregated at three time resolutions to balance detail with storage efficiency:
 
 ### Minutes
+
 - **Granularity**: 1 data point per minute
 - **Viewing window**: Last 60 minutes
 - **Use case**: Real-time monitoring, immediate performance issues
 
 ### Hours
+
 - **Granularity**: 1 data point per hour
 - **Viewing window**: Last 24 hours
 - **Use case**: Daily trends, hourly traffic patterns
 
 ### Days
+
 - **Granularity**: 1 data point per day
 - **Viewing window**: Configurable retention period (default: 90 days)
 - **Use case**: Long-term trends, capacity planning
-
-## How Aggregation Works
-
-Crude Functions uses a background aggregation service to efficiently manage metrics data:
-
-### The Aggregation Pipeline
-
-```
-Raw Executions → Minute Records → Hour Records → Day Records
-     (1-60s)         (60 min)        (24 hours)     (retention)
-```
-
-**Pass 1: Execution to Minutes**
-- Collects all function executions within each minute window
-- Calculates weighted averages, maximums, and totals
-- Creates both per-function and global minute records
-
-**Pass 2: Minutes to Hours**
-- Aggregates 60 minute records into 1 hour record
-- Maintains accuracy with weighted averaging
-- Deletes processed minute records to save space
-
-**Pass 3: Hours to Days**
-- Aggregates 24 hour records into 1 day record
-- Preserves long-term trends
-- Deletes processed hour records
 
 ### Background Processing
 
@@ -73,141 +51,63 @@ The aggregation service runs automatically:
 - **Catches up automatically**: Processes missed periods after restarts
 - **Watermark tracking**: Remembers progress to prevent reprocessing
 - **Graceful degradation**: Failures don't stop function execution
+- **Destructive**: Deletes processed raw data to keep the database footprint minimal
 
-**Configuration**: Aggregation interval and retention period are set in Settings → Server Settings → Metrics.
+**Configuration**: Aggregation interval and retention period are set in Settings.
 
 ## Viewing Metrics in the Web UI
 
 ### Per-Function Metrics
 
-**Path**: `/web/functions` → Click 📊 next to any function
+Functions management page → Click 📊 next to any function
 
 The metrics page shows:
 
 **Summary Cards** (top of page):
+
 - **Avg Executions / {period}** - Average requests per time unit
 - **Avg Execution Time** - Overall weighted average in milliseconds
 - **Max Execution Time** - Peak execution time across all periods
 - **Total Executions** - Sum of all executions in the time range
 
 **Execution Time Chart** (line graph):
+
 - Blue line: Average execution time per period
 - Red line: Maximum execution time per period
 - Orange markers: Current incomplete period (live data)
 - Gray dashed lines: Periods with no activity (interpolated)
 
 **Request Count Chart** (bar graph):
+
 - Blue bars: Number of executions per period
 - Orange bars: Current incomplete period (live data)
 - Hover to see exact counts
 
 **Time Range Tabs**:
+
 - Last Hour (minute-by-minute)
 - Last 24 Hours (hour-by-hour)
 - Last X Days (day-by-day, based on retention setting)
 
-**Placeholder for screenshot: metrics-function-view.png**
-*Caption: Function metrics showing execution time trends and request counts*
+![Metrics view for hello-world function](../../../assets/screenshots/hello-world-metrics.png)
 
 ### Global Metrics
 
-**Path**: `/web/functions/metrics/global`
+Global metrics can be accessed from within any functions metrics page by selecting `Global metrics` in the `Source` dropdown:
 
-Shows aggregated metrics across **all functions** on your server:
+![Metrics source selection](../../../assets/screenshots/metrics-source-dropdown.png)
+The Global metrics show aggregated metrics across **all functions** on your server:
+
 - Same chart types as per-function view
 - Combines data from all routes
 - Useful for understanding overall server load
-
-**Placeholder for screenshot: metrics-global-view.png**
-*Caption: Global metrics aggregating all function executions*
-
-### Switching Between Functions
-
-Use the **Source** dropdown at the top of the metrics page to:
-- Switch between individual functions
-- View global (server-wide) metrics
-- Compare different functions without leaving the page
-
-## Querying Metrics via API
-
-The metrics API provides programmatic access for dashboards, alerting, or custom analytics.
-
-### API Endpoint
-
-```
-GET /api/metrics
-```
-
-**Authentication**: Requires API key from an authorized group (see Settings → API Access Groups)
-
-### Query Parameters
-
-**Required:**
-- `resolution` - Time resolution: `minutes`, `hours`, or `days`
-
-**Optional:**
-- `functionId` - Filter by function ID (omit for global metrics)
-
-### Example: Function Metrics
-
-```bash
-# Get last 60 minutes for function ID 1
-curl -H "X-API-Key: your-management-key" \
-  "http://localhost:8000/api/metrics?resolution=minutes&functionId=1"
-```
-
-Response:
-```json
-{
-  "data": {
-    "metrics": [
-      {
-        "timestamp": "2026-01-12T10:00:00.000Z",
-        "avgTimeMs": 45.2,
-        "maxTimeMs": 120,
-        "executionCount": 15
-      },
-      {
-        "timestamp": "2026-01-12T10:01:00.000Z",
-        "avgTimeMs": 38.7,
-        "maxTimeMs": 95,
-        "executionCount": 22
-      }
-      // ... more data points
-    ],
-    "functionId": 1,
-    "resolution": "minutes",
-    "summary": {
-      "totalExecutions": 850,
-      "avgExecutionTime": 42.1,
-      "maxExecutionTime": 250,
-      "periodCount": 60
-    }
-  }
-}
-```
-
-### Example: Global Metrics
-
-```bash
-# Get last 24 hours across all functions
-curl -H "X-API-Key: your-management-key" \
-  "http://localhost:8000/api/metrics?resolution=hours"
-```
-
-### Example: Long-Term Trends
-
-```bash
-# Get daily metrics for last 90 days (or your retention setting)
-curl -H "X-API-Key: your-management-key" \
-  "http://localhost:8000/api/metrics?resolution=days&functionId=1"
-```
 
 ## Understanding Performance Data
 
 ### Reading Execution Times
 
 **Average Execution Time**:
+
 - Weighted average across all executions in the period
 - Lower is better (faster responses)
 - Sudden increases may indicate:
@@ -217,11 +117,13 @@ curl -H "X-API-Key: your-management-key" \
   - Code performance issues
 
 **Maximum Execution Time**:
+
 - Longest single execution in the period
 - Spikes are normal for:
-  - First execution (cold start)
+  - First execution
   - Database connection establishment
   - Cache misses
+  - When Deno needs to download imported third party packages for the first time
 - Consistently high maximums may indicate:
   - Timeout-prone operations
   - Unhandled edge cases
@@ -230,6 +132,7 @@ curl -H "X-API-Key: your-management-key" \
 ### Reading Execution Counts
 
 **Request Volume**:
+
 - Shows traffic patterns and usage trends
 - Compare to expected patterns:
   - Business hours vs. off-hours
@@ -237,41 +140,24 @@ curl -H "X-API-Key: your-management-key" \
   - Seasonal variations
 
 **Drops in volume** may indicate:
+
 - Service interruptions
 - Client-side issues
 - API key problems
 - Function disabled
 
 **Spikes in volume** may indicate:
+
 - Marketing campaigns
 - Viral content
 - Automated traffic (bots, scrapers)
 - Retry storms
 
-### Weighted Averages Explained
-
-Crude Functions uses **weighted averages** to accurately represent performance:
-
-**Example**:
-- Period 1: 10 executions averaging 50ms each
-- Period 2: 100 executions averaging 30ms each
-
-**Naive average**: (50 + 30) / 2 = 40ms ← **Incorrect**
-
-**Weighted average**: (10×50 + 100×30) / (10 + 100) = 31.8ms ← **Correct**
-
-This ensures metrics accurately reflect real-world performance where some periods have more traffic than others.
-
 ## Metrics Retention and Storage
 
 ### Retention Policy
 
-**Default**: 90 days of daily metrics
-
-**Configurable**: Settings → Server Settings → Metrics Retention Days
-- Minimum: 7 days
-- Maximum: 365 days
-- Affects storage requirements
+**Default**: 90 days of daily metrics - Configurable in Settings
 
 ### What Gets Deleted
 
@@ -286,157 +172,25 @@ The aggregation service automatically cleans up:
 
 ### Storage Estimates
 
-Approximate database size per function:
+Unlike traditional time-series databases, Crude Functions uses aggressive aggregation and cleanup to maintain a **constant storage footprint per function**, regardless of retention period. Storage is determined by traffic rate, not retention days.
 
-- **High-traffic function** (1000 req/min): ~500 KB/day
-- **Medium-traffic function** (100 req/min): ~50 KB/day
-- **Low-traffic function** (10 req/min): ~5 KB/day
+#### Per-Function Storage (90-day retention)
 
-With 10 functions and 90-day retention: ~50-500 MB total
+| Traffic Rate | Raw Records (2 min) | Total Records | Estimated Storage |
+|--------------|---------------------|---------------|-------------------|
+| 1 req/min    | 2                   | 176           | ~52 KB            |
+| 10 req/min   | 20                  | 194           | ~58 KB            |
+| 100 req/min  | 200                 | 374           | ~112 KB           |
+| 1000 req/min | 2000                | 2174          | ~652 KB           |
 
-## Integration Examples
+**Total records** = Raw records + 174 aggregated records (60 minute + 24 hour + 90 day)
 
-### Dashboard Integration
+**Storage calculation**: ~300 bytes per record (data + index overhead)
 
-Use the metrics API to build custom dashboards:
+#### Example Deployments
 
-```javascript
-// Fetch metrics for display
-async function fetchMetrics(functionId, resolution) {
-  const response = await fetch(
-    `/api/metrics?functionId=${functionId}&resolution=${resolution}`,
-    {
-      headers: { 'X-API-Key': API_KEY }
-    }
-  );
-  const data = await response.json();
-  return data.data;
-}
+- **10 low-traffic functions** (10 req/min each): ~580 KB total
+- **10 mixed-traffic functions** (1-100 req/min): ~580 KB - 1 MB total
+- **10 high-traffic functions** (1000 req/min each): ~6.5 MB total
 
-// Display in chart library (Chart.js, etc.)
-const metricsData = await fetchMetrics(1, 'hours');
-const chartData = {
-  labels: metricsData.metrics.map(m => m.timestamp),
-  datasets: [{
-    label: 'Avg Execution Time',
-    data: metricsData.metrics.map(m => m.avgTimeMs)
-  }]
-};
-```
-
-### Alerting Integration
-
-Monitor metrics and trigger alerts:
-
-```javascript
-// Check for performance degradation
-async function checkPerformance(functionId, threshold) {
-  const data = await fetchMetrics(functionId, 'minutes');
-  const recentAvg = data.summary.avgExecutionTime;
-
-  if (recentAvg > threshold) {
-    await sendAlert({
-      message: `Function ${functionId} slow: ${recentAvg}ms`,
-      severity: 'warning'
-    });
-  }
-}
-
-// Run every 5 minutes
-setInterval(() => checkPerformance(1, 100), 5 * 60 * 1000);
-```
-
-### Capacity Planning
-
-Analyze trends for capacity decisions:
-
-```javascript
-// Get long-term daily metrics
-const data = await fetchMetrics(1, 'days');
-
-// Calculate growth rate
-const first7Days = data.metrics.slice(0, 7);
-const last7Days = data.metrics.slice(-7);
-
-const oldAvg = average(first7Days.map(m => m.executionCount));
-const newAvg = average(last7Days.map(m => m.executionCount));
-
-const growthRate = ((newAvg - oldAvg) / oldAvg) * 100;
-console.log(`Traffic growth: ${growthRate.toFixed(1)}%`);
-```
-
-## Troubleshooting
-
-### No Metrics Showing
-
-**Possible causes**:
-1. Function hasn't been executed yet
-2. Aggregation service hasn't run yet (wait up to 60 seconds)
-3. Viewing wrong time range (try "Last Hour")
-
-**Solution**: Execute the function and refresh after ~60 seconds.
-
-### Gaps in Metrics
-
-**Cause**: No executions during that period
-
-**Chart behavior**: Dashed gray lines indicate interpolated data (no actual executions)
-
-**Normal for**:
-- Scheduled jobs that run periodically
-- Low-traffic functions
-- Off-hours periods
-
-### Metrics Not Updating
-
-**Check**:
-1. Container logs: `docker compose logs -f`
-2. Look for `[MetricsAggregation]` messages
-3. Check for database errors
-
-**Recovery**: Restart the container - aggregation will catch up automatically.
-
-### High Storage Usage
-
-**If metrics database is too large**:
-
-1. Reduce retention: Settings → Metrics Retention Days
-2. Delete old metrics: Reduction takes effect on next cleanup
-3. Monitor per-function metrics: High-traffic functions contribute more
-
-**Disable metrics** (not recommended): Currently not supported - metrics are always collected.
-
-## Best Practices
-
-### Monitoring Strategy
-
-1. **Start with global metrics** - Understand overall server health
-2. **Drill down to functions** - Identify performance bottlenecks
-3. **Compare time ranges** - Look for patterns (hourly, daily, weekly)
-4. **Set baselines** - Know your normal performance ranges
-5. **Monitor trends, not absolutes** - Watch for changes over time
-
-### Performance Optimization
-
-Use metrics to guide optimization efforts:
-
-1. **High average time** → Profile code, optimize queries
-2. **High maximum time** → Investigate edge cases, add timeouts
-3. **Increasing trends** → Address before issues occur
-4. **Traffic spikes** → Consider rate limiting, caching
-
-### Alert Thresholds
-
-Recommended alert levels:
-
-- **Warning**: 2x normal average execution time
-- **Critical**: 5x normal average execution time
-- **Volume**: 3x normal request count (potential abuse)
-
-Adjust based on your specific functions and requirements.
-
-## Related Topics
-
-- **Logs**: See [Execution Logs](/guides/logs) for detailed function output
-- **API Reference**: Complete endpoint documentation in [API Endpoints](/reference/api)
-- **Settings**: Configure retention in [Settings Guide](/guides/settings)
+**Key insight**: Increasing retention days from 90 to 365 only adds ~82 KB per function (275 additional day records), making long-term retention very affordable.
