@@ -211,6 +211,7 @@ export async function layout(
         <li><a href="/web/secrets" title="Secrets">🔒</a></li>
         <li><a href="/web/users" title="Users">👥</a></li>
         <li><a href="/web/settings" title="Settings">⚙️</a></li>
+        <li><a href="https://crude-functions.xkonti.tech" target="_blank" rel="noopener noreferrer" title="Documentation">❔</a></li>
         ${userDropdown}
       </ul>
     </nav>
