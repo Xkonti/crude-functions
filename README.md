@@ -3,6 +3,9 @@
 <div align="center">
 
 ![Crude Functions](https://raw.githubusercontent.com/Xkonti/crude-functions/main/docs/public/logo.svg)
+</div>
+<div align="center">
+
 [Documentation](https://crude-functions.xkonti.tech) | [GitHub Repository](https://github.com/Xkonti/crude-functions)
 
 </div>
