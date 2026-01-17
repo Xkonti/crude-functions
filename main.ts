@@ -169,7 +169,7 @@ const hasUsers = userExists !== null;
 // Auth secret is stored in the encryption keys file (auto-generated on first run)
 const auth = createAuth({
   databasePath: "./data/database.db",
-  baseUrl: Deno.env.get("BETTER_AUTH_BASE_URL") || undefined,
+  baseUrl: Deno.env.get("AUTH_BASE_URL") || undefined,
   secret: encryptionKeys.better_auth_secret,
   hasUsers,
 });
@@ -267,9 +267,6 @@ const functionRouter = new FunctionRouter({
   secretsService,
   codeDirectory: "./code",
 });
-
-// Public endpoints
-app.get("/ping", (c) => c.json({ pong: true }));
 
 // Better Auth handler - handles /api/auth/* endpoints
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));

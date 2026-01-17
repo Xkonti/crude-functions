@@ -174,9 +174,9 @@ function renderServerSettingsTab(
       <h3>Server Settings</h3>
       <form method="POST" action="/web/settings/server">
         ${renderSettingsForm(data, availableGroups)}
-        <div class="grid">
-          <button type="submit">Save Settings</button>
-          <a href="/web" role="button" class="secondary">Cancel</a>
+        <div class="grid" style="margin-bottom: 0;">
+          <button type="submit" style="margin-bottom: 0;">Save Settings</button>
+          <a href="/web" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
     </article>

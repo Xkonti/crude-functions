@@ -70,7 +70,7 @@ export function getTrustedOrigins(
       const url = new URL(configuredBaseUrl);
       origins.add(url.origin);
     } catch (error) {
-      console.warn(`Invalid BETTER_AUTH_BASE_URL: ${configuredBaseUrl}`, error);
+      console.warn(`Invalid AUTH_BASE_URL: ${configuredBaseUrl}`, error);
     }
     return Array.from(origins);
   }

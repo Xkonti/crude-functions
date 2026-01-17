@@ -1014,7 +1014,7 @@ function renderMetricsPage(
 
   // Build source selector options
   const sourceOptions = [
-    `<option value="/web/functions/metrics/global?mode=${mode}" ${isGlobal ? "selected" : ""}>Server Stats</option>`,
+    `<option value="/web/functions/metrics/global?mode=${mode}" ${isGlobal ? "selected" : ""}>Global metrics</option>`,
     ...allFunctions.map(
       (fn) =>
         `<option value="/web/functions/metrics/${fn.id}?mode=${mode}" ${fn.id === routeId ? "selected" : ""}>Function: ${escapeHtml(fn.name)}</option>`
@@ -1178,9 +1178,9 @@ function renderFunctionForm(
         </p>
       </div>
       `}
-      <div class="grid">
-        <button type="submit">${isEdit ? "Save Changes" : "Create Function"}</button>
-        <a href="/web/functions" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">${isEdit ? "Save Changes" : "Create Function"}</button>
+        <a href="/web/functions" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
 
@@ -1377,9 +1377,9 @@ function renderFunctionSecretCreateForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create Secret</button>
-        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create Secret</button>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
   `;
@@ -1414,9 +1414,9 @@ function renderFunctionSecretEditForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/functions/secrets/${functionId}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
   `;
@@ -1840,7 +1840,7 @@ export function createFunctionsPages(
     const allFunctions = await routesService.getAll();
 
     const content = renderMetricsPage(
-      "Server Stats",
+      "Global metrics",
       null,
       mode,
       dataPoints,
@@ -1849,7 +1849,7 @@ export function createFunctionsPages(
       allFunctions
     );
 
-    return c.html(await layout("Metrics: Server Stats", content, getLayoutUser(c), settingsService));
+    return c.html(await layout("Metrics: Global metrics", content, getLayoutUser(c), settingsService));
   });
 
   // View metrics for a function
