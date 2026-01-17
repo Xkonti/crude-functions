@@ -1,5 +1,9 @@
 # Crude Functions
 
+![Crude Functions Logo](https://raw.githubusercontent.com/Xkonti/crude-functions/main/docs/public/logo.svg)
+
+[Documentation](https://crude-functions.xkonti.tech) | [GitHub Repository](https://github.com/Xkonti/crude-functions)
+
 Crude Functions is a minimal, self-hosted serverless function platform that runs in a single Docker container. Write TypeScript functions, deploy them as HTTP endpoints, manage everything through a web UI or API. That's it.
 
 **Philosophy:** Simple, pragmatic, and designed for internal use. No complex deployment pipelines, no sandboxing theater, no scaling nonsense. You want to run some functions on your network? Done.

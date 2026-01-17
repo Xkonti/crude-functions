@@ -344,6 +344,26 @@ app.use("/api/users/*", hybridAuth);
 app.use("/api/users", hybridAuth);
 app.route("/api/users", createUserRoutes(userService));
 
+// Serve favicon at root level (browsers request /favicon.ico automatically)
+app.get("/favicon.ico", async (c) => {
+  try {
+    const faviconPath = new URL("./docs/public/favicon.svg", import.meta.url);
+    const content = await Deno.readFile(faviconPath);
+
+    return new Response(content, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml",
+        "Content-Length": String(content.length),
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  } catch (error) {
+    console.error("Failed to serve favicon:", error);
+    return c.text("Favicon not found", 404);
+  }
+});
+
 // Web UI routes (session auth applied internally)
 app.route("/web", createWebRoutes({
   auth,

@@ -105,6 +105,7 @@ export async function layout(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} - ${escapeHtml(serverName)}</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
     /* Compact Pico CSS overrides */
@@ -211,6 +212,7 @@ export async function layout(
         <li><a href="/web/secrets" title="Secrets">🔒</a></li>
         <li><a href="/web/users" title="Users">👥</a></li>
         <li><a href="/web/settings" title="Settings">⚙️</a></li>
+        <li><a href="https://crude-functions.xkonti.tech" target="_blank" rel="noopener noreferrer" title="Documentation">❔</a></li>
         ${userDropdown}
       </ul>
     </nav>
