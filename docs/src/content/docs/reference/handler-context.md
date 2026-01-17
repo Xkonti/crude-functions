@@ -201,7 +201,7 @@ export default async function (c, ctx) {
 
 ## Hono Context (`c`)
 
-The `c` parameter is Hono's standard context object. Here are the most commonly used methods.
+The `c` parameter is Hono's standard [Context object](https://hono.dev/docs/api/context). Here are the most commonly used methods.
 
 ### Response Methods
 
@@ -211,6 +211,7 @@ The `c` parameter is Hono's standard context object. Here are the most commonly 
 | `c.text(text, status?)` | Send plain text |
 | `c.html(html, status?)` | Send HTML |
 | `c.body(body, status?)` | Send raw body |
+| `c.redirect(url, status?)` | Redirect to another URL (default 302) |
 
 ```typescript
 // JSON response
@@ -223,6 +224,10 @@ return c.text("Not found", 404);
 
 // HTML response
 return c.html("<h1>Hello</h1>");
+
+// Redirect
+return c.redirect("/other-page");
+return c.redirect("https://example.com", 301);  // permanent redirect
 ```
 
 ### Request Properties
@@ -284,6 +289,7 @@ export default async function (c, ctx) {
 | `c.json(data, status?)` | `Response` | Send JSON |
 | `c.text(text, status?)` | `Response` | Send text |
 | `c.html(html, status?)` | `Response` | Send HTML |
+| `c.redirect(url, status?)` | `Response` | Redirect to URL |
 | `c.req.json()` | `Promise<any>` | Parse JSON body |
 | `c.req.header(name)` | `string \| undefined` | Get header |
 

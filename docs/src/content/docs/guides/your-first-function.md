@@ -66,7 +66,8 @@ Every function handler receives exactly two parameters:
 - `ctx.authenticatedKeyGroup` - API key group (if authenticated)
 - `ctx.getSecret()` - Access to secrets
 - `ctx.route` - Route configuration details
-- and [more...](/guides/writing-functions)
+
+See the [Handler Context Reference](/reference/handler-context) for the complete API.
 
 ## Step 2: Register the Route
 
