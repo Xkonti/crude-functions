@@ -99,9 +99,9 @@ export function createCodePages(fileService: FileService, settingsService: Setti
             Content
             <textarea name="content" id="content-input" rows="20" style="font-family: monospace;">${escapeHtml(content)}</textarea>
           </label>
-          <div class="grid">
-            <button type="submit" id="save-btn">Save</button>
-            <a href="/web/code" role="button" class="secondary">Cancel</a>
+          <div class="grid" style="margin-bottom: 0;">
+            <button type="submit" id="save-btn" style="margin-bottom: 0;">Save</button>
+            <a href="/web/code" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
           </div>
         </form>
         <script>
@@ -160,9 +160,9 @@ export function createCodePages(fileService: FileService, settingsService: Setti
           <p>Select a new file to replace this one:</p>
           <form id="replace-form">
             <input type="file" id="fileInput" required>
-            <div class="grid">
-              <button type="submit" id="replace-btn">Replace File</button>
-              <a href="/web/code" role="button" class="secondary">Cancel</a>
+            <div class="grid" style="margin-bottom: 0;">
+              <button type="submit" id="replace-btn" style="margin-bottom: 0;">Replace File</button>
+              <a href="/web/code" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
             </div>
           </form>
         </article>
@@ -293,9 +293,9 @@ export function createCodePages(fileService: FileService, settingsService: Setti
           Content
           <textarea name="content" id="content-input" rows="15" style="font-family: monospace;"></textarea>
         </label>
-        <div class="grid">
-          <button type="submit" id="upload-btn">Upload</button>
-          <a href="/web/code" role="button" class="secondary">Cancel</a>
+        <div class="grid" style="margin-bottom: 0;">
+          <button type="submit" id="upload-btn" style="margin-bottom: 0;">Upload</button>
+          <a href="/web/code" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
       <script>

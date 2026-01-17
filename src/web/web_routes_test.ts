@@ -496,7 +496,7 @@ Deno.test("GET /web/keys/create shows form", async () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Create API Key");
-    expect(html).toContain('name="group"');
+    expect(html).toContain('name="groupId"');
     expect(html).toContain('name="value"');
   } finally {
     await cleanup(db, tempDir);
@@ -504,9 +504,12 @@ Deno.test("GET /web/keys/create shows form", async () => {
 });
 
 Deno.test("GET /web/keys/create with group param prefills form", async () => {
-  const { app, db, tempDir } = await createTestApp();
+  const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
-    const res = await app.request("/web/keys/create?group=mykey");
+    // Create a group and get its ID
+    const groupId = await apiKeyService.createGroup("mykey");
+
+    const res = await app.request(`/web/keys/create?group=${groupId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('value="mykey"');
@@ -519,8 +522,11 @@ Deno.test("GET /web/keys/create with group param prefills form", async () => {
 Deno.test("POST /web/keys/create creates key", async () => {
   const { app, db, tempDir, apiKeyService } = await createTestApp();
   try {
+    // Create group first and get its ID
+    const groupId = await apiKeyService.createGroup("newkey");
+
     const formData = new FormData();
-    formData.append("group", "newkey");
+    formData.append("groupId", String(groupId));
     formData.append("name", "newkey-name");
     formData.append("value", "newvalue123");
     formData.append("description", "test description");
@@ -532,7 +538,7 @@ Deno.test("POST /web/keys/create creates key", async () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/keys?success=");
 
-    const keys = await apiKeyService.getKeys("newkey");
+    const keys = await apiKeyService.getKeysByGroupId(groupId);
     expect(keys).not.toBeNull();
     expect(keys!.some((k) => k.value === "newvalue123")).toBe(true);
   } finally {
@@ -618,11 +624,12 @@ Deno.test("GET /web/code/edit without path redirects with error", async () => {
   }
 });
 
-Deno.test("POST /web/keys/create rejects invalid key group", async () => {
+Deno.test("POST /web/keys/create rejects invalid groupId", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
     const formData = new FormData();
-    formData.append("group", "Invalid Group!");
+    formData.append("groupId", "not-a-number");
+    formData.append("name", "test-key");
     formData.append("value", "validvalue");
 
     const res = await app.request("/web/keys/create", {

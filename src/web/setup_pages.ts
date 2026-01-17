@@ -1,6 +1,8 @@
 import { Hono } from "@hono/hono";
 import type { Auth } from "../auth/auth.ts";
 import type { UserService } from "../users/user_service.ts";
+import type { SettingsService } from "../settings/settings_service.ts";
+import { SettingNames, GlobalSettingDefaults } from "../settings/types.ts";
 
 /**
  * Options for creating the setup pages router.
@@ -10,6 +12,8 @@ export interface SetupPagesOptions {
   auth: Auth;
   /** User service for user existence check and role update */
   userService: UserService;
+  /** Settings service for fetching application name */
+  settingsService: SettingsService;
 }
 
 /**
@@ -19,7 +23,7 @@ export interface SetupPagesOptions {
  * Only accessible when no users exist in the database.
  */
 export function createSetupPages(options: SetupPagesOptions): Hono {
-  const { userService } = options;
+  const { userService, settingsService } = options;
   const routes = new Hono();
 
   // GET /setup - Setup form (only accessible when no users exist)
@@ -31,12 +35,16 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
 
     const error = c.req.query("error");
 
+    // Fetch server name setting, with fallback to default if not found
+    const serverName = await settingsService.getGlobalSetting(SettingNames.SERVER_NAME)
+      ?? GlobalSettingDefaults[SettingNames.SERVER_NAME];
+
     const content = `<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Setup - Functions Router</title>
+  <title>Setup - ${serverName}</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <style>
     /* Compact Pico CSS overrides */
@@ -65,7 +73,7 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
   <main class="container">
     <article>
       <header>
-        <h1>Welcome to Functions Router</h1>
+        <h1>Welcome to ${serverName}</h1>
         <p>Create your admin account to get started.</p>
       </header>
 

@@ -43,7 +43,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   const secretsService = new SecretsService({ db, encryptionService });
 
   // Mount setup pages (public - only accessible when no users exist)
-  routes.route("/setup", createSetupPages({ auth, userService }));
+  routes.route("/setup", createSetupPages({ auth, userService, settingsService }));
 
   // Mount auth pages (login/logout - no auth required)
   routes.route("/", createAuthPages({ auth, userService }));

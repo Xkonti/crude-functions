@@ -14,6 +14,8 @@ import {
   secretScripts,
   parseSecretFormData,
   parseSecretEditFormData,
+  generateValueButton,
+  valueGeneratorScripts,
 } from "./templates.ts";
 
 /**
@@ -366,10 +368,12 @@ function renderCreateForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(data.value ?? "")}</textarea>
-        <small>Encrypted at rest using AES-256-GCM</small>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="global-secret-value" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(data.value ?? "")}</textarea>
+          ${generateValueButton('global-secret-value')}
+        </div>
       </label>
       <label>
         Comment
@@ -377,11 +381,12 @@ function renderCreateForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Create Secret</button>
-        <a href="/web/secrets" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Create Secret</button>
+        <a href="/web/secrets" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 
@@ -404,10 +409,12 @@ function renderEditForm(
       </label>
       <label>
         Secret Value *
-        <textarea name="value" required
-                  placeholder="your-secret-value"
-                  rows="4">${escapeHtml(secret.value)}</textarea>
-        <small>Encrypted at rest using AES-256-GCM</small>
+        <div style="display: flex; align-items: flex-start;">
+          <textarea id="global-secret-edit" name="value" required
+                    placeholder="your-secret-value"
+                    rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
+          ${generateValueButton('global-secret-edit')}
+        </div>
       </label>
       <label>
         Comment
@@ -415,11 +422,12 @@ function renderEditForm(
                placeholder="Optional description" />
         <small>Helps identify the purpose of this secret</small>
       </label>
-      <div class="grid">
-        <button type="submit">Save Changes</button>
-        <a href="/web/secrets" role="button" class="secondary">Cancel</a>
+      <div class="grid" style="margin-bottom: 0;">
+        <button type="submit" style="margin-bottom: 0;">Save Changes</button>
+        <a href="/web/secrets" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
+    ${valueGeneratorScripts()}
   `;
 }
 

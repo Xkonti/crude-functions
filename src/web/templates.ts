@@ -330,6 +330,57 @@ export function secretScripts(): string {
 }
 
 /**
+ * Returns a reusable generate button for value fields with inline JavaScript.
+ * The button generates a cryptographically secure random value using Web Crypto API.
+ *
+ * @param targetFieldId - The ID of the input/textarea to populate
+ * @returns HTML string with button and inline script
+ */
+export function generateValueButton(targetFieldId: string): string {
+  return `
+    <button type="button"
+            onclick="generateRandomValue('${targetFieldId}')"
+            class="secondary"
+            style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;"
+            title="Generate for me">
+      ♻
+    </button>
+  `;
+}
+
+/**
+ * Returns JavaScript for value generation functionality.
+ * This should be included once per page that uses generateValueButton().
+ */
+export function valueGeneratorScripts(): string {
+  return `<script>
+    function generateRandomValue(fieldId) {
+      // Generate 24 random bytes (192 bits of entropy)
+      const array = new Uint8Array(24);
+      crypto.getRandomValues(array);
+
+      // Convert to URL-safe base64
+      let binary = '';
+      for (let i = 0; i < array.length; i++) {
+        binary += String.fromCharCode(array[i]);
+      }
+      const value = btoa(binary)
+        .replace(/\\+/g, '-')
+        .replace(/\\//g, '_')
+        .replace(/=/g, '');
+
+      // Set the value in the target field
+      const field = document.getElementById(fieldId);
+      if (field) {
+        field.value = value;
+        // Trigger change event in case form validation listens to it
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+  </script>`;
+}
+
+/**
  * Parse and validate secret create form data.
  */
 export function parseSecretFormData(formData: FormData): {

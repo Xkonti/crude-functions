@@ -85,7 +85,6 @@ SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`. Acc
 
 ### Endpoints Structure
 
-- `/ping` - Health check
 - `/api/auth/*` - Better Auth handlers
 - `/api/keys/*` - API key management (protected)
 - `/api/functions/*` - Function management (protected)

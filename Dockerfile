@@ -12,7 +12,9 @@ COPY deno.json deno.lock ./
 RUN deno install
 
 # Copy application source code
-COPY main.ts main_test.ts function_handler_design.md ./
+# TODO: Make sure to exclude tests
+# TODO: Make sure to exclude docs
+COPY main.ts ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
 

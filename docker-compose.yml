@@ -8,10 +8,10 @@ services:
       - 8000:8000
     # Environment variables (optional)
     # environment:
-    #   # Better Auth configuration
+    #   # Authentication configuration
     #   # Auto-detects from request headers if not set
     #   # Set explicitly when behind reverse proxy: https://your-domain.com
-    #   - BETTER_AUTH_BASE_URL=http://localhost:8000
+    #   - AUTH_BASE_URL=http://localhost:8000
     #
     # Note: All settings (log level, metrics, encryption, API access groups)
     # are configured via the web UI Settings page and stored in the database.
