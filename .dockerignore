@@ -13,8 +13,15 @@ code/
 
 # Development files
 *.md
-!function_handler_design.md
 docker-compose.yml
+
+# Documentation
+docs/
+
+# Test files
+**/*_test.ts
+**/*.test.ts
+src/test/
 
 # IDE
 .vscode

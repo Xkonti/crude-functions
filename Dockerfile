@@ -11,9 +11,7 @@ WORKDIR /app
 COPY deno.json deno.lock ./
 RUN deno install
 
-# Copy application source code
-# TODO: Make sure to exclude tests
-# TODO: Make sure to exclude docs
+# Copy application source code (tests and docs excluded via .dockerignore)
 COPY main.ts ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
