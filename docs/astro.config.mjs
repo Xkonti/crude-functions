@@ -4,6 +4,7 @@ import starlight from '@astrojs/starlight';
 
 // https://astro.build/config
 export default defineConfig({
+	site: process.env.SITE_URL || 'http://localhost:4321',
 	integrations: [
 		starlight({
 			title: 'Crude Functions Documentation',
@@ -33,7 +34,7 @@ export default defineConfig({
 				},
 			],
       editLink: {
-        baseUrl: 'https://github.com/xkonti/crude-functions/edit/main/',
+        baseUrl: 'https://github.com/xkonti/crude-functions/edit/main/docs/',
       },
 		}),
 	],
