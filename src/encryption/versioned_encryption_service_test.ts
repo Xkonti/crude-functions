@@ -315,7 +315,10 @@ Deno.test("VersionedEncryptionService - Decryption", async (t) => {
   await t.step("throws DecryptionError for tampered data", async () => {
     const service = EncryptionServiceBuilder.create().build();
     const encrypted = await service.encrypt("test");
-    const tampered = encrypted.slice(0, 10) + "X" + encrypted.slice(11);
+    // Use a different character than what's at position 10 to guarantee tampering
+    const originalChar = encrypted.charAt(10);
+    const replacementChar = originalChar === "X" ? "Y" : "X";
+    const tampered = encrypted.slice(0, 10) + replacementChar + encrypted.slice(11);
 
     await TestHelpers.expectDecryptionFails(service, tampered, DecryptionError);
   });
