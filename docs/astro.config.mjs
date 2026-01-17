@@ -25,9 +25,6 @@ export default defineConfig({
 						// Monitoring
 						{ label: 'Logs', slug: 'guides/logs' },
 						{ label: 'Metrics', slug: 'guides/metrics' },
-
-						// Troubleshooting
-						{ label: 'Troubleshooting', slug: 'guides/troubleshooting' },
 					],
 				},
 				{
