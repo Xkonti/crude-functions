@@ -28,15 +28,6 @@ export default defineConfig({
 					],
 				},
 				{
-					label: 'Examples',
-					items: [
-						{ label: 'REST API CRUD', slug: 'guides/examples/rest-api-crud' },
-						{ label: 'Webhook Handler', slug: 'guides/examples/webhook-handler' },
-						{ label: 'Scheduled Task', slug: 'guides/examples/scheduled-task' },
-						{ label: 'Database Connection', slug: 'guides/examples/database-connection' },
-					],
-				},
-				{
 					label: 'Reference',
 					autogenerate: { directory: 'reference' },
 				},
