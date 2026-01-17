@@ -32,7 +32,37 @@ Crude Functions provides a comprehensive REST API for programmatic management.
 | PUT | `/api/files/:path` | Create or update a file |
 | DELETE | `/api/files/:path` | Delete a file |
 
-**Note:** File paths are URL-encoded. The GET endpoint supports content negotiation - use `Accept: application/json` for JSON envelope response with metadata.
+**Notes:**
+
+- File paths are URL-encoded (use `%2F` for nested paths)
+- GET supports content negotiation - use `Accept: application/json` for JSON envelope with metadata
+- POST returns 201 (created), fails with 409 if file exists
+- PUT returns 201 (created) or 200 (updated)
+- Returns 413 if file exceeds configured max size (default 50 MB)
+
+**Upload content formats (POST/PUT):**
+
+```bash
+# JSON body
+curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/json" \
+  -d '{"content": "file contents", "encoding": "utf-8"}' \
+  http://localhost:8000/api/files/example.ts
+
+# Base64 for binary files
+curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/json" \
+  -d '{"content": "base64data...", "encoding": "base64"}' \
+  http://localhost:8000/api/files/image.png
+
+# Multipart form-data
+curl -X PUT -H "X-API-Key: key" \
+  -F "file=@local-file.ts" \
+  http://localhost:8000/api/files/example.ts
+
+# Raw binary
+curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/octet-stream" \
+  --data-binary @local-file.bin \
+  http://localhost:8000/api/files/binary.bin
+```
 
 ### API Key Groups
 
@@ -114,7 +144,7 @@ curl -X POST \
 **Query parameters:**
 
 - `functionId` - Filter by function ID (omit for all functions)
-- `level` - Filter by log level (comma-separated: log, debug, info, warn, error, trace)
+- `level` - Filter by log level (comma-separated: log, debug, info, warn, error, trace, stdout, stderr, exec_start, exec_end, exec_reject)
 - `limit` - Results per page (1-1000, default: 50)
 - `cursor` - Pagination cursor from previous response
 
