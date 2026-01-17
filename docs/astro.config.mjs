@@ -22,8 +22,7 @@ export default defineConfig({
 						{ label: 'API Keys', slug: 'guides/api-keys' },
 						{ label: 'Secrets', slug: 'guides/secrets' },
 
-						// Configuration & Monitoring
-						{ label: 'Configuration', slug: 'guides/configuration' },
+						// Monitoring
 						{ label: 'Logs', slug: 'guides/logs' },
 						{ label: 'Metrics', slug: 'guides/metrics' },
 
