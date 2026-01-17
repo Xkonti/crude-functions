@@ -41,6 +41,10 @@ Unlike traditional servers that maintain persistent database connections, server
 
 PostgreSQL uses the `pg` package (or `postgres.js` for a lighter alternative).
 
+:::note[Package Versions]
+The version numbers shown (e.g., `pg@8.11.3`, `zod@3.22.4`) are examples. Check npm or the package's documentation for the latest stable versions.
+:::
+
 ```typescript
 // code/lib/postgres.ts
 import { Pool } from "npm:pg@8.11.3";
@@ -156,6 +160,10 @@ For production databases, always use SSL: `postgresql://user:pass@host:5432/db?s
 :::
 
 ### Step 3: Create CRUD Operations
+
+:::note[Schema First]
+Before running these handlers, create the database schema shown in [Step 4](#step-4-create-database-schema). The handlers assume the `users` table already exists.
+:::
 
 **List users:**
 
@@ -445,6 +453,91 @@ CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_created_at ON users(created_at DESC);
 ```
 
+### Step 5: Register Routes
+
+Use the web UI or API to register each handler as a route:
+
+| Name | Route | Method | Handler | Description |
+|------|-------|--------|---------|-------------|
+| list-users | `/users` | GET | `users/list.ts` | List all users with pagination |
+| get-user | `/users/:id` | GET | `users/get.ts` | Get a single user by ID |
+| create-user | `/users` | POST | `users/create.ts` | Create a new user |
+| update-user | `/users/:id` | PUT | `users/update.ts` | Update an existing user |
+| delete-user | `/users/:id` | DELETE | `users/delete.ts` | Delete a user |
+
+**Via Web UI:**
+
+1. Navigate to `http://localhost:8000/web/functions`
+2. Click "Create New Function"
+3. Fill in the route details (name, handler, route, methods)
+4. Save
+
+For more details on the function creation form, see [Your First Function](/guides/your-first-function#step-2-register-the-route).
+
+**Via API:**
+
+```bash
+# List users
+curl -X POST http://localhost:8000/api/functions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-management-key" \
+  -d '{
+    "name": "list-users",
+    "route": "/users",
+    "methods": ["GET"],
+    "handler": "users/list.ts",
+    "description": "List all users with pagination"
+  }'
+
+# Get user
+curl -X POST http://localhost:8000/api/functions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-management-key" \
+  -d '{
+    "name": "get-user",
+    "route": "/users/:id",
+    "methods": ["GET"],
+    "handler": "users/get.ts",
+    "description": "Get a single user by ID"
+  }'
+
+# Create user
+curl -X POST http://localhost:8000/api/functions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-management-key" \
+  -d '{
+    "name": "create-user",
+    "route": "/users",
+    "methods": ["POST"],
+    "handler": "users/create.ts",
+    "description": "Create a new user"
+  }'
+
+# Update user
+curl -X POST http://localhost:8000/api/functions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-management-key" \
+  -d '{
+    "name": "update-user",
+    "route": "/users/:id",
+    "methods": ["PUT"],
+    "handler": "users/update.ts",
+    "description": "Update an existing user"
+  }'
+
+# Delete user
+curl -X POST http://localhost:8000/api/functions \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-management-key" \
+  -d '{
+    "name": "delete-user",
+    "route": "/users/:id",
+    "methods": ["DELETE"],
+    "handler": "users/delete.ts",
+    "description": "Delete a user"
+  }'
+```
+
 ## MySQL Connection
 
 ### Step 1: Install MySQL Client
@@ -660,6 +753,15 @@ export async function getDatabase(ctx: any): Promise<DatabasePool> {
 3. Pool persists across function invocations (until process restarts)
 4. Connections are reused efficiently
 
+:::note[Pool Lifecycle]
+The connection pool persists in memory across function invocations for the lifetime of the Crude Functions process. The pool is recreated when:
+- The server restarts
+- The handler file is modified (triggering hot-reload)
+- The module is otherwise reloaded
+
+This means temporary connectivity issues may require a server restart to fully recover if the pool enters a bad state.
+:::
+
 ### Pool Configuration
 
 **PostgreSQL (pg):**
@@ -862,42 +964,71 @@ export default async function (c, ctx) {
 
 ### Transactions
 
+:::caution[Transactions Require a Dedicated Connection]
+When using connection pools, `BEGIN`, `UPDATE`, and `COMMIT` may execute on different connections if you use the pool's `query()` method directly. This breaks transaction atomicity. Always acquire a dedicated client for the entire transaction scope.
+:::
+
 ```typescript
 // code/users/transfer-credits.ts
-import { getDatabase } from "../lib/postgres.ts";
+import { Pool } from "npm:pg@8.11.3";
+
+// Module-level pool singleton
+let pool: Pool | null = null;
+
+async function getPool(ctx: any): Promise<Pool> {
+  if (!pool) {
+    const connectionString = await ctx.getSecret("DATABASE_URL");
+    if (!connectionString) {
+      throw new Error("DATABASE_URL secret not configured");
+    }
+    pool = new Pool({
+      connectionString,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+  }
+  return pool;
+}
 
 export default async function (c, ctx) {
   const { fromUserId, toUserId, amount } = await c.req.json();
-  const db = await getDatabase(ctx);
+  const pool = await getPool(ctx);
+
+  // Get a dedicated client for the transaction
+  const client = await pool.connect();
 
   try {
-    // Begin transaction
-    await db.query("BEGIN");
+    // Begin transaction on this specific client
+    await client.query("BEGIN");
 
-    // Deduct from sender
-    await db.query(
+    // Deduct from sender (same client)
+    await client.query(
       "UPDATE users SET credits = credits - $1 WHERE id = $2",
       [amount, fromUserId]
     );
 
-    // Add to receiver
-    await db.query(
+    // Add to receiver (same client)
+    await client.query(
       "UPDATE users SET credits = credits + $1 WHERE id = $2",
       [amount, toUserId]
     );
 
-    // Commit transaction
-    await db.query("COMMIT");
+    // Commit transaction (same client)
+    await client.query("COMMIT");
 
     console.log(`[${ctx.requestId}] Transferred ${amount} credits: ${fromUserId} -> ${toUserId}`);
 
     return c.json({ success: true });
   } catch (error) {
-    // Rollback on error
-    await db.query("ROLLBACK");
+    // Rollback on error (same client)
+    await client.query("ROLLBACK");
 
     console.error(`[${ctx.requestId}] Transaction failed:`, error);
     return c.json({ error: "Transfer failed" }, 500);
+  } finally {
+    // Always release the client back to the pool
+    client.release();
   }
 }
 ```
@@ -1132,6 +1263,6 @@ curl -X DELETE http://localhost:8000/run/users/delete/123e4567-e89b-12d3-a456-42
 ## Related Topics
 
 - [Secrets Management](/guides/secrets) - Storing database credentials securely
-- [Writing Functions](/guides/writing-functions) - Complete handler reference
-- [Error Handling](/guides/error-handling) - Handling database errors gracefully
+- [Your First Function](/guides/your-first-function) - Handler basics and function context
+- [REST API CRUD Example](/guides/examples/rest-api-crud) - Full CRUD API with validation and error handling
 - [API Reference](/reference/api) - Management API for secrets and functions

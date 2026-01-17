@@ -22,9 +22,15 @@ Create a function that performs regular maintenance tasks like deleting old logs
 
 ### File: `code/tasks/cleanup.ts`
 
+:::note[Database Connection Required]
+This example assumes you have set up a database connection module. See the [Database Connection](/guides/examples/database-connection) guide for how to create `code/lib/database.ts` with connection pooling and credential management.
+:::
+
 ```typescript
 // POST /tasks/cleanup
 // Automated cleanup task - triggered by cron
+
+import { getDatabase } from "../lib/database.ts";
 
 export default async function (c, ctx) {
   console.log(`Starting cleanup task at ${new Date().toISOString()}`);
@@ -39,43 +45,58 @@ export default async function (c, ctx) {
   };
 
   try {
+    // Get database connection (see database-connection example for setup)
+    const db = await getDatabase(ctx);
+
     // Delete old logs (older than 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-    const deletedLogs = await db.logs.deleteOlderThan(thirtyDaysAgo);
-    results.deletedLogs = deletedLogs;
-    console.log(`Deleted ${deletedLogs} old logs`);
+    const logsResult = await db.query(
+      "DELETE FROM logs WHERE timestamp < $1 RETURNING id",
+      [thirtyDaysAgo.toISOString()]
+    );
+    results.deletedLogs = logsResult.rows?.length ?? 0;
+    console.log(`Deleted ${results.deletedLogs} old logs`);
 
     // Delete expired sessions
-    const deletedSessions = await db.sessions.deleteExpired();
-    results.deletedSessions = deletedSessions;
-    console.log(`Deleted ${deletedSessions} expired sessions`);
+    const sessionsResult = await db.query(
+      "DELETE FROM sessions WHERE expires_at < NOW() RETURNING id"
+    );
+    results.deletedSessions = sessionsResult.rows?.length ?? 0;
+    console.log(`Deleted ${results.deletedSessions} expired sessions`);
 
     // Delete temporary files older than 7 days
     const tempFilesCutoff = new Date();
     tempFilesCutoff.setDate(tempFilesCutoff.getDate() - 7);
 
-    const tempFiles = await Deno.readDir("./temp");
-    let deletedFiles = 0;
+    try {
+      const tempFiles = await Deno.readDir("./temp");
+      let deletedFiles = 0;
 
-    for await (const entry of tempFiles) {
-      if (!entry.isFile) continue;
+      for await (const entry of tempFiles) {
+        if (!entry.isFile) continue;
 
-      const filePath = `./temp/${entry.name}`;
-      const fileInfo = await Deno.stat(filePath);
+        const filePath = `./temp/${entry.name}`;
+        const fileInfo = await Deno.stat(filePath);
 
-      if (fileInfo.mtime && fileInfo.mtime < tempFilesCutoff) {
-        await Deno.remove(filePath);
-        deletedFiles++;
+        if (fileInfo.mtime && fileInfo.mtime < tempFilesCutoff) {
+          await Deno.remove(filePath);
+          deletedFiles++;
+        }
+      }
+
+      results.deletedFiles = deletedFiles;
+      console.log(`Deleted ${deletedFiles} temporary files`);
+    } catch (error) {
+      // Temp directory may not exist - that's OK
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
       }
     }
 
-    results.deletedFiles = deletedFiles;
-    console.log(`Deleted ${deletedFiles} temporary files`);
-
-    // Vacuum database to reclaim space
-    await db.vacuum();
+    // Vacuum database to reclaim space (PostgreSQL)
+    await db.query("VACUUM");
     results.databaseVacuumed = true;
     console.log("Database vacuumed successfully");
 
@@ -101,25 +122,6 @@ export default async function (c, ctx) {
     }, 500);
   }
 }
-
-// Database helper (simplified - you'd import from your lib)
-const db = {
-  logs: {
-    async deleteOlderThan(cutoffDate: Date): Promise<number> {
-      // Implementation: DELETE FROM logs WHERE timestamp < cutoffDate
-      return 42; // Example count
-    },
-  },
-  sessions: {
-    async deleteExpired(): Promise<number> {
-      // Implementation: DELETE FROM sessions WHERE expires_at < NOW()
-      return 15; // Example count
-    },
-  },
-  async vacuum(): Promise<void> {
-    // Implementation: VACUUM
-  },
-};
 ```
 
 ## Registering the Function
@@ -154,6 +156,8 @@ curl -X POST http://localhost:8000/api/functions \
     "keys": [1]
   }'
 ```
+
+The `keys` field is an array of **key group IDs** (not key names). In the Web UI, when you select the "management" group for API key protection, it corresponds to its numeric ID (typically `1` for the default management group). You can find group IDs by listing groups via `GET /api/key-groups`.
 
 ## Creating an API Key for Cron
 
@@ -191,12 +195,9 @@ Response includes the key value (only shown once):
 
 ```json
 {
-  "success": true,
-  "data": {
-    "id": 5,
-    "name": "cron-cleanup",
-    "value": "aGVsbG93b3JsZGhlbGxvd29ybGQ"
-  }
+  "id": 5,
+  "name": "cron-cleanup",
+  "value": "aGVsbG93b3JsZGhlbGxvd29ybGQ"
 }
 ```
 
@@ -248,14 +249,16 @@ BASE_URL=http://localhost:8000
 0 9 * * 1 root curl -X POST -H "X-API-Key: $API_KEY" $BASE_URL/run/tasks/weekly-report
 ```
 
+:::caution[Variable Expansion]
+Environment variable handling varies between cron implementations. Variables defined at the top of `/etc/cron.d/` files work on most Linux systems, but user crontabs (`crontab -e`) may not expand them. If variables aren't expanding, hardcode values directly or use a wrapper shell script that sources your environment.
+:::
+
 ### Docker Container Cron
 
 If running Crude Functions in Docker, you can run cron in a separate container:
 
 ```yaml
 # docker-compose.yml
-version: '3.8'
-
 services:
   crude-functions:
     image: crude-functions:latest
@@ -479,18 +482,28 @@ async function sendNotification(options: {
 Only perform expensive operations when necessary:
 
 ```typescript
+import { getDatabase } from "../lib/database.ts";
+
 export default async function (c, ctx) {
+  const db = await getDatabase(ctx);
+
   // Check if cleanup is needed
-  const logCount = await db.logs.count();
+  const countResult = await db.query("SELECT COUNT(*) as total FROM logs");
+  const logCount = parseInt(countResult.rows[0].total);
 
   if (logCount < 10000) {
     console.log(`Log count (${logCount}) below threshold, skipping cleanup`);
     return c.json({ success: true, skipped: true, reason: 'below threshold' });
   }
 
-  // Proceed with cleanup
+  // Proceed with cleanup - delete oldest 5000 logs
   console.log(`Log count (${logCount}) above threshold, performing cleanup`);
-  const deleted = await db.logs.deleteOldest(5000);
+  const deleteResult = await db.query(
+    `DELETE FROM logs WHERE id IN (
+      SELECT id FROM logs ORDER BY timestamp ASC LIMIT 5000
+    ) RETURNING id`
+  );
+  const deleted = deleteResult.rows?.length ?? 0;
 
   return c.json({ success: true, deletedLogs: deleted });
 }
@@ -531,30 +544,55 @@ export default async function (c, ctx) {
 
 ### Idempotent Operations
 
-Ensure tasks can be safely retried:
+Ensure tasks can be safely retried using a simple in-memory cache to track completion:
 
 ```typescript
+// Simple in-memory cache (resets when process restarts)
+// For production, consider using Redis or your database
+const completionCache = new Map<string, { value: string; expiresAt: number }>();
+
+function cacheGet(key: string): string | null {
+  const entry = completionCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    completionCache.delete(key);
+    return null;
+  }
+  return entry.value;
+}
+
+function cacheSet(key: string, value: string, ttlSeconds: number): void {
+  completionCache.set(key, {
+    value,
+    expiresAt: Date.now() + ttlSeconds * 1000,
+  });
+}
+
 export default async function (c, ctx) {
-  // Use request ID to track completion
+  // Use date to track daily completion
   const completionKey = `cleanup:${new Date().toISOString().slice(0, 10)}`;
 
   // Check if already run today
-  const alreadyRun = await cache.get(completionKey);
+  const alreadyRun = cacheGet(completionKey);
 
   if (alreadyRun) {
     console.log('Cleanup already completed today, skipping');
     return c.json({ success: true, skipped: true, reason: 'already run' });
   }
 
-  // Perform cleanup
-  const results = await performCleanup();
+  // Perform cleanup (implement your cleanup logic here)
+  const results = { deletedLogs: 42, deletedSessions: 15 };
 
-  // Mark as completed
-  await cache.set(completionKey, 'true', { ttl: 86400 }); // 24 hours
+  // Mark as completed (24 hours TTL)
+  cacheSet(completionKey, 'true', 86400);
 
   return c.json({ success: true, results });
 }
 ```
+
+:::tip[Production Caching]
+The in-memory cache above resets when the process restarts. For reliable idempotency across restarts, store completion status in your database or use an external cache like Redis.
+:::
 
 ## Cron Expression Reference
 

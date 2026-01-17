@@ -33,6 +33,10 @@ code/
     delete.ts            # DELETE /tasks/:id
 ```
 
+:::tip[Creating directories]
+In the Web UI code editor, you create directory structures by including the path in the filename. For example, uploading a file named `lib/database.ts` automatically creates the `lib/` directory. See [Your First Function](/guides/your-first-function) for a walkthrough of the file upload process.
+:::
+
 ## Step 1: Shared Types
 
 Create shared TypeScript types for consistency across all handlers:
@@ -131,6 +135,10 @@ class TaskDatabase {
 export const db = new TaskDatabase();
 ```
 
+:::note[In-memory storage]
+This in-memory database persists across function calls within the same server process, but data is lost when the server restarts. For persistent storage, see the [Database Connection](/guides/examples/database-connection) example.
+:::
+
 ## Step 3: Validation Schemas
 
 Create Zod schemas for input validation:
@@ -183,9 +191,10 @@ import { PaginationSchema } from "../lib/validators.ts";
 export default async function (c, ctx) {
   try {
     // Parse and validate pagination parameters
+    // Zod schema applies defaults if page/limit are undefined
     const queryResult = PaginationSchema.safeParse({
-      page: ctx.query.page || "1",
-      limit: ctx.query.limit || "20",
+      page: ctx.query.page,
+      limit: ctx.query.limit,
     });
 
     if (!queryResult.success) {
@@ -413,6 +422,8 @@ export default async function (c, ctx) {
 ```
 
 ## Step 5: Register Routes
+
+At this point, you should have created and saved all seven files from Steps 1-4: `types.ts`, `lib/database.ts`, `lib/validators.ts`, and the five handler files in the `tasks/` directory. Now you can register each handler as a route.
 
 Use the web UI or API to register each handler as a route:
 
@@ -829,5 +840,5 @@ export async function getTasks() {
 
 - Learn about [API Keys and Authentication](/guides/api-keys) to protect your endpoints
 - Explore [Secrets Management](/guides/secrets) to store database credentials
-- Review [Error Handling](/guides/writing-functions#error-handling) best practices
-- Check out other examples in the [Examples Gallery](/guides/examples)
+- Review the [Your First Function](/guides/your-first-function) guide for handler basics
+- Check out other examples like the [Webhook Handler](/guides/examples/webhook-handler) or [Database Connection](/guides/examples/database-connection)

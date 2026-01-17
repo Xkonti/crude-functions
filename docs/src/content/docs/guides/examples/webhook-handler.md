@@ -34,7 +34,7 @@ Create a file called `stripe-webhook.ts` in your `code/webhooks/` directory:
 
 ```typescript
 // code/webhooks/stripe-webhook.ts
-import Stripe from "npm:stripe@14.21.0";
+import Stripe from "npm:stripe@17.7.0";
 
 export default async function (c, ctx) {
   // Get Stripe signature from headers
@@ -59,7 +59,7 @@ export default async function (c, ctx) {
 
   // Initialize Stripe client
   const stripe = new Stripe(apiKey, {
-    apiVersion: "2024-11-20.acacia",
+    apiVersion: "2024-09-30.acacia",
   });
 
   // Get raw request body (required for signature verification)
@@ -292,8 +292,9 @@ The [Stripe CLI](https://stripe.com/docs/stripe-cli) lets you forward webhook ev
 # macOS
 brew install stripe/stripe-cli/stripe
 
-# Linux
-# Download from https://github.com/stripe/stripe-cli/releases
+# Linux (x64)
+curl -L https://github.com/stripe/stripe-cli/releases/latest/download/stripe_linux_x86_64.tar.gz | tar xz
+sudo mv stripe /usr/local/bin/
 
 # Windows
 # Download from https://github.com/stripe/stripe-cli/releases
@@ -590,7 +591,7 @@ export default async function (c, ctx) {
   console.log(`[${ctx.requestId}] Processing webhook for tenant: ${tenantId}`);
 
   // Verify signature with tenant's webhook secret
-  const stripe = new Stripe(apiKey, { apiVersion: "2024-11-20.acacia" });
+  const stripe = new Stripe(apiKey, { apiVersion: "2024-09-30.acacia" });
   const rawBody = await c.req.text();
   const signature = c.req.header("stripe-signature")!;
 
@@ -619,8 +620,6 @@ Here's a generic webhook handler pattern that works with any service (GitHub, Sl
 
 ```typescript
 // code/webhooks/generic.ts
-import { crypto } from "jsr:@std/crypto";
-
 export default async function (c, ctx) {
   const signature = c.req.header("X-Hub-Signature-256"); // GitHub format
   const rawBody = await c.req.text();
@@ -773,6 +772,6 @@ console.error(`[${ctx.requestId}] Internal error:`, error);
 ## Related Topics
 
 - [Secrets Management](/guides/secrets) - Storing API credentials securely
-- [Writing Functions](/guides/writing-functions) - Complete handler reference
+- [Your First Function](/guides/your-first-function) - Handler structure and context reference
 - [Logs](/guides/logs) - Viewing and debugging function logs
 - [API Keys](/guides/api-keys) - Managing API authentication
