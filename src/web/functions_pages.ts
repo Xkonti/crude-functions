@@ -1014,7 +1014,7 @@ function renderMetricsPage(
 
   // Build source selector options
   const sourceOptions = [
-    `<option value="/web/functions/metrics/global?mode=${mode}" ${isGlobal ? "selected" : ""}>Server Stats</option>`,
+    `<option value="/web/functions/metrics/global?mode=${mode}" ${isGlobal ? "selected" : ""}>Global metrics</option>`,
     ...allFunctions.map(
       (fn) =>
         `<option value="/web/functions/metrics/${fn.id}?mode=${mode}" ${fn.id === routeId ? "selected" : ""}>Function: ${escapeHtml(fn.name)}</option>`
@@ -1840,7 +1840,7 @@ export function createFunctionsPages(
     const allFunctions = await routesService.getAll();
 
     const content = renderMetricsPage(
-      "Server Stats",
+      "Global metrics",
       null,
       mode,
       dataPoints,
@@ -1849,7 +1849,7 @@ export function createFunctionsPages(
       allFunctions
     );
 
-    return c.html(await layout("Metrics: Server Stats", content, getLayoutUser(c), settingsService));
+    return c.html(await layout("Metrics: Global metrics", content, getLayoutUser(c), settingsService));
   });
 
   // View metrics for a function
