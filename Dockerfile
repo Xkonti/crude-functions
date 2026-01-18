@@ -1,6 +1,7 @@
 # Base image can be overridden for hardened variant:
 # docker build --build-arg BASE_IMAGE=dhi.io/deno:2 .
 ARG BASE_IMAGE=denoland/deno:2.6.4
+ARG BUILD_VERSION=dev
 
 # Builder stage - uses standard deno image for shell utilities
 FROM denoland/deno:2.6.4 AS builder
@@ -15,6 +16,9 @@ RUN deno install
 COPY main.ts ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+
+# Generate version file with build-time version
+RUN echo "export const APP_VERSION = \"${BUILD_VERSION}\";" > src/version.ts
 
 # Create directories for volumes
 RUN mkdir -p /app/config /app/code
