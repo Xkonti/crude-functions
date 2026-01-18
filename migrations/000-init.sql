@@ -271,3 +271,55 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobQueue_reference_active
 CREATE INDEX IF NOT EXISTS idx_jobQueue_completed
   ON jobQueue(status, completedAt)
   WHERE status IN ('completed', 'failed');
+
+--------------------------------------------------------------------------------
+-- Scheduled Tasks
+--------------------------------------------------------------------------------
+
+-- Scheduled tasks table - persisted schedules that survive restarts
+CREATE TABLE IF NOT EXISTS scheduledTasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Unique task name (e.g., 'git-sync:source-1', 'log-trimming')
+  name TEXT NOT NULL UNIQUE,
+  -- Task type for handler dispatch (e.g., 'git-sync', 'cleanup')
+  type TEXT NOT NULL,
+  -- Schedule type: 'one-off' | 'interval' | 'dynamic'
+  scheduleType TEXT NOT NULL CHECK(scheduleType IN ('one-off', 'interval', 'dynamic')),
+  -- Interval in seconds (for 'interval' type)
+  intervalSeconds INTEGER,
+  -- Specific datetime for one-off tasks (ISO8601)
+  scheduledAt TEXT,
+  -- Whether this task is enabled
+  enabled INTEGER NOT NULL DEFAULT 1,
+  -- JSON payload for the task handler
+  payload TEXT,
+  -- Last successful execution timestamp
+  lastRunAt TEXT,
+  -- Next scheduled execution timestamp
+  nextRunAt TEXT,
+  -- Last error message (NULL if last run succeeded)
+  lastError TEXT,
+  -- Count of consecutive failures (reset on success)
+  consecutiveFailures INTEGER NOT NULL DEFAULT 0,
+  -- Process instance ID currently running this task (orphan detection)
+  processInstanceId TEXT,
+  -- Task status: 'idle' | 'running' | 'disabled'
+  status TEXT NOT NULL DEFAULT 'idle' CHECK(status IN ('idle', 'running', 'disabled')),
+  -- When status became 'running' (stuck task detection)
+  runStartedAt TEXT,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Index for finding next task to run
+CREATE INDEX IF NOT EXISTS idx_scheduledTasks_nextRun
+  ON scheduledTasks(enabled, status, nextRunAt)
+  WHERE enabled = 1 AND status = 'idle';
+
+-- Index for finding orphaned running tasks
+CREATE INDEX IF NOT EXISTS idx_scheduledTasks_running
+  ON scheduledTasks(status, processInstanceId)
+  WHERE status = 'running';
+
+-- Index for type-based queries
+CREATE INDEX IF NOT EXISTS idx_scheduledTasks_type ON scheduledTasks(type);
