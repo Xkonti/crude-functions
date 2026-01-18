@@ -30,12 +30,21 @@ jobs:
             type=semver,pattern={{major}}
             type=raw,value=latest
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v0.3.5 → 0.3.5)
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          build-args: BASE_IMAGE=denoland/deno:2.6.4
+          build-args: |
+            BASE_IMAGE=denoland/deno:2.6.4
+            BUILD_VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
@@ -70,12 +79,21 @@ jobs:
             type=raw,value=hardened
             type=raw,value=latest-hardened
 
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Extract version from tag (e.g., v0.3.5 → 0.3.5)
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          build-args: BASE_IMAGE=dhi.io/deno:2
+          build-args: |
+            BASE_IMAGE=dhi.io/deno:2
+            BUILD_VERSION=${{ steps.version.outputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64

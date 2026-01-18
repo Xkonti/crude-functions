@@ -14,6 +14,7 @@ code/
 # Development files
 *.md
 docker-compose.yml
+src/version.ts
 
 # Documentation
 docs/

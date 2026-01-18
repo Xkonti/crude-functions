@@ -1,5 +1,6 @@
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames, GlobalSettingDefaults } from "../settings/types.ts";
+import { APP_VERSION } from "../version.ts";
 
 /**
  * Escapes HTML special characters to prevent XSS attacks.
@@ -94,6 +95,7 @@ export async function layout(
           <ul class="user-dropdown-menu">
             <li><a href="/web/password">Change Password</a></li>
             <li><a href="/web/logout">Logout</a></li>
+            <li style="pointer-events: none; opacity: 0.6; text-align: center;"><small>v${escapeHtml(APP_VERSION)}</small></li>
           </ul>
         </li>
       `
