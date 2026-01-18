@@ -201,3 +201,73 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_settings_name_user
 ON settings(name, COALESCE(userId, ''));
 CREATE INDEX IF NOT EXISTS idx_settings_name ON settings(name);
 CREATE INDEX IF NOT EXISTS idx_settings_user ON settings(userId) WHERE userId IS NOT NULL;
+
+--------------------------------------------------------------------------------
+-- Job Queue
+--------------------------------------------------------------------------------
+
+-- Job queue table - generic queue for background processing with orphan detection
+-- Used by code source sync, cleanup tasks, and other async operations.
+-- Features:
+--   - Priority-based processing (higher priority processed first)
+--   - Orphan detection via processInstanceId (detects jobs from crashed containers)
+--   - Unique constraint on active jobs per reference (prevents duplicate work)
+--   - JSON payload/result for flexible job data
+CREATE TABLE IF NOT EXISTS jobQueue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Job type identifier. Used to dispatch to correct handler.
+  -- Examples: 'source_sync', 'log_cleanup', 'metrics_aggregate'
+  type TEXT NOT NULL,
+  -- Job lifecycle state. Transitions: pending -> running -> completed/failed
+  -- Running jobs can be reset to pending on orphan recovery (increments retryCount)
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK(status IN ('pending', 'running', 'completed', 'failed')),
+  -- Job parameters as JSON. Structure depends on job type.
+  -- May be encrypted if sensitive data (e.g., credentials).
+  payload TEXT,
+  -- Outcome as JSON. On success: result data. On failure: error details.
+  result TEXT,
+  -- UUID of process instance handling this job. Set when status -> running.
+  -- Used for orphan detection: if process crashes, jobs have mismatched ID.
+  processInstanceId TEXT,
+  -- How many times this job has been retried after orphaning.
+  retryCount INTEGER NOT NULL DEFAULT 0,
+  -- Maximum retry attempts. After retryCount >= maxRetries, job stays failed.
+  -- Default 1 means: try once, if orphaned retry once, then give up.
+  maxRetries INTEGER NOT NULL DEFAULT 1,
+  -- Higher priority jobs processed first. Default 0. Manual syncs could use
+  -- higher priority to jump ahead of scheduled syncs.
+  priority INTEGER NOT NULL DEFAULT 0,
+  -- Generic entity reference for constraint enforcement and querying.
+  -- For source_sync jobs: referenceType='code_source', referenceId=source.id
+  referenceType TEXT,
+  referenceId INTEGER,
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  -- When job was picked up (status -> running). NULL until started.
+  startedAt TEXT,
+  -- When job finished (status -> completed/failed). NULL until done.
+  completedAt TEXT
+);
+
+-- Index for finding pending jobs to process (ordered by priority, then creation time)
+CREATE INDEX IF NOT EXISTS idx_jobQueue_status ON jobQueue(status);
+
+-- Index for finding jobs by type and status
+CREATE INDEX IF NOT EXISTS idx_jobQueue_type_status ON jobQueue(type, status);
+
+-- Index for priority ordering when selecting next pending job
+CREATE INDEX IF NOT EXISTS idx_jobQueue_priority
+  ON jobQueue(status, priority DESC, createdAt ASC);
+
+-- CRITICAL: Enforce "one active job per entity" at database level.
+-- Prevents race conditions where multiple jobs queue for same entity.
+-- Partial index: only constrains rows where status is pending/running AND
+-- referenceId is set. Jobs without entity reference (NULL) aren't constrained.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobQueue_reference_active
+  ON jobQueue(referenceType, referenceId)
+  WHERE status IN ('pending', 'running') AND referenceId IS NOT NULL;
+
+-- Index for cleanup queries (finding old completed/failed jobs)
+CREATE INDEX IF NOT EXISTS idx_jobQueue_completed
+  ON jobQueue(status, completedAt)
+  WHERE status IN ('completed', 'failed');

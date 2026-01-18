@@ -1,0 +1,491 @@
+import { expect } from "@std/expect";
+import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { JobProcessorService } from "./job_processor_service.ts";
+
+// =============================================================================
+// Handler Registration
+// =============================================================================
+
+Deno.test("JobProcessorService.registerHandler registers handler", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("test-job", async () => ({ done: true }));
+
+    expect(processor.hasHandler("test-job")).toBe(true);
+    expect(processor.hasHandler("unknown-job")).toBe(false);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.unregisterHandler removes handler", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("test-job", async () => ({}));
+    expect(processor.hasHandler("test-job")).toBe(true);
+
+    const removed = processor.unregisterHandler("test-job");
+    expect(removed).toBe(true);
+    expect(processor.hasHandler("test-job")).toBe(false);
+
+    // Second unregister returns false
+    expect(processor.unregisterHandler("test-job")).toBe(false);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.getStatus returns registered handlers", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("job-a", async () => ({}));
+    processor.registerHandler("job-b", async () => ({}));
+
+    const status = processor.getStatus();
+    expect(status.registeredHandlers).toContain("job-a");
+    expect(status.registeredHandlers).toContain("job-b");
+    expect(status.isRunning).toBe(false);
+    expect(status.isProcessing).toBe(false);
+    expect(status.consecutiveFailures).toBe(0);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// processOne() - Single Job Processing
+// =============================================================================
+
+Deno.test("JobProcessorService.processOne processes pending job", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    let processedPayload: unknown = null;
+
+    processor.registerHandler("test-job", async (job) => {
+      processedPayload = job.payload;
+      return { processed: true };
+    });
+
+    await ctx.jobQueueService.enqueue({
+      type: "test-job",
+      payload: { value: 42 },
+    });
+
+    const result = await processor.processOne();
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("completed");
+    expect(result!.result).toEqual({ processed: true });
+    expect(processedPayload).toEqual({ value: 42 });
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.processOne returns null when queue is empty", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("test-job", async () => ({}));
+
+    const result = await processor.processOne();
+    expect(result).toBeNull();
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.processOne marks job failed when handler throws", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("failing-job", async () => {
+      throw new Error("Handler failed!");
+    });
+
+    await ctx.jobQueueService.enqueue({ type: "failing-job" });
+
+    const result = await processor.processOne();
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("failed");
+    expect(result!.result).toEqual({
+      error: "Error",
+      message: "Handler failed!",
+      stack: expect.any(String),
+    });
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.processOne fails job when no handler registered", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    // No handler registered for this type
+    await ctx.jobQueueService.enqueue({ type: "unknown-job" });
+
+    const result = await processor.processOne();
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("failed");
+    expect(result!.result).toEqual({
+      error: "NoHandlerError",
+      message: "No handler registered for job type: unknown-job",
+    });
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.processOne processes highest priority job first", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    const processedTypes: string[] = [];
+
+    processor.registerHandler("low-priority", async (job) => {
+      processedTypes.push(job.type);
+      return {};
+    });
+
+    processor.registerHandler("high-priority", async (job) => {
+      processedTypes.push(job.type);
+      return {};
+    });
+
+    await ctx.jobQueueService.enqueue({ type: "low-priority", priority: 0 });
+    await ctx.jobQueueService.enqueue({ type: "high-priority", priority: 10 });
+
+    await processor.processOne();
+
+    expect(processedTypes).toEqual(["high-priority"]);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Lifecycle (start/stop)
+// =============================================================================
+
+Deno.test("JobProcessorService.start and stop lifecycle", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 1 },
+  });
+
+  try {
+    expect(processor.isRunning()).toBe(false);
+
+    processor.start();
+    // Give it a moment to start
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(processor.isRunning()).toBe(true);
+
+    await processor.stop();
+
+    expect(processor.isRunning()).toBe(false);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService.start processes pending jobs", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 1 },
+  });
+
+  try {
+    let handlerCalled = false;
+
+    processor.registerHandler("auto-process", async () => {
+      handlerCalled = true;
+      return { done: true };
+    });
+
+    await ctx.jobQueueService.enqueue({ type: "auto-process" });
+
+    processor.start();
+
+    // Wait for processing
+    await new Promise((r) => setTimeout(r, 500));
+
+    expect(handlerCalled).toBe(true);
+
+    const job = (await ctx.jobQueueService.getJobsByType("auto-process"))[0];
+    expect(job.status).toBe("completed");
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService warns when start called twice", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.start();
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Second start should warn but not crash
+    processor.start();
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Orphan Recovery
+// =============================================================================
+
+Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    // Insert orphaned job directly
+    await ctx.db.execute(
+      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
+       VALUES (?, 'running', 'crashed-instance', datetime('now'), 0, 2, datetime('now'))`,
+      ["orphaned-job"],
+    );
+
+    // Verify it's orphaned
+    const orphaned = await ctx.jobQueueService.getOrphanedJobs();
+    expect(orphaned.length).toBe(1);
+
+    let handlerCalled = false;
+    const processor = new JobProcessorService({
+      jobQueueService: ctx.jobQueueService,
+      instanceIdService: ctx.instanceIdService,
+      config: { pollingIntervalSeconds: 60 },
+    });
+
+    processor.registerHandler("orphaned-job", async () => {
+      handlerCalled = true;
+      return { recovered: true };
+    });
+
+    processor.start();
+
+    // Wait for orphan recovery and processing
+    await new Promise((r) => setTimeout(r, 500));
+
+    await processor.stop();
+
+    expect(handlerCalled).toBe(true);
+
+    const jobs = await ctx.jobQueueService.getJobsByType("orphaned-job");
+    expect(jobs[0].status).toBe("completed");
+    expect(jobs[0].retryCount).toBe(1); // Was reset with incremented count
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    // Insert orphaned job that has already reached max retries
+    await ctx.db.execute(
+      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
+       VALUES (?, 'running', 'crashed-instance', datetime('now'), 1, 1, datetime('now'))`,
+      ["exhausted-job"],
+    );
+
+    const processor = new JobProcessorService({
+      jobQueueService: ctx.jobQueueService,
+      instanceIdService: ctx.instanceIdService,
+      config: { pollingIntervalSeconds: 60 },
+    });
+
+    processor.registerHandler("exhausted-job", async () => {
+      return {};
+    });
+
+    processor.start();
+
+    // Wait for orphan recovery
+    await new Promise((r) => setTimeout(r, 300));
+
+    await processor.stop();
+
+    // Job should be marked as failed
+    const jobs = await ctx.jobQueueService.getJobsByType("exhausted-job");
+    expect(jobs[0].status).toBe("failed");
+    expect(jobs[0].result).toEqual({
+      error: "MaxRetriesExceeded",
+      message: "Job exceeded maximum retries after orphan recovery",
+      retryCount: 1,
+      maxRetries: 1,
+    });
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Multiple Jobs Processing
+// =============================================================================
+
+Deno.test("JobProcessorService processes multiple jobs in sequence", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    const processedIds: number[] = [];
+
+    processor.registerHandler("sequential-job", async (job) => {
+      processedIds.push(job.id);
+      return {};
+    });
+
+    // Enqueue 3 jobs
+    await ctx.jobQueueService.enqueue({ type: "sequential-job" });
+    await ctx.jobQueueService.enqueue({ type: "sequential-job" });
+    await ctx.jobQueueService.enqueue({ type: "sequential-job" });
+
+    // Process all
+    await processor.processOne();
+    await processor.processOne();
+    await processor.processOne();
+
+    expect(processedIds.length).toBe(3);
+
+    // All should be completed
+    const jobs = await ctx.jobQueueService.getJobsByType("sequential-job");
+    expect(jobs.every((j) => j.status === "completed")).toBe(true);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Job Context Available to Handler
+// =============================================================================
+
+Deno.test("JobProcessorService passes full job context to handler", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    let receivedJob: unknown = null;
+
+    processor.registerHandler("context-check", async (job) => {
+      receivedJob = job;
+      return {};
+    });
+
+    await ctx.jobQueueService.enqueue({
+      type: "context-check",
+      payload: { data: "test" },
+      priority: 5,
+      referenceType: "test-entity",
+      referenceId: 123,
+    });
+
+    await processor.processOne();
+
+    expect(receivedJob).not.toBeNull();
+    const job = receivedJob as Record<string, unknown>;
+    expect(job.type).toBe("context-check");
+    expect(job.payload).toEqual({ data: "test" });
+    expect(job.priority).toBe(5);
+    expect(job.referenceType).toBe("test-entity");
+    expect(job.referenceId).toBe(123);
+    expect(job.status).toBe("running"); // Job is claimed when handler runs
+    expect(job.processInstanceId).toBe(ctx.instanceIdService.getId());
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});

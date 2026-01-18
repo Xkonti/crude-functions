@@ -132,83 +132,23 @@ CREATE TABLE IF NOT EXISTS codeSources (
 
 **jobQueue table:**
 
-```sql
-CREATE TABLE IF NOT EXISTS jobQueue (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
+The generic job queue infrastructure already exists in `migrations/000-init.sql`. Use `JobQueueService` from `src/jobs/job_queue_service.ts` for all job management operations.
 
-  -- Job type identifier. Used by job processor to dispatch to correct handler.
-  -- Examples: 'source_sync', 'log_cleanup', 'metrics_aggregate'.
-  -- Not constrained by CHECK because new job types can be added without
-  -- schema migration - unknown types are simply ignored/logged.
-  type TEXT NOT NULL,
+Key features for source sync:
+- Enforce "one active job per entity" via `referenceType='code_source'` and `referenceId=source.id`
+- Priority support (manual syncs can use higher priority)
+- Orphan detection via process instance ID (handled by `JobProcessorService`)
+- Encrypted payload support (pass `encryptionService` to `JobQueueService`)
 
-  -- Job lifecycle state. Transitions: pending → running → completed/failed.
-  -- 'pending': Waiting to be picked up by processor
-  -- 'running': Currently being executed (processInstanceId set)
-  -- 'completed': Finished successfully
-  -- 'failed': Finished with error (after retries exhausted)
-  status TEXT NOT NULL DEFAULT 'pending'
-    CHECK(status IN ('pending', 'running', 'completed', 'failed')),
-
-  -- Job parameters as JSON. Structure depends on job type.
-  -- For source_sync: {"sourceId": 123}
-  -- Keeping job-specific data here (not in columns) makes queue truly generic.
-  payload TEXT,
-
-  -- Outcome as JSON. On success: result data. On failure: error details.
-  -- Preserved for debugging and audit purposes.
-  result TEXT,
-
-  -- UUID of the process instance handling this job. Set when status→running.
-  -- Used for orphan detection: if process crashes, its jobs have wrong ID.
-  -- On startup, jobs with status='running' and mismatched ID are orphaned.
-  processInstanceId TEXT,
-
-  -- How many times this job has been retried after failure/orphaning.
-  retryCount INTEGER NOT NULL DEFAULT 0,
-
-  -- Maximum retry attempts. After retryCount >= maxRetries, job stays failed.
-  -- Default 1 means: try once, if orphaned retry once, then give up.
-  maxRetries INTEGER NOT NULL DEFAULT 1,
-
-  -- Higher priority jobs processed first. Default 0. Manual syncs could use
-  -- higher priority to jump ahead of scheduled syncs.
-  priority INTEGER NOT NULL DEFAULT 0,
-
-  -- Generic entity reference for constraint enforcement. Using referenceType +
-  -- referenceId instead of sourceId FK because:
-  -- 1. Queue is generic - future job types may reference other entities
-  -- 2. Allows same constraint pattern for any entity type
-  -- 3. No FK = no cascade delete complications (jobs are historical records)
-  -- For source_sync jobs: referenceType='code_source', referenceId=source.id
-  referenceType TEXT,
-  referenceId INTEGER,
-
-  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
-
-  -- When job was picked up (status→running). NULL until started.
-  startedAt TEXT,
-
-  -- When job finished (status→completed/failed). NULL until done.
-  -- Duration = completedAt - startedAt.
-  completedAt TEXT
-);
-
--- Index for finding jobs to process: get pending jobs, ordered by priority.
-CREATE INDEX IF NOT EXISTS idx_jobQueue_status ON jobQueue(status);
-
--- Index for job type filtering (e.g., find all pending source_sync jobs).
-CREATE INDEX IF NOT EXISTS idx_jobQueue_type_status ON jobQueue(type, status);
-
--- CRITICAL: Enforce "one active job per entity" at database level.
--- Prevents race conditions where multiple sync jobs queue for same source.
--- Partial index: only constrains rows where status is pending/running AND
--- referenceId is set. Jobs without entity reference (NULL) aren't constrained.
--- This means: for any (referenceType, referenceId) pair, at most ONE job
--- can be pending or running at a time.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_jobQueue_reference_active
-ON jobQueue(referenceType, referenceId)
-WHERE status IN ('pending', 'running') AND referenceId IS NOT NULL;
+For source sync jobs, use:
+```typescript
+await jobQueueService.enqueue({
+  type: 'source_sync',
+  payload: { sourceId: 123 },
+  referenceType: 'code_source',
+  referenceId: 123,
+  priority: 0, // or higher for manual sync
+});
 ```
 
 **Manual Source Behavior Notes:**
@@ -222,7 +162,7 @@ For implementers - manual sources have special semantics:
 
 **Job Cleanup Strategy:**
 
-Not in schema but needed in implementation: background task to delete old completed/failed jobs. Pattern exists in `LogTrimmingService`. Suggested retention: 7 days for completed, 30 days for failed (for debugging).
+Consider adding a background task to delete old completed/failed jobs (similar to `LogTrimmingService` pattern). Use `JobQueueService.deleteCompleted()` and `JobQueueService.deleteFailed()` methods. Suggested retention: 7 days for completed, 30 days for failed (for debugging).
 
 **Type Settings (encrypted JSON):**
 
@@ -248,14 +188,23 @@ interface SyncSettings {
 
 ### 2. Service Architecture
 
+**Existing Services (use these):**
+
+| Service | Location | Responsibility |
+|---------|----------|----------------|
+| **JobQueueService** | `src/jobs/job_queue_service.ts` | Generic queue, orphan detection, process tracking |
+| **JobProcessorService** | `src/jobs/job_processor_service.ts` | Background job processing with handler registration |
+| **InstanceIdService** | `src/instance/instance_id_service.ts` | Unique process instance ID for orphan detection |
+
+**New Services (to create):**
+
 | Service | Location | Responsibility |
 |---------|----------|----------------|
 | **CodeSourceService** | `src/sources/code_source_service.ts` | CRUD for sources, directory management, encryption |
-| **JobQueueService** | `src/jobs/job_queue_service.ts` | Generic queue, orphan detection, process tracking |
 | **SyncService** | `src/sources/sync_service.ts` | Orchestrates syncs, delegates to providers |
 | **GitSyncProvider** | `src/sources/git_sync_provider.ts` | Clone/pull/checkout using isomorphic-git |
 | **ManualSourceProvider** | `src/sources/manual_source_provider.ts` | Scoped file operations for manual sources |
-| **SyncSchedulerService** | `src/sources/sync_scheduler_service.ts` | Background interval checking, job processing |
+| **SyncSchedulerService** | `src/sources/sync_scheduler_service.ts` | Background interval checking, triggers sync jobs |
 
 ### 3. API Endpoints
 
@@ -292,21 +241,39 @@ interface SyncSettings {
 
 ### 5. Key Implementation Patterns
 
-**Orphan Detection:**
+**Job Processing:**
+
+Use `JobProcessorService` for background job processing. Register a handler for `'source_sync'` jobs:
 
 ```typescript
-// On startup and periodically:
-// - Find jobs with status='running' and processInstanceId != current
-// - If retryCount < maxRetries: reset to 'pending', increment retry
-// - Otherwise: mark as 'failed'
+jobProcessorService.registerHandler('source_sync', async (job) => {
+  const { sourceId } = job.payload;
+  await syncService.syncSource(sourceId);
+  return { synced: true };
+});
+
+jobProcessorService.start(); // Starts polling and handles orphans automatically
 ```
+
+Orphan detection is automatic on service start and during polling.
 
 **Sync Queuing:**
 
 ```typescript
-// When sync triggered:
-// - If no active job for source: create and process immediately
-// - If job running: queue new job (will run after)
+// JobQueueService enforces unique constraint via referenceType + referenceId
+// If active job exists, enqueue() throws DuplicateActiveJobError
+try {
+  await jobQueueService.enqueue({
+    type: 'source_sync',
+    payload: { sourceId },
+    referenceType: 'code_source',
+    referenceId: sourceId,
+  });
+} catch (error) {
+  if (error instanceof DuplicateActiveJobError) {
+    // Already queued or running - safe to ignore
+  }
+}
 ```
 
 **Path Scoping:**
@@ -323,24 +290,23 @@ interface SyncSettings {
 
 ### Phase 1: Database & Core Services
 
-1. Add tables to `000-init.sql`
+1. Add `codeSources` table to `000-init.sql`
 2. Implement `CodeSourceService`
-3. Implement `JobQueueService`
-4. Add TestSetupBuilder extensions
+3. Update `TestSetupBuilder` to support source services
 
 ### Phase 2: Sync Infrastructure
 
 1. Implement `GitSyncProvider` (with isomorphic-git)
 2. Implement `ManualSourceProvider`
 3. Implement `SyncService`
-4. Implement `SyncSchedulerService`
+4. Implement `SyncSchedulerService` (registers handler with existing `JobProcessorService`)
 
 ### Phase 3: API & Integration
 
 1. Create `source_routes.ts`
 2. Create `webhook_routes.ts`
 3. Update `file_routes.ts` for source-scoping
-4. Integrate into `main.ts`
+4. Update `main.ts` to initialize source services and register sync job handler
 
 ### Phase 4: Web UI
 
@@ -360,10 +326,11 @@ interface SyncSettings {
 
 **Modify:**
 
-- `migrations/000-init.sql` - Add code_sources and jobQueue tables
-- `main.ts` - Initialize new services, generate process ID
+- `migrations/000-init.sql` - Add `codeSources` table (jobQueue already exists)
+- `main.ts` - Initialize source services, register sync handler with `JobProcessorService`
 - `src/files/file_service.ts` - Enforce source-scoped paths
 - `src/web/code_pages.ts` - Source-aware file browsing
+- `src/test/test_setup_builder.ts` - Add source service support
 
 **Create:**
 
@@ -374,7 +341,6 @@ interface SyncSettings {
 - `src/sources/sync_scheduler_service.ts`
 - `src/sources/source_routes.ts`
 - `src/sources/webhook_routes.ts`
-- `src/jobs/job_queue_service.ts`
 - `src/web/sources_pages.ts`
 
 ---

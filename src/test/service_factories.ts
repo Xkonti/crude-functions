@@ -20,6 +20,8 @@ import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts
 import { MetricsStateService } from "../metrics/metrics_state_service.ts";
 import { UserService } from "../users/user_service.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
+import { InstanceIdService } from "../instance/instance_id_service.ts";
+import { JobQueueService } from "../jobs/job_queue_service.ts";
 import { createAuth } from "../auth/auth.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
 import type { betterAuth } from "better-auth";
@@ -292,6 +294,38 @@ export async function createUserDirectly(
   );
 
   return userId;
+}
+
+// =============================================================================
+// Instance ID Factory
+// =============================================================================
+
+/**
+ * Creates the InstanceIdService.
+ * No dependencies.
+ */
+export function createInstanceIdService(): InstanceIdService {
+  return new InstanceIdService();
+}
+
+// =============================================================================
+// Job Queue Factory
+// =============================================================================
+
+/**
+ * Creates the JobQueueService.
+ * Requires database and instance ID service. Encryption is optional.
+ */
+export function createJobQueueService(
+  db: DatabaseService,
+  instanceIdService: InstanceIdService,
+  encryptionService?: VersionedEncryptionService,
+): JobQueueService {
+  return new JobQueueService({
+    db,
+    instanceIdService,
+    encryptionService,
+  });
 }
 
 // =============================================================================

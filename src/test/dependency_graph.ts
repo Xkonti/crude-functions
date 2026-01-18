@@ -21,7 +21,9 @@ export type ServiceKey =
   | "apiKeyService"
   | "secretsService"
   | "auth"
-  | "userService";
+  | "userService"
+  | "instanceIdService"
+  | "jobQueueService";
 
 /**
  * Service flags interface - tracks which services to include.
@@ -41,6 +43,8 @@ export interface ServiceFlags {
   secretsService: boolean;
   auth: boolean;
   userService: boolean;
+  instanceIdService: boolean;
+  jobQueueService: boolean;
 }
 
 /**
@@ -60,6 +64,8 @@ export function createDefaultFlags(): ServiceFlags {
     secretsService: false,
     auth: false,
     userService: false,
+    instanceIdService: false,
+    jobQueueService: false,
   };
 }
 
@@ -80,6 +86,7 @@ export const DEPENDENCIES: Record<ServiceKey, ServiceKey[]> = {
   metricsStateService: [],
   routesService: [],
   fileService: [],
+  instanceIdService: [],
 
   // Encryption layer (encryptionService includes hashService)
   encryptionService: ["hashService"],
@@ -102,6 +109,9 @@ export const DEPENDENCIES: Record<ServiceKey, ServiceKey[]> = {
 
   // User service depends on auth
   userService: ["auth"],
+
+  // Job queue depends on instance ID service
+  jobQueueService: ["instanceIdService"],
 };
 
 /**

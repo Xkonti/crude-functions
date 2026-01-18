@@ -103,6 +103,8 @@ import type {
   SecretsContext,
   AuthContext,
   UsersContext,
+  InstanceIdContext,
+  JobQueueContext,
   RouteOptions,
   DeferredUser,
   DeferredKeyGroup,
@@ -112,6 +114,7 @@ import type {
   DeferredSetting,
   DeferredConsoleLog,
   DeferredMetric,
+  DeferredJob,
 } from "./types.ts";
 import {
   type ServiceFlags,
@@ -136,6 +139,8 @@ import {
   createBetterAuth,
   createUserService,
   createUserDirectly,
+  createInstanceIdService,
+  createJobQueueService,
   createCleanupFunction,
 } from "./service_factories.ts";
 
@@ -164,6 +169,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   private deferredSettings: DeferredSetting[] = [];
   private deferredLogs: DeferredConsoleLog[] = [];
   private deferredMetrics: DeferredMetric[] = [];
+  private deferredJobs: DeferredJob[] = [];
 
   private constructor() {}
 
@@ -307,6 +313,24 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     return this as unknown as TestSetupBuilder<TContext & UsersContext>;
   }
 
+  /**
+   * Include InstanceIdService in the test context.
+   * No dependencies - works with just the base context.
+   */
+  withInstanceIdService(): TestSetupBuilder<TContext & InstanceIdContext> {
+    enableServiceWithDependencies(this.flags, "instanceIdService");
+    return this as unknown as TestSetupBuilder<TContext & InstanceIdContext>;
+  }
+
+  /**
+   * Include JobQueueService in the test context.
+   * Auto-enables: instanceIdService.
+   */
+  withJobQueueService(): TestSetupBuilder<TContext & JobQueueContext> {
+    enableServiceWithDependencies(this.flags, "jobQueueService");
+    return this as unknown as TestSetupBuilder<TContext & JobQueueContext>;
+  }
+
   // =============================================================================
   // Convenience Methods (Compose Multiple Services)
   // =============================================================================
@@ -383,6 +407,26 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
    */
   withUsers(): TestSetupBuilder<TContext & UsersContext> {
     return this.withUserService() as unknown as TestSetupBuilder<TContext & UsersContext>;
+  }
+
+  /**
+   * Include instance ID service.
+   * Alias for withInstanceIdService() for semantic clarity.
+   */
+  withInstanceId(): TestSetupBuilder<TContext & InstanceIdContext> {
+    return this.withInstanceIdService() as unknown as TestSetupBuilder<
+      TContext & InstanceIdContext
+    >;
+  }
+
+  /**
+   * Include job queue service and its dependencies (instanceIdService).
+   * Alias for withJobQueueService() for semantic clarity.
+   */
+  withJobQueue(): TestSetupBuilder<TContext & JobQueueContext> {
+    return this.withJobQueueService() as unknown as TestSetupBuilder<
+      TContext & JobQueueContext
+    >;
   }
 
   /**
@@ -527,6 +571,18 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     return this as unknown as TestSetupBuilder<
       TContext & { executionMetricsService: MetricsContext["executionMetricsService"] }
     >;
+  }
+
+  /**
+   * Seed a job in the job queue during build.
+   * Auto-enables: jobQueueService, instanceIdService.
+   *
+   * @param job - Job data
+   */
+  withJob(job: DeferredJob): TestSetupBuilder<TContext & JobQueueContext> {
+    this.deferredJobs.push(job);
+    this.withJobQueueService();
+    return this as unknown as TestSetupBuilder<TContext & JobQueueContext>;
   }
 
   // =============================================================================
@@ -727,7 +783,42 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       context.metricsStateService = createMetricsStateService(db);
     }
 
-    // STEP 11: Create cleanup function
+    // STEP 11: Create instance ID service if needed
+    if (this.flags.instanceIdService || this.flags.jobQueueService) {
+      context.instanceIdService = createInstanceIdService();
+    }
+
+    // STEP 12: Create job queue service if needed
+    if (this.flags.jobQueueService) {
+      context.jobQueueService = createJobQueueService(
+        db,
+        context.instanceIdService,
+        context.encryptionService,
+      );
+
+      // Seed deferred jobs
+      for (const job of this.deferredJobs) {
+        // Insert job directly into database for seeding
+        // (bypasses enqueue to allow setting status)
+        const payloadStr = job.payload !== undefined
+          ? JSON.stringify(job.payload)
+          : null;
+        await db.execute(
+          `INSERT INTO jobQueue (type, status, payload, priority, referenceType, referenceId, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          [
+            job.type,
+            job.status ?? "pending",
+            payloadStr,
+            job.priority ?? 0,
+            job.referenceType ?? null,
+            job.referenceId ?? null,
+          ],
+        );
+      }
+    }
+
+    // STEP 13: Create cleanup function
     context.cleanup = createCleanupFunction(
       db,
       tempDir,

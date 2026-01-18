@@ -40,6 +40,9 @@ import type { ExecutionMetricsService } from "../metrics/execution_metrics_servi
 import type { MetricsStateService } from "../metrics/metrics_state_service.ts";
 import type { UserService } from "../users/user_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
+import type { InstanceIdService } from "../instance/instance_id_service.ts";
+import type { JobQueueService } from "../jobs/job_queue_service.ts";
+import type { JobStatus } from "../jobs/types.ts";
 import type { betterAuth } from "better-auth";
 import type { SettingName } from "../settings/types.ts";
 
@@ -167,6 +170,24 @@ export interface UsersContext extends AuthContext {
   userService: UserService;
 }
 
+/**
+ * Context with instance ID service.
+ * No dependencies beyond base context.
+ */
+export interface InstanceIdContext {
+  /** Instance ID service instance */
+  instanceIdService: InstanceIdService;
+}
+
+/**
+ * Context with job queue service.
+ * Requires instance ID service.
+ */
+export interface JobQueueContext extends InstanceIdContext {
+  /** Job queue service instance */
+  jobQueueService: JobQueueService;
+}
+
 // =============================================================================
 // Full Context (All Services)
 // =============================================================================
@@ -184,7 +205,8 @@ export type FullTestContext = BaseTestContext &
   FilesContext &
   ApiKeysContext &
   SecretsContext &
-  UsersContext;
+  UsersContext &
+  JobQueueContext;
 
 /**
  * Alias for FullTestContext (backward compatibility).
@@ -295,4 +317,22 @@ export interface DeferredMetric {
   executionCount: number;
   /** Optional timestamp (auto-generated if not provided) */
   timestamp?: Date;
+}
+
+/**
+ * Data for seeding a job via withJob().
+ */
+export interface DeferredJob {
+  /** Job type identifier */
+  type: string;
+  /** Job payload data */
+  payload?: unknown;
+  /** Job status (defaults to 'pending') */
+  status?: JobStatus;
+  /** Processing priority (defaults to 0) */
+  priority?: number;
+  /** Reference type for entity association */
+  referenceType?: string;
+  /** Reference ID for entity association */
+  referenceId?: number;
 }
