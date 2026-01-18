@@ -109,9 +109,12 @@ export class LogTrimmingService {
   }
 
   /**
-   * Main trimming loop - called by timer.
+   * Run a single trimming cycle.
+   * Called by the SchedulingService instead of internal timer.
+   *
+   * @param signal - AbortSignal for graceful cancellation
    */
-  private async runTrimming(): Promise<void> {
+  async runOnce(signal: AbortSignal): Promise<void> {
     if (this.isProcessing) {
       logger.debug("[LogTrimming] Skipping, already processing");
       return;
@@ -128,14 +131,14 @@ export class LogTrimmingService {
         }
       }
 
-      if (this.stopRequested) return;
+      if (signal.aborted) return;
 
       // STEP 2: Count-based trimming per route
       const routeIds = await this.logService.getDistinctRouteIds();
 
       let totalDeleted = 0;
       for (const routeId of routeIds) {
-        if (this.stopRequested) return;
+        if (signal.aborted) return;
 
         const deleted = await this.logService.trimToLimit(
           routeId,
@@ -150,5 +153,18 @@ export class LogTrimmingService {
     } finally {
       this.isProcessing = false;
     }
+  }
+
+  /**
+   * Main trimming loop - called by timer.
+   * @deprecated Use runOnce() with SchedulingService instead
+   */
+  private async runTrimming(): Promise<void> {
+    // Create a fake abort controller for backward compatibility
+    const controller = new AbortController();
+    if (this.stopRequested) {
+      controller.abort();
+    }
+    await this.runOnce(controller.signal);
   }
 }

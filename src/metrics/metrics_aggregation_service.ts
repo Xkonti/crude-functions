@@ -100,11 +100,46 @@ export class MetricsAggregationService {
   }
 
   /**
-   * Run aggregation once and wait for completion.
-   * Useful for testing and one-off catch-up processing.
+   * Run a single aggregation cycle.
+   * Called by the SchedulingService instead of internal timer.
+   *
+   * @param signal - AbortSignal for graceful cancellation
    */
-  async runOnce(): Promise<void> {
-    await this.runAggregation();
+  async runOnce(signal: AbortSignal): Promise<void> {
+    if (this.isProcessing) {
+      logger.debug("[MetricsAggregation] Skipping, already processing");
+      return;
+    }
+
+    this.isProcessing = true;
+    try {
+      const now = new Date();
+
+      // Clean up all old metrics first (any type)
+      await this.cleanupOldMetrics();
+
+      if (signal.aborted) return;
+
+      // PASS 1: Process minutes (execution → minute)
+      await this.processMinutesPass(now, signal);
+
+      if (signal.aborted) return;
+
+      // PASS 2: Process hours (minute → hour)
+      await this.processHoursPass(now, signal);
+
+      if (signal.aborted) return;
+
+      // PASS 3: Process days (hour → day)
+      await this.processDaysPass(now, signal);
+
+      if (signal.aborted) return;
+
+      // CLEANUP: Delete processed source records
+      await this.cleanupProcessedRecords();
+    } finally {
+      this.isProcessing = false;
+    }
   }
 
   /**
@@ -140,50 +175,22 @@ export class MetricsAggregationService {
 
   /**
    * Main aggregation loop - called by timer.
-   * Runs three passes (minutes, hours, days) then cleans up old records.
+   * @deprecated Use runOnce() with SchedulingService instead
    */
   private async runAggregation(): Promise<void> {
-    if (this.isProcessing) {
-      logger.debug("[MetricsAggregation] Skipping, already processing");
-      return;
+    // Create a fake abort controller for backward compatibility
+    const controller = new AbortController();
+    if (this.stopRequested) {
+      controller.abort();
     }
-
-    this.isProcessing = true;
-    try {
-      const now = new Date();
-
-      // Clean up all old metrics first (any type)
-      await this.cleanupOldMetrics();
-
-      if (this.stopRequested) return;
-
-      // PASS 1: Process minutes (execution → minute)
-      await this.processMinutesPass(now);
-
-      if (this.stopRequested) return;
-
-      // PASS 2: Process hours (minute → hour)
-      await this.processHoursPass(now);
-
-      if (this.stopRequested) return;
-
-      // PASS 3: Process days (hour → day)
-      await this.processDaysPass(now);
-
-      if (this.stopRequested) return;
-
-      // CLEANUP: Delete processed source records
-      await this.cleanupProcessedRecords();
-    } finally {
-      this.isProcessing = false;
-    }
+    await this.runOnce(controller.signal);
   }
 
   /**
    * MINUTES PASS: Aggregate execution records into minute records.
    * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processMinutesPass(now: Date): Promise<void> {
+  private async processMinutesPass(now: Date, signal: AbortSignal): Promise<void> {
     const currentMinute = this.floorToMinute(now);
 
     // Get or initialize marker
@@ -195,7 +202,7 @@ export class MetricsAggregationService {
 
     // Process each complete minute
     while (marker < currentMinute) {
-      if (this.stopRequested) return;
+      if (signal.aborted) return;
 
       // Limit processing per run
       if (minutesProcessed >= this.maxMinutesPerRun) {
@@ -303,7 +310,7 @@ export class MetricsAggregationService {
    * HOURS PASS: Aggregate minute records into hour records.
    * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processHoursPass(now: Date): Promise<void> {
+  private async processHoursPass(now: Date, signal: AbortSignal): Promise<void> {
     const currentHour = this.floorToHour(now);
 
     // Get or initialize marker
@@ -314,7 +321,7 @@ export class MetricsAggregationService {
 
     // Process each complete hour
     while (marker < currentHour) {
-      if (this.stopRequested) return;
+      if (signal.aborted) return;
 
       const windowStart = marker;
       const windowEnd = new Date(marker.getTime() + 60 * 60 * 1000);
@@ -394,7 +401,7 @@ export class MetricsAggregationService {
    * DAYS PASS: Aggregate hour records into day records.
    * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processDaysPass(now: Date): Promise<void> {
+  private async processDaysPass(now: Date, signal: AbortSignal): Promise<void> {
     const currentDay = this.floorToDay(now);
 
     // Get or initialize marker
@@ -405,7 +412,7 @@ export class MetricsAggregationService {
 
     // Process each complete day
     while (marker < currentDay) {
-      if (this.stopRequested) return;
+      if (signal.aborted) return;
 
       const windowStart = marker;
       const windowEnd = new Date(marker.getTime() + 24 * 60 * 60 * 1000);

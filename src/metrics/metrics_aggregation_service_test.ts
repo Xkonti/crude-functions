@@ -58,6 +58,11 @@ function isPastHourOnDifferentDay(hoursAgo: number): boolean {
 
 type MetricsTestContext = BaseTestContext & MetricsContext;
 
+// Helper to create a no-op abort signal for tests
+function createTestSignal(): AbortSignal {
+  return new AbortController().signal;
+}
+
 interface TestSetup {
   aggregationService: MetricsAggregationService;
   ctx: MetricsTestContext;
@@ -129,7 +134,7 @@ Deno.test("MetricsAggregationService aggregates executions into minute", async (
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Check that minute aggregate was created
     const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
@@ -175,7 +180,7 @@ Deno.test("MetricsAggregationService handles weighted averages correctly", async
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
     expect(minuteMetrics.length).toBe(1);
@@ -215,7 +220,7 @@ Deno.test("MetricsAggregationService processes multiple routes separately", asyn
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     const route1Minutes = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
     const route2Minutes = await setup.ctx.executionMetricsService.getByRouteId(2, "minute");
@@ -257,7 +262,7 @@ Deno.test("MetricsAggregationService skips empty periods (no zero-value rows)", 
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Should have minute records for both minutes only
     // Empty periods are skipped - no zero-value rows
@@ -321,7 +326,7 @@ Deno.test("MetricsAggregationService aggregates minutes into hour", async () => 
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     if (crossesDayBoundary) {
       // When running at 00:xx, the previous hour (23:xx) is on yesterday,
@@ -417,7 +422,7 @@ Deno.test("MetricsAggregationService aggregates hours into day", async () => {
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Check day aggregate was created for the previous day
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
@@ -500,7 +505,7 @@ Deno.test("MetricsAggregationService cleans up old metrics of all types", async 
     });
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Only the recent day metric should remain - all old metrics deleted
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
@@ -541,7 +546,7 @@ Deno.test("MetricsAggregationService processes multiple minutes in one run", asy
     }
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // All executions should be deleted
     const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
@@ -571,7 +576,7 @@ Deno.test("MetricsAggregationService does nothing when no data", async () => {
 
   try {
     // Run with no data
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // No errors should occur, no data should be created
     const allMetrics = await setup.ctx.executionMetricsService.getRecent(100);
@@ -623,7 +628,7 @@ Deno.test("MetricsAggregationService stop waits for processing to complete", asy
     }
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Processing should have completed
     const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
@@ -679,7 +684,7 @@ Deno.test("MetricsAggregationService processes pending minutes into hours when n
     expect(execsBefore.length).toBe(0);
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     if (crossesDayBoundary) {
       // When running at 00:xx or 01:xx, getPastHour(2) returns yesterday's hour,
@@ -743,7 +748,7 @@ Deno.test("MetricsAggregationService processes pending hours into days when no e
     expect(minutesBefore.length).toBe(0);
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Check day aggregate was created
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
@@ -794,7 +799,7 @@ Deno.test("MetricsAggregationService processes both pending minutes and hours in
     expect(execsBefore.length).toBe(0);
 
     // Run aggregation once
-    await setup.aggregationService.runOnce();
+    await setup.aggregationService.runOnce(createTestSignal());
 
     // Check day aggregate was created from yesterday's hour
     const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");

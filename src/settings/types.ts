@@ -27,6 +27,11 @@ export const SettingNames = {
   // Files
   FILES_MAX_SIZE_BYTES: "files.max-size-bytes",
 
+  // Scheduling
+  SCHEDULING_POLLING_INTERVAL_SECONDS: "scheduling.polling-interval-seconds",
+  SCHEDULING_DEFAULT_TIMEOUT_MS: "scheduling.default-timeout-ms",
+  SCHEDULING_STUCK_TASK_TIMEOUT_MS: "scheduling.stuck-task-timeout-ms",
+
   // General
   SERVER_NAME: "server.name",
 } as const;
@@ -56,6 +61,9 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS]: "100",
   [SettingNames.API_ACCESS_GROUPS]: "",
   [SettingNames.FILES_MAX_SIZE_BYTES]: "52428800", // 50 MB
+  [SettingNames.SCHEDULING_POLLING_INTERVAL_SECONDS]: "1",
+  [SettingNames.SCHEDULING_DEFAULT_TIMEOUT_MS]: "300000", // 5 minutes
+  [SettingNames.SCHEDULING_STUCK_TASK_TIMEOUT_MS]: "3600000", // 1 hour
   [SettingNames.SERVER_NAME]: "Crude Functions",
 };
 
@@ -70,7 +78,7 @@ export interface SettingMetadata {
   options?: readonly string[];
   min?: number;
   max?: number;
-  category: "General" | "Logging" | "Metrics" | "Encryption" | "Security";
+  category: "General" | "Logging" | "Metrics" | "Encryption" | "Security" | "Scheduling";
 }
 
 /**
@@ -201,6 +209,33 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     max: 524288000,
     category: "Security",
   },
+  [SettingNames.SCHEDULING_POLLING_INTERVAL_SECONDS]: {
+    name: SettingNames.SCHEDULING_POLLING_INTERVAL_SECONDS,
+    label: "Scheduler Polling Interval",
+    description: "How often the scheduler checks for due tasks (seconds)",
+    inputType: "number",
+    min: 1,
+    max: 60,
+    category: "Scheduling",
+  },
+  [SettingNames.SCHEDULING_DEFAULT_TIMEOUT_MS]: {
+    name: SettingNames.SCHEDULING_DEFAULT_TIMEOUT_MS,
+    label: "Task Default Timeout",
+    description: "Default timeout for scheduled task execution (milliseconds)",
+    inputType: "number",
+    min: 1000,
+    max: 3600000,
+    category: "Scheduling",
+  },
+  [SettingNames.SCHEDULING_STUCK_TASK_TIMEOUT_MS]: {
+    name: SettingNames.SCHEDULING_STUCK_TASK_TIMEOUT_MS,
+    label: "Stuck Task Timeout",
+    description: "Time after which a running task is considered stuck (milliseconds)",
+    inputType: "number",
+    min: 60000,
+    max: 86400000,
+    category: "Scheduling",
+  },
   [SettingNames.SERVER_NAME]: {
     name: SettingNames.SERVER_NAME,
     label: "Server Name",
@@ -238,5 +273,10 @@ export const SettingsByCategory = {
   Security: [
     SettingNames.API_ACCESS_GROUPS,
     SettingNames.FILES_MAX_SIZE_BYTES,
+  ],
+  Scheduling: [
+    SettingNames.SCHEDULING_POLLING_INTERVAL_SECONDS,
+    SettingNames.SCHEDULING_DEFAULT_TIMEOUT_MS,
+    SettingNames.SCHEDULING_STUCK_TASK_TIMEOUT_MS,
   ],
 } as const;

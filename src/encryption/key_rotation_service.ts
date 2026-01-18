@@ -248,6 +248,101 @@ export class KeyRotationService {
   }
 
   /**
+   * Run a single rotation check cycle.
+   * Called by the SchedulingService instead of internal timer.
+   *
+   * @param signal - AbortSignal for graceful cancellation
+   */
+  async runOnce(signal: AbortSignal): Promise<void> {
+    // Check if stop was requested via signal
+    if (signal.aborted) {
+      return;
+    }
+
+    // Check in-memory lock
+    if (this.isRotating) {
+      logger.debug("[KeyRotation] Rotation already in progress, skipping");
+      return;
+    }
+
+    // Load current keys
+    const keys = await this.keyStorage.loadKeys();
+    if (!keys) {
+      logger.error("[KeyRotation] No keys file found");
+      return;
+    }
+
+    // Check if previous rotation incomplete (2 keys exist)
+    if (this.keyStorage.isRotationInProgress(keys)) {
+      logger.warn(
+        "[KeyRotation] Detected incomplete rotation from previous run. " +
+          "Both current and phased_out keys exist. Resuming rotation..."
+      );
+      // Reset failure counter - this is a fresh attempt after restart
+      this.consecutiveFailures = 0;
+      await this.performRotationWithSignal(keys, signal);
+      return;
+    }
+
+    // Check if time for new rotation
+    const lastRotation = new Date(keys.last_rotation_finished_at);
+    const nextRotation = new Date(
+      lastRotation.getTime() +
+        this.config.rotationIntervalDays * 24 * 60 * 60 * 1000
+    );
+
+    if (new Date() < nextRotation) {
+      logger.debug(
+        `[KeyRotation] Not time for rotation yet (next: ${nextRotation.toISOString()})`
+      );
+      return;
+    }
+
+    // Final check before starting rotation
+    if (signal.aborted) {
+      return;
+    }
+
+    // Start new rotation
+    logger.info("[KeyRotation] Starting new key rotation");
+    await this.startNewRotationWithSignal(keys, signal);
+  }
+
+  /**
+   * Calculate when the next rotation should happen.
+   * Used by SchedulingService for one-off task scheduling.
+   *
+   * @returns Date when next rotation should be checked/performed
+   */
+  async getNextRotationTime(): Promise<Date> {
+    const keys = await this.keyStorage.loadKeys();
+    if (!keys) {
+      // No keys - rotation should happen immediately
+      return new Date();
+    }
+
+    // If rotation is in progress, check again soon
+    if (this.keyStorage.isRotationInProgress(keys)) {
+      // Check again in 1 minute to continue rotation
+      return new Date(Date.now() + 60 * 1000);
+    }
+
+    // Calculate next rotation time based on last completed rotation
+    const lastRotation = new Date(keys.last_rotation_finished_at);
+    const nextRotation = new Date(
+      lastRotation.getTime() +
+        this.config.rotationIntervalDays * 24 * 60 * 60 * 1000
+    );
+
+    // If next rotation is in the past, return now
+    if (nextRotation <= new Date()) {
+      return new Date();
+    }
+
+    return nextRotation;
+  }
+
+  /**
    * Manually trigger a key rotation.
    * This bypasses the normal rotation interval check and forces immediate rotation.
    *
@@ -282,6 +377,7 @@ export class KeyRotationService {
   /**
    * Main rotation check - called by timer.
    * Determines if rotation is needed and performs it.
+   * @deprecated Use runOnce() with SchedulingService instead
    */
   private async checkAndRotate(): Promise<void> {
     // 1. Check if stop was requested
@@ -341,6 +437,7 @@ export class KeyRotationService {
   /**
    * Start a new key rotation.
    * Generates new keys, swaps them, and begins re-encryption.
+   * @deprecated Use startNewRotationWithSignal() with SchedulingService instead
    */
   private async startNewRotation(keys: EncryptionKeyFile): Promise<void> {
     // Generate new encryption key and auth secret
@@ -390,6 +487,7 @@ export class KeyRotationService {
 
   /**
    * Perform the key rotation (re-encrypt all data).
+   * @deprecated Use performRotationWithSignal() with SchedulingService instead
    */
   private async performRotation(keys: EncryptionKeyFile): Promise<void> {
     this.isRotating = true;
@@ -446,7 +544,207 @@ export class KeyRotationService {
   }
 
   /**
+   * Start a new key rotation with AbortSignal support.
+   * Used by runOnce() for SchedulingService integration.
+   */
+  private async startNewRotationWithSignal(keys: EncryptionKeyFile, signal: AbortSignal): Promise<void> {
+    // Generate new encryption key and auth secret
+    const [newKey, newAuthSecret] = await Promise.all([
+      this.keyStorage.generateKey(),
+      this.keyStorage.generateKey(),
+    ]);
+
+    const newVersion = this.keyStorage.getNextVersion(keys.current_version);
+
+    // Swap keys: current becomes phased_out, new becomes current
+    const updatedKeys: EncryptionKeyFile = {
+      current_key: newKey,
+      current_version: newVersion,
+      phased_out_key: keys.current_key,
+      phased_out_version: keys.current_version,
+      last_rotation_finished_at: keys.last_rotation_finished_at, // Don't update until complete
+      better_auth_secret: newAuthSecret,
+      hash_key: keys.hash_key, // Hash key doesn't rotate
+    };
+
+    try {
+      await this.keyStorage.saveKeys(updatedKeys);
+    } catch (error) {
+      logger.error(
+        "[KeyRotation] CRITICAL: Failed to save keys during rotation start. " +
+        "Rotation will not proceed. Error:",
+        error
+      );
+      throw error;
+    }
+
+    // Update encryption service with new keys
+    await this.encryptionService.updateKeys({
+      currentKey: updatedKeys.current_key,
+      currentVersion: updatedKeys.current_version,
+      phasedOutKey: updatedKeys.phased_out_key!,
+      phasedOutVersion: updatedKeys.phased_out_version!,
+    });
+
+    logger.info(
+      `[KeyRotation] Keys swapped (${keys.current_version} → ${newVersion}), starting re-encryption`
+    );
+
+    await this.performRotationWithSignal(updatedKeys, signal);
+  }
+
+  /**
+   * Perform the key rotation with AbortSignal support.
+   * Used by runOnce() for SchedulingService integration.
+   */
+  private async performRotationWithSignal(keys: EncryptionKeyFile, signal: AbortSignal): Promise<void> {
+    this.isRotating = true;
+
+    try {
+      if (!keys.phased_out_version) {
+        logger.error("[KeyRotation] No phased out version, cannot rotate");
+        return;
+      }
+
+      // Process each table
+      for (const table of ENCRYPTED_TABLES) {
+        if (signal.aborted) {
+          logger.info("[KeyRotation] Abort signal received, pausing rotation");
+          return;
+        }
+        await this.reencryptTableWithSignal(table, keys.phased_out_version, signal);
+      }
+
+      // Complete rotation - clear phased out key
+      const completedKeys: EncryptionKeyFile = {
+        current_key: keys.current_key,
+        current_version: keys.current_version,
+        phased_out_key: null,
+        phased_out_version: null,
+        last_rotation_finished_at: new Date().toISOString(),
+        better_auth_secret: keys.better_auth_secret,
+        hash_key: keys.hash_key, // Hash key doesn't rotate
+      };
+
+      try {
+        await this.keyStorage.saveKeys(completedKeys);
+      } catch (error) {
+        logger.error(
+          "[KeyRotation] WARNING: Failed to save keys after completing rotation. " +
+          "All data has been re-encrypted successfully, but rotation will be retried on next check. Error:",
+          error
+        );
+        throw error;
+      }
+
+      // Update encryption service (remove phased out key)
+      await this.encryptionService.updateKeys({
+        currentKey: completedKeys.current_key,
+        currentVersion: completedKeys.current_version,
+      });
+
+      logger.info(
+        `[KeyRotation] Rotation completed successfully (version ${keys.current_version})`
+      );
+    } finally {
+      this.isRotating = false;
+    }
+  }
+
+  /**
+   * Re-encrypt all records in a table with AbortSignal support.
+   */
+  private async reencryptTableWithSignal(
+    table: EncryptedTable,
+    phasedOutVersion: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    logger.info(`[KeyRotation] Starting re-encryption of ${table}`);
+    let totalProcessed = 0;
+
+    while (!signal.aborted) {
+      // a. Lock encryption service
+      {
+        using _lock = await this.encryptionService.acquireRotationLock();
+
+        // b. Fetch batch
+        const records = await this.fetchBatch(table, phasedOutVersion);
+
+        // c. Check if done
+        if (records.length === 0) {
+          logger.info(
+            `[KeyRotation] Completed re-encryption of ${table} (${totalProcessed} records)`
+          );
+          return;
+        }
+
+        // d. Re-encrypt batch
+        const processed = await this.reencryptBatchWithSignal(table, records, signal);
+        totalProcessed += processed;
+
+        logger.debug(
+          `[KeyRotation] Re-encrypted ${processed}/${records.length} records in ${table}`
+        );
+      }
+      // e. Lock released when block exits
+
+      // f. Sleep between batches
+      await new Promise((resolve) =>
+        setTimeout(resolve, this.config.batchSleepMs)
+      );
+    }
+  }
+
+  /**
+   * Re-encrypt a batch of records with AbortSignal support.
+   */
+  private async reencryptBatchWithSignal(
+    table: EncryptedTable,
+    records: EncryptedRecord[],
+    signal: AbortSignal
+  ): Promise<number> {
+    let successCount = 0;
+
+    for (const record of records) {
+      if (signal.aborted) {
+        break;
+      }
+
+      try {
+        // Decrypt with old key, encrypt with new key
+        // Using unlocked variants because caller already holds the rotation lock
+        const plaintext = await this.encryptionService.decryptUnlocked(record.value);
+        const newValue = await this.encryptionService.encryptUnlocked(plaintext);
+
+        // Update with optimistic concurrency
+        const result = await this.db.execute(
+          `UPDATE ${table}
+           SET value = ?, updatedAt = CURRENT_TIMESTAMP
+           WHERE id = ? AND updatedAt = ?`,
+          [newValue, record.id, record.updatedAt]
+        );
+
+        if (result.changes === 0) {
+          logger.warn(
+            `[KeyRotation] Optimistic concurrency conflict for ${table} id=${record.id}, will be picked up in next batch`
+          );
+        } else {
+          successCount++;
+        }
+      } catch (error) {
+        logger.error(
+          `[KeyRotation] Failed to re-encrypt ${table} id=${record.id}:`,
+          error
+        );
+      }
+    }
+
+    return successCount;
+  }
+
+  /**
    * Re-encrypt all records in a table that have the phased out version.
+   * @deprecated Use reencryptTableWithSignal() with SchedulingService instead
    */
   private async reencryptTable(
     table: EncryptedTable,
