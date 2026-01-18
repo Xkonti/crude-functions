@@ -81,43 +81,148 @@ This plan outlines the research and design work needed before implementing the "
 
 ### 1. Database Schema
 
-**code_sources table:**
+**codeSources table:**
 
 ```sql
 CREATE TABLE IF NOT EXISTS codeSources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  name TEXT NOT NULL UNIQUE,           -- Directory name under code/
+
+  -- Directory name under code/. Must be unique because each source maps to
+  -- exactly one directory, and directory names must be unique on filesystem.
+  name TEXT NOT NULL UNIQUE,
+
+  -- Source type determines which provider handles sync operations.
+  -- CHECK constraint prevents invalid types at DB level. When adding new
+  -- source types (s3, ftp), this constraint must be updated.
   type TEXT NOT NULL CHECK(type IN ('manual', 'git')),
-  typeSettings TEXT,                   -- JSON, encrypted: git URL, branch, token
-  syncSettings TEXT,                   -- JSON, encrypted: interval, webhook secret
-  lastSyncAt TEXT,                     -- Last successful sync timestamp
-  lastSyncError TEXT,                  -- Last sync error (if any)
+
+  -- Type-specific configuration as encrypted JSON. Encrypted because it may
+  -- contain auth tokens (git), access keys (s3), etc. Examples:
+  --   git: {"url": "https://...", "branch": "main", "authToken": "..."}
+  --   manual: {} (empty, reserved for future use)
+  -- Storing as JSON avoids schema changes when adding new source types.
+  typeSettings TEXT,
+
+  -- Sync configuration as encrypted JSON. Encrypted because webhookSecret
+  -- is sensitive. Format: {"intervalSeconds": 300, "webhookSecret": "..."}
+  -- For manual sources: intervalSeconds is ignored (nothing to sync FROM),
+  -- but webhookSecret could be used if external system notifies of changes.
+  syncSettings TEXT,
+
+  -- When the current/last sync attempt started. Separate from lastSyncAt
+  -- because we need to show "sync in progress since X" in UI, and detect
+  -- hung syncs (started long ago, never completed).
+  lastSyncStartedAt TEXT,
+
+  -- Last SUCCESSFUL sync completion. NULL for manual sources (they don't
+  -- sync from anywhere) or sources that have never synced successfully.
+  lastSyncAt TEXT,
+
+  -- Error message from last failed sync attempt. Cleared on successful sync.
+  lastSyncError TEXT,
+
+  -- Soft-disable without deleting. Disabled sources won't run interval/webhook
+  -- syncs, but manual sync still allowed for debugging.
   enabled INTEGER NOT NULL DEFAULT 1,
+
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
   updatedAt TEXT DEFAULT CURRENT_TIMESTAMP
 );
 ```
 
-**job_queue table:**
+**jobQueue table:**
 
 ```sql
 CREATE TABLE IF NOT EXISTS jobQueue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  type TEXT NOT NULL,                  -- 'source_sync', etc.
+
+  -- Job type identifier. Used by job processor to dispatch to correct handler.
+  -- Examples: 'source_sync', 'log_cleanup', 'metrics_aggregate'.
+  -- Not constrained by CHECK because new job types can be added without
+  -- schema migration - unknown types are simply ignored/logged.
+  type TEXT NOT NULL,
+
+  -- Job lifecycle state. Transitions: pending → running → completed/failed.
+  -- 'pending': Waiting to be picked up by processor
+  -- 'running': Currently being executed (processInstanceId set)
+  -- 'completed': Finished successfully
+  -- 'failed': Finished with error (after retries exhausted)
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK(status IN ('pending', 'running', 'completed', 'failed')),
-  payload TEXT,                        -- JSON: job parameters
-  result TEXT,                         -- JSON: result or error
-  processInstanceId TEXT,              -- UUID of handling process
+
+  -- Job parameters as JSON. Structure depends on job type.
+  -- For source_sync: {"sourceId": 123}
+  -- Keeping job-specific data here (not in columns) makes queue truly generic.
+  payload TEXT,
+
+  -- Outcome as JSON. On success: result data. On failure: error details.
+  -- Preserved for debugging and audit purposes.
+  result TEXT,
+
+  -- UUID of the process instance handling this job. Set when status→running.
+  -- Used for orphan detection: if process crashes, its jobs have wrong ID.
+  -- On startup, jobs with status='running' and mismatched ID are orphaned.
+  processInstanceId TEXT,
+
+  -- How many times this job has been retried after failure/orphaning.
   retryCount INTEGER NOT NULL DEFAULT 0,
+
+  -- Maximum retry attempts. After retryCount >= maxRetries, job stays failed.
+  -- Default 1 means: try once, if orphaned retry once, then give up.
   maxRetries INTEGER NOT NULL DEFAULT 1,
+
+  -- Higher priority jobs processed first. Default 0. Manual syncs could use
+  -- higher priority to jump ahead of scheduled syncs.
   priority INTEGER NOT NULL DEFAULT 0,
-  sourceId INTEGER REFERENCES codeSources(id) ON DELETE CASCADE,
+
+  -- Generic entity reference for constraint enforcement. Using referenceType +
+  -- referenceId instead of sourceId FK because:
+  -- 1. Queue is generic - future job types may reference other entities
+  -- 2. Allows same constraint pattern for any entity type
+  -- 3. No FK = no cascade delete complications (jobs are historical records)
+  -- For source_sync jobs: referenceType='code_source', referenceId=source.id
+  referenceType TEXT,
+  referenceId INTEGER,
+
   createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+
+  -- When job was picked up (status→running). NULL until started.
   startedAt TEXT,
+
+  -- When job finished (status→completed/failed). NULL until done.
+  -- Duration = completedAt - startedAt.
   completedAt TEXT
 );
+
+-- Index for finding jobs to process: get pending jobs, ordered by priority.
+CREATE INDEX IF NOT EXISTS idx_jobQueue_status ON jobQueue(status);
+
+-- Index for job type filtering (e.g., find all pending source_sync jobs).
+CREATE INDEX IF NOT EXISTS idx_jobQueue_type_status ON jobQueue(type, status);
+
+-- CRITICAL: Enforce "one active job per entity" at database level.
+-- Prevents race conditions where multiple sync jobs queue for same source.
+-- Partial index: only constrains rows where status is pending/running AND
+-- referenceId is set. Jobs without entity reference (NULL) aren't constrained.
+-- This means: for any (referenceType, referenceId) pair, at most ONE job
+-- can be pending or running at a time.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_jobQueue_reference_active
+ON jobQueue(referenceType, referenceId)
+WHERE status IN ('pending', 'running') AND referenceId IS NOT NULL;
 ```
+
+**Manual Source Behavior Notes:**
+
+For implementers - manual sources have special semantics:
+
+1. **No interval sync**: `intervalSeconds` in syncSettings is ignored. There's nothing to sync FROM - local filesystem IS the source of truth.
+2. **`lastSyncAt` is NULL**: Manual sources never "sync" so this stays NULL. (Or could indicate last filesystem validation scan if that feature is added.)
+3. **Webhook may be used**: Even manual sources might want webhook notification - e.g., CI/CD could notify when deploying new files.
+4. **Application must validate**: On create/update, validate that manual sources don't have intervalSeconds set (or warn user it's ignored).
+
+**Job Cleanup Strategy:**
+
+Not in schema but needed in implementation: background task to delete old completed/failed jobs. Pattern exists in `LogTrimmingService`. Suggested retention: 7 days for completed, 30 days for failed (for debugging).
 
 **Type Settings (encrypted JSON):**
 
