@@ -50,6 +50,8 @@ import { SettingNames } from "./src/settings/types.ts";
 import { UserService } from "./src/users/user_service.ts";
 import { createUserRoutes } from "./src/users/user_routes.ts";
 import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
+import { SchedulingService } from "./src/scheduling/mod.ts";
+import { InstanceIdService } from "./src/scheduling/instance_id_service.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -193,7 +195,7 @@ const executionMetricsService = new ExecutionMetricsService({ db });
 // Initialize metrics state service (for aggregation watermarks)
 const metricsStateService = new MetricsStateService({ db });
 
-// Initialize and start metrics aggregation service
+// Initialize metrics aggregation service (runs via scheduler)
 const metricsAggregationConfig: MetricsAggregationConfig = {
   aggregationIntervalSeconds: await getIntSetting(SettingNames.METRICS_AGGREGATION_INTERVAL_SECONDS, 60),
   retentionDays: await getIntSetting(SettingNames.METRICS_RETENTION_DAYS, 90),
@@ -203,9 +205,8 @@ const metricsAggregationService = new MetricsAggregationService({
   stateService: metricsStateService,
   config: metricsAggregationConfig,
 });
-metricsAggregationService.start();
 
-// Initialize and start log trimming service
+// Initialize log trimming service (runs via scheduler)
 const logTrimmingConfig: LogTrimmingConfig = {
   trimmingIntervalSeconds: await getIntSetting(SettingNames.LOG_TRIMMING_INTERVAL_SECONDS, 300),
   maxLogsPerRoute: await getIntSetting(SettingNames.LOG_TRIMMING_MAX_PER_FUNCTION, 2000),
@@ -215,9 +216,8 @@ const logTrimmingService = new LogTrimmingService({
   logService: consoleLogService,
   config: logTrimmingConfig,
 });
-logTrimmingService.start();
 
-// Initialize and start key rotation service
+// Initialize key rotation service (runs via scheduler)
 const keyRotationConfig: KeyRotationConfig = {
   checkIntervalSeconds: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS, 10800),
   rotationIntervalDays: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS, 90),
@@ -230,7 +230,81 @@ const keyRotationService = new KeyRotationService({
   keyStorage: keyStorageService,
   config: keyRotationConfig,
 });
-keyRotationService.start();
+
+// ============================================================================
+// Scheduling Service Initialization
+// ============================================================================
+
+// Initialize instance ID service (for orphan detection in multi-instance scenarios)
+const instanceIdService = new InstanceIdService();
+
+// Initialize scheduling service
+const schedulingPollingIntervalSeconds = await getIntSetting(SettingNames.SCHEDULING_POLLING_INTERVAL_SECONDS, 1);
+const schedulingDefaultTimeoutMs = await getIntSetting(SettingNames.SCHEDULING_DEFAULT_TIMEOUT_MS, 300000);
+const schedulingStuckTaskTimeoutMs = await getIntSetting(SettingNames.SCHEDULING_STUCK_TASK_TIMEOUT_MS, 3600000);
+
+const schedulingService = new SchedulingService({
+  db,
+  instanceIdService,
+  pollingIntervalSeconds: schedulingPollingIntervalSeconds,
+  defaultTimeoutMs: schedulingDefaultTimeoutMs,
+  stuckTaskTimeoutMs: schedulingStuckTaskTimeoutMs,
+});
+
+// Register task handlers
+schedulingService.registerHandler("log-trimming", {
+  handler: async (_task, signal) => {
+    await logTrimmingService.runOnce(signal);
+    return { success: true };
+  },
+});
+
+schedulingService.registerHandler("metrics-aggregation", {
+  handler: async (_task, signal) => {
+    await metricsAggregationService.runOnce(signal);
+    return { success: true };
+  },
+});
+
+schedulingService.registerHandler("key-rotation", {
+  handler: async (_task, signal) => {
+    await keyRotationService.runOnce(signal);
+    // Return next rotation time for rescheduling
+    const nextRunAt = await keyRotationService.getNextRotationTime();
+    return { success: true, nextRunAt };
+  },
+});
+
+// Register in-memory scheduled tasks
+schedulingService.registerInMemoryTask({
+  name: "log-trimming",
+  type: "log-trimming",
+  scheduleType: "interval",
+  intervalSeconds: logTrimmingConfig.trimmingIntervalSeconds,
+  runImmediately: true,
+});
+
+schedulingService.registerInMemoryTask({
+  name: "metrics-aggregation",
+  type: "metrics-aggregation",
+  scheduleType: "interval",
+  intervalSeconds: metricsAggregationConfig.aggregationIntervalSeconds,
+  runImmediately: true,
+});
+
+// Key rotation uses dynamic scheduling - runs once, then reschedules based on next rotation time
+const nextKeyRotationTime = await keyRotationService.getNextRotationTime();
+schedulingService.registerInMemoryTask({
+  name: "key-rotation",
+  type: "key-rotation",
+  scheduleType: "dynamic",
+  scheduledAt: nextKeyRotationTime,
+  runImmediately: false, // Will run at scheduled time
+});
+
+// Start the scheduler
+await schedulingService.start();
+console.log("✓ Scheduling service started");
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -408,19 +482,11 @@ async function gracefulShutdown(signal: string) {
     await consoleLogService.shutdown();
     console.log("Console log service flushed");
 
-    // 5. Stop log trimming service (waits for current processing)
-    await logTrimmingService.stop();
-    console.log("Log trimming service stopped");
+    // 5. Stop scheduling service (waits for any running tasks)
+    await schedulingService.stop();
+    console.log("Scheduling service stopped");
 
-    // 6. Stop aggregation service (waits for current processing)
-    await metricsAggregationService.stop();
-    console.log("Metrics aggregation service stopped");
-
-    // 7. Stop key rotation service (waits for current rotation batch)
-    await keyRotationService.stop();
-    console.log("Key rotation service stopped");
-
-    // 8. Close database last
+    // 6. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {
