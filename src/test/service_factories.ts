@@ -22,6 +22,7 @@ import { UserService } from "../users/user_service.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 import { InstanceIdService } from "../instance/instance_id_service.ts";
 import { JobQueueService } from "../jobs/job_queue_service.ts";
+import { SchedulingService } from "../scheduling/scheduling_service.ts";
 import { createAuth } from "../auth/auth.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
 import type { betterAuth } from "better-auth";
@@ -325,6 +326,24 @@ export function createJobQueueService(
     db,
     instanceIdService,
     encryptionService,
+  });
+}
+
+// =============================================================================
+// Scheduling Service Factory
+// =============================================================================
+
+/**
+ * Creates the SchedulingService.
+ * Requires database and instance ID service.
+ */
+export function createSchedulingService(
+  db: DatabaseService,
+  instanceIdService: InstanceIdService,
+): SchedulingService {
+  return new SchedulingService({
+    db,
+    instanceIdService,
   });
 }
 

@@ -105,6 +105,7 @@ import type {
   UsersContext,
   InstanceIdContext,
   JobQueueContext,
+  SchedulingContext,
   RouteOptions,
   DeferredUser,
   DeferredKeyGroup,
@@ -141,6 +142,7 @@ import {
   createUserDirectly,
   createInstanceIdService,
   createJobQueueService,
+  createSchedulingService,
   createCleanupFunction,
 } from "./service_factories.ts";
 
@@ -331,6 +333,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     return this as unknown as TestSetupBuilder<TContext & JobQueueContext>;
   }
 
+  /**
+   * Include SchedulingService in the test context.
+   * Auto-enables: instanceIdService.
+   */
+  withSchedulingService(): TestSetupBuilder<TContext & SchedulingContext> {
+    enableServiceWithDependencies(this.flags, "schedulingService");
+    return this as unknown as TestSetupBuilder<TContext & SchedulingContext>;
+  }
+
   // =============================================================================
   // Convenience Methods (Compose Multiple Services)
   // =============================================================================
@@ -426,6 +437,16 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   withJobQueue(): TestSetupBuilder<TContext & JobQueueContext> {
     return this.withJobQueueService() as unknown as TestSetupBuilder<
       TContext & JobQueueContext
+    >;
+  }
+
+  /**
+   * Include scheduling service and its dependencies (instanceIdService).
+   * Alias for withSchedulingService() for semantic clarity.
+   */
+  withScheduling(): TestSetupBuilder<TContext & SchedulingContext> {
+    return this.withSchedulingService() as unknown as TestSetupBuilder<
+      TContext & SchedulingContext
     >;
   }
 
@@ -784,7 +805,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 11: Create instance ID service if needed
-    if (this.flags.instanceIdService || this.flags.jobQueueService) {
+    if (this.flags.instanceIdService || this.flags.jobQueueService || this.flags.schedulingService) {
       context.instanceIdService = createInstanceIdService();
     }
 
@@ -818,7 +839,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       }
     }
 
-    // STEP 13: Create cleanup function
+    // STEP 13: Create scheduling service if needed
+    if (this.flags.schedulingService) {
+      context.schedulingService = createSchedulingService(
+        db,
+        context.instanceIdService,
+      );
+    }
+
+    // STEP 14: Create cleanup function
     context.cleanup = createCleanupFunction(
       db,
       tempDir,

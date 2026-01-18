@@ -23,7 +23,8 @@ export type ServiceKey =
   | "auth"
   | "userService"
   | "instanceIdService"
-  | "jobQueueService";
+  | "jobQueueService"
+  | "schedulingService";
 
 /**
  * Service flags interface - tracks which services to include.
@@ -45,6 +46,7 @@ export interface ServiceFlags {
   userService: boolean;
   instanceIdService: boolean;
   jobQueueService: boolean;
+  schedulingService: boolean;
 }
 
 /**
@@ -66,6 +68,7 @@ export function createDefaultFlags(): ServiceFlags {
     userService: false,
     instanceIdService: false,
     jobQueueService: false,
+    schedulingService: false,
   };
 }
 
@@ -112,6 +115,9 @@ export const DEPENDENCIES: Record<ServiceKey, ServiceKey[]> = {
 
   // Job queue depends on instance ID service
   jobQueueService: ["instanceIdService"],
+
+  // Scheduling service depends on instance ID service
+  schedulingService: ["instanceIdService"],
 };
 
 /**
