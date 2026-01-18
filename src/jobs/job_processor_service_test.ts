@@ -16,7 +16,7 @@ Deno.test("JobProcessorService.registerHandler registers handler", async () => {
   });
 
   try {
-    processor.registerHandler("test-job", async () => ({ done: true }));
+    processor.registerHandler("test-job", () => ({ done: true }));
 
     expect(processor.hasHandler("test-job")).toBe(true);
     expect(processor.hasHandler("unknown-job")).toBe(false);
@@ -36,7 +36,7 @@ Deno.test("JobProcessorService.unregisterHandler removes handler", async () => {
   });
 
   try {
-    processor.registerHandler("test-job", async () => ({}));
+    processor.registerHandler("test-job", () => ({}));
     expect(processor.hasHandler("test-job")).toBe(true);
 
     const removed = processor.unregisterHandler("test-job");
@@ -61,8 +61,8 @@ Deno.test("JobProcessorService.getStatus returns registered handlers", async () 
   });
 
   try {
-    processor.registerHandler("job-a", async () => ({}));
-    processor.registerHandler("job-b", async () => ({}));
+    processor.registerHandler("job-a", () => ({}));
+    processor.registerHandler("job-b", () => ({}));
 
     const status = processor.getStatus();
     expect(status.registeredHandlers).toContain("job-a");
@@ -92,7 +92,7 @@ Deno.test("JobProcessorService.processOne processes pending job", async () => {
   try {
     let processedPayload: unknown = null;
 
-    processor.registerHandler("test-job", async (job) => {
+    processor.registerHandler("test-job", (job) => {
       processedPayload = job.payload;
       return { processed: true };
     });
@@ -124,7 +124,7 @@ Deno.test("JobProcessorService.processOne returns null when queue is empty", asy
   });
 
   try {
-    processor.registerHandler("test-job", async () => ({}));
+    processor.registerHandler("test-job", () => ({}));
 
     const result = await processor.processOne();
     expect(result).toBeNull();
@@ -144,7 +144,7 @@ Deno.test("JobProcessorService.processOne marks job failed when handler throws",
   });
 
   try {
-    processor.registerHandler("failing-job", async () => {
+    processor.registerHandler("failing-job", () => {
       throw new Error("Handler failed!");
     });
 
@@ -204,12 +204,12 @@ Deno.test("JobProcessorService.processOne processes highest priority job first",
   try {
     const processedTypes: string[] = [];
 
-    processor.registerHandler("low-priority", async (job) => {
+    processor.registerHandler("low-priority", (job) => {
       processedTypes.push(job.type);
       return {};
     });
 
-    processor.registerHandler("high-priority", async (job) => {
+    processor.registerHandler("high-priority", (job) => {
       processedTypes.push(job.type);
       return {};
     });
@@ -269,7 +269,7 @@ Deno.test("JobProcessorService.start processes pending jobs", async () => {
   try {
     let handlerCalled = false;
 
-    processor.registerHandler("auto-process", async () => {
+    processor.registerHandler("auto-process", () => {
       handlerCalled = true;
       return { done: true };
     });
@@ -338,7 +338,7 @@ Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
       config: { pollingIntervalSeconds: 60 },
     });
 
-    processor.registerHandler("orphaned-job", async () => {
+    processor.registerHandler("orphaned-job", () => {
       handlerCalled = true;
       return { recovered: true };
     });
@@ -377,7 +377,7 @@ Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async (
       config: { pollingIntervalSeconds: 60 },
     });
 
-    processor.registerHandler("exhausted-job", async () => {
+    processor.registerHandler("exhausted-job", () => {
       return {};
     });
 
@@ -418,7 +418,7 @@ Deno.test("JobProcessorService processes multiple jobs in sequence", async () =>
   try {
     const processedIds: number[] = [];
 
-    processor.registerHandler("sequential-job", async (job) => {
+    processor.registerHandler("sequential-job", (job) => {
       processedIds.push(job.id);
       return {};
     });
@@ -460,7 +460,7 @@ Deno.test("JobProcessorService passes full job context to handler", async () => 
   try {
     let receivedJob: unknown = null;
 
-    processor.registerHandler("context-check", async (job) => {
+    processor.registerHandler("context-check", (job) => {
       receivedJob = job;
       return {};
     });

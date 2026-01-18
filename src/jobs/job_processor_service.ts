@@ -9,7 +9,7 @@ import type {
 import {
   JobAlreadyClaimedError,
   MaxRetriesExceededError,
-  NoHandlerError,
+  NoHandlerError as _NoHandlerError,
 } from "./errors.ts";
 import { logger } from "../utils/logger.ts";
 

@@ -1,5 +1,3 @@
-import type { InstanceIdServiceOptions } from "./types.ts";
-
 /**
  * Service that generates and holds a unique instance identifier.
  *
@@ -19,7 +17,7 @@ import type { InstanceIdServiceOptions } from "./types.ts";
 export class InstanceIdService {
   private readonly instanceId: string;
 
-  constructor(_options?: InstanceIdServiceOptions) {
+  constructor() {
     this.instanceId = crypto.randomUUID();
   }
 

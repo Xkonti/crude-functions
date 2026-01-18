@@ -137,7 +137,7 @@ export class JobQueueService {
    * @returns The job with decrypted payload, or null if not found
    */
   async getJob(id: number): Promise<Job | null> {
-    return this.getJobInternal(id);
+    return await this.getJobInternal(id);
   }
 
   /**

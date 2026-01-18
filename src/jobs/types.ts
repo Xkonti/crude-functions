@@ -69,10 +69,13 @@ export interface NewJob {
 /**
  * Job handler function signature.
  *
+ * Handlers can be either synchronous or asynchronous.
+ * For sync handlers, the return value is automatically wrapped in a resolved Promise.
+ *
  * @param job - The job being processed (includes payload)
  * @returns Result data on success, or throws on failure
  */
-export type JobHandler = (job: Job) => Promise<unknown>;
+export type JobHandler = (job: Job) => unknown | Promise<unknown>;
 
 /**
  * Configuration for JobProcessorService.
