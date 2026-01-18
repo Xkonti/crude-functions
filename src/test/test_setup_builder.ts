@@ -804,11 +804,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
           ? JSON.stringify(job.payload)
           : null;
         await db.execute(
-          `INSERT INTO jobQueue (type, status, payload, priority, referenceType, referenceId, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          `INSERT INTO jobQueue (type, status, executionMode, payload, priority, referenceType, referenceId, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
           [
             job.type,
             job.status ?? "pending",
+            job.executionMode ?? "sequential",
             payloadStr,
             job.priority ?? 0,
             job.referenceType ?? null,

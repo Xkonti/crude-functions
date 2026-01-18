@@ -5,6 +5,7 @@ import {
   JobAlreadyClaimedError,
   JobNotFoundError,
   MaxRetriesExceededError,
+  JobNotCancellableError,
 } from "./errors.ts";
 
 // =============================================================================
@@ -774,6 +775,419 @@ Deno.test("TestSetupBuilder.withJob seeds jobs during build", async () => {
     expect(seededJob).not.toBeUndefined();
     expect(seededJob!.payload).toEqual({ test: true });
     expect(seededJob!.priority).toBe(5);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Cancellation Operations
+// =============================================================================
+
+Deno.test("JobQueueService.cancelJob cancels pending job immediately", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "cancel-test" });
+    expect(job.status).toBe("pending");
+
+    const cancelled = await ctx.jobQueueService.cancelJob(job.id, { reason: "User requested" });
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+    expect(cancelled.cancelReason).toBe("User requested");
+    expect(cancelled.completedAt).toBeInstanceOf(Date);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJob sets cancelledAt on running job", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "cancel-test" });
+    await ctx.jobQueueService.claimJob(job.id);
+
+    const cancelled = await ctx.jobQueueService.cancelJob(job.id, { reason: "Timeout" });
+
+    // Running job stays running until handler finishes
+    expect(cancelled.status).toBe("running");
+    expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+    expect(cancelled.cancelReason).toBe("Timeout");
+    expect(cancelled.completedAt).toBeNull(); // Not completed yet
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJob throws JobNotCancellableError for completed job", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "cancel-test" });
+    await ctx.jobQueueService.claimJob(job.id);
+    await ctx.jobQueueService.completeJob(job.id);
+
+    await expect(ctx.jobQueueService.cancelJob(job.id)).rejects.toThrow(
+      JobNotCancellableError,
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJob throws JobNotCancellableError for failed job", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "cancel-test" });
+    await ctx.jobQueueService.claimJob(job.id);
+    await ctx.jobQueueService.failJob(job.id, { error: "test" });
+
+    await expect(ctx.jobQueueService.cancelJob(job.id)).rejects.toThrow(
+      JobNotCancellableError,
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJob throws JobNotFoundError for non-existent job", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    await expect(ctx.jobQueueService.cancelJob(99999)).rejects.toThrow(
+      JobNotFoundError,
+    );
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJob is idempotent for already cancelled jobs", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "cancel-test" });
+    await ctx.jobQueueService.claimJob(job.id);
+
+    // Cancel twice
+    const first = await ctx.jobQueueService.cancelJob(job.id, { reason: "First" });
+    const second = await ctx.jobQueueService.cancelJob(job.id, { reason: "Second" });
+
+    // Second call should return same job (already marked for cancellation)
+    expect(first.cancelReason).toBe("First");
+    expect(second.cancelReason).toBe("First"); // Original reason preserved
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJobs cancels multiple pending jobs by type", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    await ctx.jobQueueService.enqueue({ type: "batch-cancel" });
+    await ctx.jobQueueService.enqueue({ type: "batch-cancel" });
+    await ctx.jobQueueService.enqueue({ type: "keep-this" });
+
+    const count = await ctx.jobQueueService.cancelJobs({
+      type: "batch-cancel",
+      reason: "Batch cancelled",
+    });
+
+    expect(count).toBe(2);
+
+    const cancelled = await ctx.jobQueueService.getJobsByStatus("cancelled");
+    expect(cancelled.length).toBe(2);
+    expect(cancelled.every((j) => j.type === "batch-cancel")).toBe(true);
+
+    const pending = await ctx.jobQueueService.getJobsByStatus("pending");
+    expect(pending.length).toBe(1);
+    expect(pending[0].type).toBe("keep-this");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.cancelJobs cancels jobs by reference", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    await ctx.jobQueueService.enqueue({
+      type: "ref-cancel",
+      referenceType: "entity",
+      referenceId: 1,
+    });
+    await ctx.jobQueueService.enqueue({
+      type: "ref-cancel",
+      referenceType: "entity",
+      referenceId: 2,
+    });
+
+    const count = await ctx.jobQueueService.cancelJobs({
+      referenceType: "entity",
+      referenceId: 1,
+      reason: "Entity deleted",
+    });
+
+    expect(count).toBe(1);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.getCancellationStatus returns null for non-cancelled job", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "status-test" });
+
+    const status = await ctx.jobQueueService.getCancellationStatus(job.id);
+    expect(status).toBeNull();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.getCancellationStatus returns cancellation info", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "status-test" });
+    await ctx.jobQueueService.cancelJob(job.id, { reason: "Testing" });
+
+    const status = await ctx.jobQueueService.getCancellationStatus(job.id);
+    expect(status).not.toBeNull();
+    expect(status!.cancelledAt).toBeInstanceOf(Date);
+    expect(status!.reason).toBe("Testing");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.markJobCancelled marks running job as cancelled", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "mark-test" });
+    await ctx.jobQueueService.claimJob(job.id);
+
+    const cancelled = await ctx.jobQueueService.markJobCancelled(job.id, "Handler detected cancellation");
+
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.cancelledAt).toBeInstanceOf(Date);
+    expect(cancelled.cancelReason).toBe("Handler detected cancellation");
+    expect(cancelled.completedAt).toBeInstanceOf(Date);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.getNextPendingJob excludes pre-cancelled jobs", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job1 = await ctx.jobQueueService.enqueue({ type: "pending-1" });
+    await ctx.jobQueueService.enqueue({ type: "pending-2" });
+
+    // Cancel the first job
+    await ctx.jobQueueService.cancelJob(job1.id);
+
+    // Get next should return the second job
+    const next = await ctx.jobQueueService.getNextPendingJob();
+    expect(next).not.toBeNull();
+    expect(next!.type).toBe("pending-2");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.getJobCounts includes cancelled count", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "count-test" });
+    await ctx.jobQueueService.cancelJob(job.id);
+
+    const counts = await ctx.jobQueueService.getJobCounts();
+    expect(counts.cancelled).toBe(1);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.deleteOldJobs removes old cancelled jobs", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "cleanup-test" });
+    await ctx.jobQueueService.cancelJob(job.id);
+
+    // Update completedAt to be in the past
+    await ctx.db.execute(
+      `UPDATE jobQueue SET completedAt = datetime('now', '-10 days') WHERE id = ?`,
+      [job.id],
+    );
+
+    const deleted = await ctx.jobQueueService.deleteOldJobs(
+      new Date(Date.now() - 5 * 24 * 60 * 60 * 1000), // 5 days ago
+    );
+
+    expect(deleted).toBe(1);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Execution Mode Tests
+// =============================================================================
+
+Deno.test("JobQueueService.enqueue defaults to sequential execution mode", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({ type: "mode-test" });
+
+    expect(job.executionMode).toBe("sequential");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.enqueue accepts concurrent execution mode", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job = await ctx.jobQueueService.enqueue({
+      type: "mode-test",
+      executionMode: "concurrent",
+    });
+
+    expect(job.executionMode).toBe("concurrent");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.enqueue allows concurrent jobs with same reference", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    const job1 = await ctx.jobQueueService.enqueue({
+      type: "concurrent-test",
+      executionMode: "concurrent",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    const job2 = await ctx.jobQueueService.enqueue({
+      type: "concurrent-test",
+      executionMode: "concurrent",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    expect(job1.id).not.toBe(job2.id);
+    expect(job1.referenceId).toBe(123);
+    expect(job2.referenceId).toBe(123);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.enqueue throws DuplicateActiveJobError for sequential jobs with same reference", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    await ctx.jobQueueService.enqueue({
+      type: "sequential-test",
+      executionMode: "sequential",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    await expect(
+      ctx.jobQueueService.enqueue({
+        type: "sequential-test",
+        executionMode: "sequential",
+        referenceType: "entity",
+        referenceId: 123,
+      }),
+    ).rejects.toThrow(DuplicateActiveJobError);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.enqueue allows sequential job when concurrent exists for same reference", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    // First job is concurrent
+    await ctx.jobQueueService.enqueue({
+      type: "mixed-mode",
+      executionMode: "concurrent",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    // Second job is sequential - should succeed since concurrent doesn't block
+    const job2 = await ctx.jobQueueService.enqueue({
+      type: "mixed-mode",
+      executionMode: "sequential",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    expect(job2.executionMode).toBe("sequential");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobQueueService.enqueue allows concurrent job when sequential exists for same reference", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  try {
+    // First job is sequential
+    await ctx.jobQueueService.enqueue({
+      type: "mixed-mode",
+      executionMode: "sequential",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    // Second job is concurrent - should succeed
+    const job2 = await ctx.jobQueueService.enqueue({
+      type: "mixed-mode",
+      executionMode: "concurrent",
+      referenceType: "entity",
+      referenceId: 123,
+    });
+
+    expect(job2.executionMode).toBe("concurrent");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("TestSetupBuilder.withJob seeds jobs with execution mode", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withJob({ type: "seeded-sequential" })
+    .withJob({ type: "seeded-concurrent", executionMode: "concurrent" })
+    .build();
+
+  try {
+    const jobs = await ctx.jobQueueService.getJobsByStatus("pending");
+
+    const seqJob = jobs.find((j) => j.type === "seeded-sequential");
+    const concJob = jobs.find((j) => j.type === "seeded-concurrent");
+
+    expect(seqJob!.executionMode).toBe("sequential");
+    expect(concJob!.executionMode).toBe("concurrent");
   } finally {
     await ctx.cleanup();
   }

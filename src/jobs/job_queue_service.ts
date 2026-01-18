@@ -6,6 +6,7 @@ import type {
   Job,
   NewJob,
   JobStatus,
+  ExecutionMode,
   JobQueueServiceOptions,
   JobRow,
 } from "./types.ts";
@@ -14,6 +15,7 @@ import {
   JobAlreadyClaimedError,
   DuplicateActiveJobError,
   MaxRetriesExceededError,
+  JobNotCancellableError,
 } from "./errors.ts";
 
 /**
@@ -62,22 +64,26 @@ export class JobQueueService {
   /**
    * Enqueue a new job for processing.
    *
-   * If referenceType and referenceId are provided, enforces unique constraint:
-   * only one active (pending/running) job per reference is allowed.
+   * If referenceType and referenceId are provided and executionMode is 'sequential' (default),
+   * enforces unique constraint: only one active (pending/running) job per reference is allowed.
+   * For concurrent execution mode, the uniqueness check is skipped.
    *
    * @param job - Job data to enqueue
    * @returns The created job with assigned ID
-   * @throws {DuplicateActiveJobError} If an active job exists for the same reference
+   * @throws {DuplicateActiveJobError} If an active sequential job exists for the same reference
    */
   async enqueue(job: NewJob): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
-    // Check for existing active job if reference is provided
-    if (job.referenceType && job.referenceId) {
+    const executionMode: ExecutionMode = job.executionMode ?? "sequential";
+
+    // Check for existing active job if reference is provided and mode is sequential
+    if (executionMode === "sequential" && job.referenceType && job.referenceId) {
       const existing = await this.db.queryOne<{ id: number }>(
         `SELECT id FROM jobQueue
          WHERE referenceType = ? AND referenceId = ?
-         AND status IN ('pending', 'running')`,
+         AND status IN ('pending', 'running')
+         AND executionMode = 'sequential'`,
         [job.referenceType, job.referenceId],
       );
 
@@ -90,11 +96,12 @@ export class JobQueueService {
     const payloadStr = await this.serializePayload(job.payload);
 
     const result = await this.db.execute(
-      `INSERT INTO jobQueue (type, status, payload, maxRetries, priority,
+      `INSERT INTO jobQueue (type, status, executionMode, payload, maxRetries, priority,
                              referenceType, referenceId, createdAt)
-       VALUES (?, 'pending', ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+       VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
       [
         job.type,
+        executionMode,
         payloadStr,
         job.maxRetries ?? 1,
         job.priority ?? 0,
@@ -145,9 +152,9 @@ export class JobQueueService {
    */
   private async getJobInternal(id: number): Promise<Job | null> {
     const row = await this.db.queryOne<JobRow>(
-      `SELECT id, type, status, payload, result, processInstanceId,
+      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
               retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt
+              createdAt, startedAt, completedAt, cancelledAt, cancelReason
        FROM jobQueue WHERE id = ?`,
       [id],
     );
@@ -168,9 +175,9 @@ export class JobQueueService {
    */
   async getJobsByStatus(status: JobStatus): Promise<Job[]> {
     const rows = await this.db.queryAll<JobRow>(
-      `SELECT id, type, status, payload, result, processInstanceId,
+      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
               retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt
+              createdAt, startedAt, completedAt, cancelledAt, cancelReason
        FROM jobQueue
        WHERE status = ?
        ORDER BY priority DESC, createdAt ASC`,
@@ -189,9 +196,9 @@ export class JobQueueService {
    * @returns Array of matching jobs
    */
   async getJobsByType(type: string, status?: JobStatus): Promise<Job[]> {
-    let sql = `SELECT id, type, status, payload, result, processInstanceId,
+    let sql = `SELECT id, type, status, executionMode, payload, result, processInstanceId,
                       retryCount, maxRetries, priority, referenceType, referenceId,
-                      createdAt, startedAt, completedAt
+                      createdAt, startedAt, completedAt, cancelledAt, cancelReason
                FROM jobQueue
                WHERE type = ?`;
     const params: (string | number)[] = [type];
@@ -219,9 +226,9 @@ export class JobQueueService {
     referenceId: number,
   ): Promise<Job | null> {
     const row = await this.db.queryOne<JobRow>(
-      `SELECT id, type, status, payload, result, processInstanceId,
+      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
               retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt
+              createdAt, startedAt, completedAt, cancelledAt, cancelReason
        FROM jobQueue
        WHERE referenceType = ? AND referenceId = ?
        AND status IN ('pending', 'running')`,
@@ -238,16 +245,17 @@ export class JobQueueService {
   /**
    * Get the next pending job to process.
    * Returns the highest priority pending job (FIFO within same priority).
+   * Excludes jobs that have been marked for cancellation (cancelledAt is set).
    *
    * @param type - Optional job type filter
    * @returns The next job to process, or null if queue is empty
    */
   async getNextPendingJob(type?: string): Promise<Job | null> {
-    let sql = `SELECT id, type, status, payload, result, processInstanceId,
+    let sql = `SELECT id, type, status, executionMode, payload, result, processInstanceId,
                       retryCount, maxRetries, priority, referenceType, referenceId,
-                      createdAt, startedAt, completedAt
+                      createdAt, startedAt, completedAt, cancelledAt, cancelReason
                FROM jobQueue
-               WHERE status = 'pending'`;
+               WHERE status = 'pending' AND cancelledAt IS NULL`;
     const params: string[] = [];
 
     if (type) {
@@ -390,9 +398,9 @@ export class JobQueueService {
 
     // Find running jobs that belong to a different process
     const rows = await this.db.queryAll<JobRow>(
-      `SELECT id, type, status, payload, result, processInstanceId,
+      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
               retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt
+              createdAt, startedAt, completedAt, cancelledAt, cancelReason
        FROM jobQueue
        WHERE status = 'running'
        AND processInstanceId != ?
@@ -443,10 +451,189 @@ export class JobQueueService {
     return reset;
   }
 
+  // ============== Cancellation Operations ==============
+
+  /**
+   * Cancel a single job by ID.
+   *
+   * For pending jobs: Sets cancelledAt and status to 'cancelled' immediately.
+   * For running jobs: Sets cancelledAt to signal handler to stop (status remains 'running'
+   * until handler completes or is marked cancelled via markJobCancelled).
+   *
+   * @param id - Job ID to cancel
+   * @param options - Optional cancellation options
+   * @returns The updated job
+   * @throws {JobNotFoundError} If job doesn't exist
+   * @throws {JobNotCancellableError} If job is already completed/failed/cancelled
+   */
+  async cancelJob(id: number, options?: { reason?: string }): Promise<Job> {
+    using _lock = await this.writeMutex.acquire();
+
+    const job = await this.getJobInternal(id);
+    if (!job) {
+      throw new JobNotFoundError(id);
+    }
+
+    // Can only cancel pending or running jobs
+    if (job.status !== "pending" && job.status !== "running") {
+      throw new JobNotCancellableError(id, job.status);
+    }
+
+    // Already marked for cancellation
+    if (job.cancelledAt) {
+      return job;
+    }
+
+    const reason = options?.reason ?? null;
+
+    if (job.status === "pending") {
+      // Pending jobs can be cancelled immediately
+      await this.db.execute(
+        `UPDATE jobQueue
+         SET status = 'cancelled',
+             cancelledAt = CURRENT_TIMESTAMP,
+             cancelReason = ?,
+             completedAt = CURRENT_TIMESTAMP
+         WHERE id = ?`,
+        [reason, id],
+      );
+    } else {
+      // Running jobs: set cancelledAt to signal handler
+      await this.db.execute(
+        `UPDATE jobQueue
+         SET cancelledAt = CURRENT_TIMESTAMP,
+             cancelReason = ?
+         WHERE id = ?`,
+        [reason, id],
+      );
+    }
+
+    const updated = await this.getJobInternal(id);
+    if (!updated) {
+      throw new Error("Failed to retrieve cancelled job");
+    }
+    return updated;
+  }
+
+  /**
+   * Cancel multiple jobs by criteria.
+   *
+   * @param options - Filter criteria and cancellation reason
+   * @returns Number of jobs cancelled
+   */
+  async cancelJobs(options: {
+    type?: string;
+    referenceType?: string;
+    referenceId?: number;
+    reason?: string;
+  }): Promise<number> {
+    using _lock = await this.writeMutex.acquire();
+
+    const conditions: string[] = ["status IN ('pending', 'running')", "cancelledAt IS NULL"];
+    const params: (string | number | null)[] = [];
+
+    if (options.type) {
+      conditions.push("type = ?");
+      params.push(options.type);
+    }
+    if (options.referenceType) {
+      conditions.push("referenceType = ?");
+      params.push(options.referenceType);
+    }
+    if (options.referenceId !== undefined) {
+      conditions.push("referenceId = ?");
+      params.push(options.referenceId);
+    }
+
+    const reason = options.reason ?? null;
+
+    // For pending jobs, mark as cancelled immediately
+    const pendingResult = await this.db.execute(
+      `UPDATE jobQueue
+       SET status = 'cancelled',
+           cancelledAt = CURRENT_TIMESTAMP,
+           cancelReason = ?,
+           completedAt = CURRENT_TIMESTAMP
+       WHERE status = 'pending' AND ${conditions.slice(1).join(" AND ")}`,
+      [reason, ...params],
+    );
+
+    // For running jobs, just set cancelledAt
+    const runningResult = await this.db.execute(
+      `UPDATE jobQueue
+       SET cancelledAt = CURRENT_TIMESTAMP,
+           cancelReason = ?
+       WHERE status = 'running' AND cancelledAt IS NULL AND ${conditions.slice(1).filter(c => c !== "cancelledAt IS NULL").join(" AND ") || "1=1"}`,
+      [reason, ...params],
+    );
+
+    return pendingResult.changes + runningResult.changes;
+  }
+
+  /**
+   * Check if a job has a cancellation request.
+   * Used by the processor to poll for cancellation of running jobs.
+   *
+   * @param id - Job ID to check
+   * @returns Cancellation info if requested, null otherwise
+   */
+  async getCancellationStatus(id: number): Promise<{ cancelledAt: Date; reason?: string } | null> {
+    const row = await this.db.queryOne<{ cancelledAt: string | null; cancelReason: string | null }>(
+      `SELECT cancelledAt, cancelReason FROM jobQueue WHERE id = ?`,
+      [id],
+    );
+
+    if (!row || !row.cancelledAt) {
+      return null;
+    }
+
+    return {
+      cancelledAt: new Date(row.cancelledAt),
+      reason: row.cancelReason ?? undefined,
+    };
+  }
+
+  /**
+   * Mark a running job as cancelled (final state).
+   * Called by processor when handler finishes after cancellation was requested.
+   *
+   * @param id - Job ID
+   * @param reason - Optional reason (uses existing cancelReason if not provided)
+   * @returns The cancelled job
+   * @throws {JobNotFoundError} If job doesn't exist
+   */
+  async markJobCancelled(id: number, reason?: string): Promise<Job> {
+    using _lock = await this.writeMutex.acquire();
+
+    const job = await this.getJobInternal(id);
+    if (!job) {
+      throw new JobNotFoundError(id);
+    }
+
+    // Use provided reason or existing reason
+    const cancelReason = reason ?? job.cancelReason ?? null;
+
+    await this.db.execute(
+      `UPDATE jobQueue
+       SET status = 'cancelled',
+           cancelledAt = COALESCE(cancelledAt, CURRENT_TIMESTAMP),
+           cancelReason = ?,
+           completedAt = CURRENT_TIMESTAMP
+       WHERE id = ?`,
+      [cancelReason, id],
+    );
+
+    const cancelled = await this.getJobInternal(id);
+    if (!cancelled) {
+      throw new Error("Failed to retrieve cancelled job");
+    }
+    return cancelled;
+  }
+
   // ============== Cleanup Operations ==============
 
   /**
-   * Delete completed/failed jobs older than the specified date.
+   * Delete completed/failed/cancelled jobs older than the specified date.
    * Does not delete pending or running jobs.
    *
    * @param olderThan - Cutoff date
@@ -459,7 +646,7 @@ export class JobQueueService {
 
     const result = await this.db.execute(
       `DELETE FROM jobQueue
-       WHERE status IN ('completed', 'failed')
+       WHERE status IN ('completed', 'failed', 'cancelled')
        AND completedAt < ?`,
       [cutoff],
     );
@@ -484,6 +671,7 @@ export class JobQueueService {
       running: 0,
       completed: 0,
       failed: 0,
+      cancelled: 0,
     };
 
     for (const row of rows) {
@@ -520,6 +708,7 @@ export class JobQueueService {
       id: row.id,
       type: row.type,
       status: row.status as JobStatus,
+      executionMode: row.executionMode as ExecutionMode,
       payload,
       result,
       processInstanceId: row.processInstanceId,
@@ -531,6 +720,8 @@ export class JobQueueService {
       createdAt: new Date(row.createdAt),
       startedAt: row.startedAt ? new Date(row.startedAt) : null,
       completedAt: row.completedAt ? new Date(row.completedAt) : null,
+      cancelledAt: row.cancelledAt ? new Date(row.cancelledAt) : null,
+      cancelReason: row.cancelReason,
     };
   }
 

@@ -42,7 +42,7 @@ import type { UserService } from "../users/user_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { InstanceIdService } from "../instance/instance_id_service.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
-import type { JobStatus } from "../jobs/types.ts";
+import type { JobStatus, ExecutionMode } from "../jobs/types.ts";
 import type { betterAuth } from "better-auth";
 import type { SettingName } from "../settings/types.ts";
 
@@ -335,4 +335,6 @@ export interface DeferredJob {
   referenceType?: string;
   /** Reference ID for entity association */
   referenceId?: number;
+  /** Execution mode (defaults to 'sequential') */
+  executionMode?: ExecutionMode;
 }

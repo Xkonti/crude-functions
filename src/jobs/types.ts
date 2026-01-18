@@ -9,9 +9,35 @@ import type { IEncryptionService } from "../encryption/types.ts";
  * - pending -> running (when claimed by processor)
  * - running -> completed (on success)
  * - running -> failed (on error)
+ * - running -> cancelled (when cancelled mid-execution or pre-cancelled)
  * - running -> pending (on orphan recovery, increments retryCount)
  */
-export type JobStatus = "pending" | "running" | "completed" | "failed";
+export type JobStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+/**
+ * Execution mode determines how reference uniqueness is handled.
+ *
+ * - sequential (default): Enforces unique constraint on active jobs per reference.
+ *   Only one pending/running job allowed per referenceType+referenceId combination.
+ * - concurrent: Allows multiple active jobs for the same reference.
+ *   Useful when you want to run multiple jobs for the same entity in parallel.
+ */
+export type ExecutionMode = "sequential" | "concurrent";
+
+/**
+ * Cancellation token passed to job handlers.
+ *
+ * Allows handlers to detect when a job has been requested for cancellation
+ * and respond gracefully (e.g., save progress, clean up resources).
+ */
+export interface CancellationToken {
+  /** Whether cancellation has been requested */
+  readonly isCancelled: boolean;
+  /** Promise that resolves when cancellation is requested */
+  readonly whenCancelled: Promise<void>;
+  /** Throws JobCancellationError if cancellation was requested */
+  throwIfCancelled(): void;
+}
 
 /**
  * Represents a job in the queue with all metadata.
@@ -23,6 +49,8 @@ export interface Job {
   type: string;
   /** Current job status */
   status: JobStatus;
+  /** Execution mode - sequential (default) or concurrent */
+  executionMode: ExecutionMode;
   /** JSON payload (decrypted if encryption is enabled) */
   payload: unknown | null;
   /** JSON result from execution (error details on failure) */
@@ -45,6 +73,10 @@ export interface Job {
   startedAt: Date | null;
   /** When the job completed or failed (null if pending/running) */
   completedAt: Date | null;
+  /** When cancellation was requested (null if not cancelled) */
+  cancelledAt: Date | null;
+  /** Human-readable reason for cancellation (null if not cancelled) */
+  cancelReason: string | null;
 }
 
 /**
@@ -64,6 +96,12 @@ export interface NewJob {
   referenceType?: string;
   /** ID of the referenced entity */
   referenceId?: number;
+  /**
+   * Execution mode (default: 'sequential').
+   * - sequential: Enforces unique constraint on active jobs per reference.
+   * - concurrent: Allows multiple active jobs for the same reference.
+   */
+  executionMode?: ExecutionMode;
 }
 
 /**
@@ -73,9 +111,10 @@ export interface NewJob {
  * For sync handlers, the return value is automatically wrapped in a resolved Promise.
  *
  * @param job - The job being processed (includes payload)
+ * @param cancellationToken - Token to check for cancellation requests
  * @returns Result data on success, or throws on failure
  */
-export type JobHandler = (job: Job) => unknown | Promise<unknown>;
+export type JobHandler = (job: Job, cancellationToken: CancellationToken) => unknown | Promise<unknown>;
 
 /**
  * Configuration for JobProcessorService.
@@ -119,6 +158,7 @@ export interface JobRow {
   id: number;
   type: string;
   status: string;
+  executionMode: string;
   payload: string | null;
   result: string | null;
   processInstanceId: string | null;
@@ -130,6 +170,8 @@ export interface JobRow {
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
 }
 
 // Forward declaration to avoid circular imports
