@@ -105,6 +105,7 @@ import type {
   UsersContext,
   InstanceIdContext,
   JobQueueContext,
+  SchedulingContext,
   RouteOptions,
   DeferredUser,
   DeferredKeyGroup,
@@ -141,6 +142,7 @@ import {
   createUserDirectly,
   createInstanceIdService,
   createJobQueueService,
+  createSchedulingService,
   createCleanupFunction,
 } from "./service_factories.ts";
 
@@ -331,6 +333,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     return this as unknown as TestSetupBuilder<TContext & JobQueueContext>;
   }
 
+  /**
+   * Include SchedulingService in the test context.
+   * Auto-enables: jobQueueService, instanceIdService.
+   */
+  withSchedulingService(): TestSetupBuilder<TContext & SchedulingContext> {
+    enableServiceWithDependencies(this.flags, "schedulingService");
+    return this as unknown as TestSetupBuilder<TContext & SchedulingContext>;
+  }
+
   // =============================================================================
   // Convenience Methods (Compose Multiple Services)
   // =============================================================================
@@ -426,6 +437,16 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   withJobQueue(): TestSetupBuilder<TContext & JobQueueContext> {
     return this.withJobQueueService() as unknown as TestSetupBuilder<
       TContext & JobQueueContext
+    >;
+  }
+
+  /**
+   * Include scheduling service and its dependencies (jobQueueService, instanceIdService).
+   * Alias for withSchedulingService() for semantic clarity.
+   */
+  withScheduling(): TestSetupBuilder<TContext & SchedulingContext> {
+    return this.withSchedulingService() as unknown as TestSetupBuilder<
+      TContext & SchedulingContext
     >;
   }
 
@@ -784,12 +805,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 11: Create instance ID service if needed
-    if (this.flags.instanceIdService || this.flags.jobQueueService) {
+    if (this.flags.instanceIdService || this.flags.jobQueueService || this.flags.schedulingService) {
       context.instanceIdService = createInstanceIdService();
     }
 
     // STEP 12: Create job queue service if needed
-    if (this.flags.jobQueueService) {
+    if (this.flags.jobQueueService || this.flags.schedulingService) {
       context.jobQueueService = createJobQueueService(
         db,
         context.instanceIdService,
@@ -804,11 +825,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
           ? JSON.stringify(job.payload)
           : null;
         await db.execute(
-          `INSERT INTO jobQueue (type, status, payload, priority, referenceType, referenceId, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          `INSERT INTO jobQueue (type, status, executionMode, payload, priority, referenceType, referenceId, createdAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
           [
             job.type,
             job.status ?? "pending",
+            job.executionMode ?? "sequential",
             payloadStr,
             job.priority ?? 0,
             job.referenceType ?? null,
@@ -818,7 +840,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       }
     }
 
-    // STEP 13: Create cleanup function
+    // STEP 13: Create scheduling service if needed
+    if (this.flags.schedulingService) {
+      context.schedulingService = createSchedulingService(
+        db,
+        context.jobQueueService,
+      );
+    }
+
+    // STEP 14: Create cleanup function
     context.cleanup = createCleanupFunction(
       db,
       tempDir,

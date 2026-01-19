@@ -10,6 +10,7 @@ import type { Context } from "@hono/hono";
 import type { KeyRotationService } from "./key_rotation_service.ts";
 import type { KeyStorageService } from "./key_storage_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { SchedulingService } from "../scheduling/scheduling_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import { logger } from "../utils/logger.ts";
 
@@ -17,11 +18,12 @@ export interface RotationRoutesOptions {
   keyRotationService: KeyRotationService;
   keyStorageService: KeyStorageService;
   settingsService: SettingsService;
+  schedulingService?: SchedulingService;
 }
 
 export function createRotationRoutes(options: RotationRoutesOptions): Hono {
   const routes = new Hono();
-  const { keyRotationService, keyStorageService, settingsService } = options;
+  const { keyRotationService, keyStorageService, settingsService, schedulingService } = options;
 
   /**
    * GET /api/encryption-keys/rotation
@@ -107,6 +109,26 @@ export function createRotationRoutes(options: RotationRoutesOptions): Hono {
   routes.post("/rotation", async (c: Context) => {
     try {
       await keyRotationService.triggerManualRotation();
+
+      // Update the schedule's nextRunAt after manual rotation
+      if (schedulingService) {
+        try {
+          const intervalSetting = await settingsService.getGlobalSetting(
+            SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS
+          );
+          const rotationIntervalDays = intervalSetting ? parseInt(intervalSetting, 10) : 90;
+          const nextRunAt = new Date(Date.now() + rotationIntervalDays * 24 * 60 * 60 * 1000);
+
+          await schedulingService.updateSchedule("key-rotation", {
+            nextRunAt,
+          }, { nextRunAtBehavior: "explicit" });
+          logger.info(`[EncryptionKeyAPI] Reset key-rotation schedule to ${nextRunAt.toISOString()}`);
+        } catch (scheduleError) {
+          // Log but don't fail the request - rotation completed successfully
+          logger.warn("[EncryptionKeyAPI] Failed to update rotation schedule:", scheduleError);
+        }
+      }
+
       return c.json({
         success: true,
         message: "Key rotation completed successfully",

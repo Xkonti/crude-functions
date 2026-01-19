@@ -1,6 +1,8 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { JobProcessorService } from "./job_processor_service.ts";
+import { JobCancellationError } from "./errors.ts";
+import type { CancellationToken } from "./types.ts";
 
 // =============================================================================
 // Handler Registration
@@ -16,7 +18,7 @@ Deno.test("JobProcessorService.registerHandler registers handler", async () => {
   });
 
   try {
-    processor.registerHandler("test-job", () => ({ done: true }));
+    processor.registerHandler("test-job", (_job, _token) => ({ done: true }));
 
     expect(processor.hasHandler("test-job")).toBe(true);
     expect(processor.hasHandler("unknown-job")).toBe(false);
@@ -36,7 +38,7 @@ Deno.test("JobProcessorService.unregisterHandler removes handler", async () => {
   });
 
   try {
-    processor.registerHandler("test-job", () => ({}));
+    processor.registerHandler("test-job", (_job, _token) => ({}));
     expect(processor.hasHandler("test-job")).toBe(true);
 
     const removed = processor.unregisterHandler("test-job");
@@ -61,8 +63,8 @@ Deno.test("JobProcessorService.getStatus returns registered handlers", async () 
   });
 
   try {
-    processor.registerHandler("job-a", () => ({}));
-    processor.registerHandler("job-b", () => ({}));
+    processor.registerHandler("job-a", (_job, _token) => ({}));
+    processor.registerHandler("job-b", (_job, _token) => ({}));
 
     const status = processor.getStatus();
     expect(status.registeredHandlers).toContain("job-a");
@@ -92,7 +94,7 @@ Deno.test("JobProcessorService.processOne processes pending job", async () => {
   try {
     let processedPayload: unknown = null;
 
-    processor.registerHandler("test-job", (job) => {
+    processor.registerHandler("test-job", (job, _token) => {
       processedPayload = job.payload;
       return { processed: true };
     });
@@ -124,7 +126,7 @@ Deno.test("JobProcessorService.processOne returns null when queue is empty", asy
   });
 
   try {
-    processor.registerHandler("test-job", () => ({}));
+    processor.registerHandler("test-job", (_job, _token) => ({}));
 
     const result = await processor.processOne();
     expect(result).toBeNull();
@@ -144,7 +146,7 @@ Deno.test("JobProcessorService.processOne marks job failed when handler throws",
   });
 
   try {
-    processor.registerHandler("failing-job", () => {
+    processor.registerHandler("failing-job", (_job, _token) => {
       throw new Error("Handler failed!");
     });
 
@@ -204,12 +206,12 @@ Deno.test("JobProcessorService.processOne processes highest priority job first",
   try {
     const processedTypes: string[] = [];
 
-    processor.registerHandler("low-priority", (job) => {
+    processor.registerHandler("low-priority", (job, _token) => {
       processedTypes.push(job.type);
       return {};
     });
 
-    processor.registerHandler("high-priority", (job) => {
+    processor.registerHandler("high-priority", (job, _token) => {
       processedTypes.push(job.type);
       return {};
     });
@@ -269,7 +271,7 @@ Deno.test("JobProcessorService.start processes pending jobs", async () => {
   try {
     let handlerCalled = false;
 
-    processor.registerHandler("auto-process", () => {
+    processor.registerHandler("auto-process", (_job, _token) => {
       handlerCalled = true;
       return { done: true };
     });
@@ -322,8 +324,8 @@ Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
   try {
     // Insert orphaned job directly
     await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'crashed-instance', datetime('now'), 0, 2, datetime('now'))`,
+      `INSERT INTO jobQueue (type, status, executionMode, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
+       VALUES (?, 'running', 'sequential', 'crashed-instance', datetime('now'), 0, 2, datetime('now'))`,
       ["orphaned-job"],
     );
 
@@ -338,7 +340,7 @@ Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
       config: { pollingIntervalSeconds: 60 },
     });
 
-    processor.registerHandler("orphaned-job", () => {
+    processor.registerHandler("orphaned-job", (_job, _token) => {
       handlerCalled = true;
       return { recovered: true };
     });
@@ -366,8 +368,8 @@ Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async (
   try {
     // Insert orphaned job that has already reached max retries
     await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'crashed-instance', datetime('now'), 1, 1, datetime('now'))`,
+      `INSERT INTO jobQueue (type, status, executionMode, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
+       VALUES (?, 'running', 'sequential', 'crashed-instance', datetime('now'), 1, 1, datetime('now'))`,
       ["exhausted-job"],
     );
 
@@ -377,7 +379,7 @@ Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async (
       config: { pollingIntervalSeconds: 60 },
     });
 
-    processor.registerHandler("exhausted-job", () => {
+    processor.registerHandler("exhausted-job", (_job, _token) => {
       return {};
     });
 
@@ -418,7 +420,7 @@ Deno.test("JobProcessorService processes multiple jobs in sequence", async () =>
   try {
     const processedIds: number[] = [];
 
-    processor.registerHandler("sequential-job", (job) => {
+    processor.registerHandler("sequential-job", (job, _token) => {
       processedIds.push(job.id);
       return {};
     });
@@ -460,7 +462,7 @@ Deno.test("JobProcessorService passes full job context to handler", async () => 
   try {
     let receivedJob: unknown = null;
 
-    processor.registerHandler("context-check", (job) => {
+    processor.registerHandler("context-check", (job, _token) => {
       receivedJob = job;
       return {};
     });
@@ -484,6 +486,171 @@ Deno.test("JobProcessorService passes full job context to handler", async () => 
     expect(job.referenceId).toBe(123);
     expect(job.status).toBe("running"); // Job is claimed when handler runs
     expect(job.processInstanceId).toBe(ctx.instanceIdService.getId());
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+// =============================================================================
+// Cancellation Tests
+// =============================================================================
+
+Deno.test("JobProcessorService passes cancellation token to handler", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    let receivedToken: CancellationToken | null = null;
+
+    processor.registerHandler("token-test", (_job, token) => {
+      receivedToken = token;
+      return { done: true };
+    });
+
+    await ctx.jobQueueService.enqueue({ type: "token-test" });
+    await processor.processOne();
+
+    expect(receivedToken).not.toBeNull();
+    expect(receivedToken!.isCancelled).toBe(false);
+    expect(typeof receivedToken!.throwIfCancelled).toBe("function");
+    expect(receivedToken!.whenCancelled).toBeInstanceOf(Promise);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService marks job cancelled when handler throws JobCancellationError", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("cancel-throw-test", (job, _token) => {
+      throw new JobCancellationError(job.id, "Handler decided to cancel");
+    });
+
+    const enqueued = await ctx.jobQueueService.enqueue({ type: "cancel-throw-test" });
+    const result = await processor.processOne();
+
+    expect(result).not.toBeNull();
+    expect(result!.status).toBe("cancelled");
+    expect(result!.cancelReason).toBe("Handler decided to cancel");
+
+    // Verify in database
+    const job = await ctx.jobQueueService.getJob(enqueued.id);
+    expect(job!.status).toBe("cancelled");
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService marks pre-cancelled job as cancelled without running handler", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    let handlerCalled = false;
+
+    processor.registerHandler("pre-cancel-test", (_job, _token) => {
+      handlerCalled = true;
+      return {};
+    });
+
+    // Enqueue a job
+    const job = await ctx.jobQueueService.enqueue({ type: "pre-cancel-test" });
+
+    // Cancel it before processing
+    await ctx.jobQueueService.cancelJob(job.id, { reason: "Pre-cancelled" });
+
+    // Try to process - handler should not be called
+    await processor.processOne();
+
+    expect(handlerCalled).toBe(false);
+
+    // Verify job is cancelled
+    const updated = await ctx.jobQueueService.getJob(job.id);
+    expect(updated!.status).toBe("cancelled");
+    expect(updated!.cancelReason).toBe("Pre-cancelled");
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService handler can check cancellation via token.isCancelled", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    let tokenWasCancelledDuringHandler = false;
+
+    processor.registerHandler("check-cancel-test", async (_job, token) => {
+      // Initially not cancelled
+      expect(token.isCancelled).toBe(false);
+
+      // Simulate some work
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Check again - still not cancelled in this test
+      tokenWasCancelledDuringHandler = token.isCancelled;
+
+      return { checked: true };
+    });
+
+    await ctx.jobQueueService.enqueue({ type: "check-cancel-test" });
+    const result = await processor.processOne();
+
+    expect(result!.status).toBe("completed");
+    expect(tokenWasCancelledDuringHandler).toBe(false);
+  } finally {
+    await processor.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("JobProcessorService handler can use token.throwIfCancelled()", async () => {
+  const ctx = await TestSetupBuilder.create().withJobQueue().build();
+
+  const processor = new JobProcessorService({
+    jobQueueService: ctx.jobQueueService,
+    instanceIdService: ctx.instanceIdService,
+    config: { pollingIntervalSeconds: 60 },
+  });
+
+  try {
+    processor.registerHandler("throw-check-test", (_job, token) => {
+      // This should not throw since job is not cancelled
+      token.throwIfCancelled();
+      return { success: true };
+    });
+
+    await ctx.jobQueueService.enqueue({ type: "throw-check-test" });
+    const result = await processor.processOne();
+
+    expect(result!.status).toBe("completed");
+    expect(result!.result).toEqual({ success: true });
   } finally {
     await processor.stop();
     await ctx.cleanup();

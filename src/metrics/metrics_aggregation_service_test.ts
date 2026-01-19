@@ -86,7 +86,6 @@ async function createTestSetup(
 }
 
 async function cleanup(setup: TestSetup): Promise<void> {
-  await setup.aggregationService.stop();
   await setup.ctx.cleanup();
 }
 
@@ -582,30 +581,10 @@ Deno.test("MetricsAggregationService does nothing when no data", async () => {
 });
 
 // =====================
-// Timer Control Tests
+// Execution Tests
 // =====================
 
-Deno.test("MetricsAggregationService can be started and stopped", async () => {
-  const setup = await createTestSetup();
-
-  try {
-    // Start the service
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-
-    // Stop the service
-    await setup.aggregationService.stop();
-
-    // Starting again should warn but work
-    setup.aggregationService.start();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await setup.aggregationService.stop();
-  } finally {
-    await cleanup(setup);
-  }
-});
-
-Deno.test("MetricsAggregationService stop waits for processing to complete", async () => {
+Deno.test("MetricsAggregationService can be run multiple times", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -622,7 +601,9 @@ Deno.test("MetricsAggregationService stop waits for processing to complete", asy
       });
     }
 
-    // Run aggregation once
+    // Run aggregation multiple times
+    await setup.aggregationService.performAggregation();
+    await setup.aggregationService.performAggregation();
     await setup.aggregationService.runOnce();
 
     // Processing should have completed

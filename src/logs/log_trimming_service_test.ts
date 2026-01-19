@@ -39,9 +39,7 @@ async function createTestSetup(
 
 async function cleanup(setup: {
   ctx: LogTrimmingTestContext;
-  trimmingService: LogTrimmingService;
 }): Promise<void> {
-  await setup.trimmingService.stop();
   await setup.ctx.cleanup();
 }
 
@@ -72,9 +70,10 @@ Deno.test("LogTrimmingService deletes logs older than retention period", async (
     await setup.ctx.consoleLogService.flush();
 
     // Run trimming
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    const result = await setup.trimmingService.performTrimming();
+
+    // Should have deleted old log
+    expect(result.deletedByAge).toBe(1);
 
     // Old log should be deleted, new log should remain
     const oldLogs = await setup.ctx.consoleLogService.getByRequestId("old-request");
@@ -101,9 +100,10 @@ Deno.test("LogTrimmingService skips time-based deletion when retentionSeconds is
     );
 
     // Run trimming
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    const result = await setup.trimmingService.performTrimming();
+
+    // No time-based deletions (disabled)
+    expect(result.deletedByAge).toBe(0);
 
     // Old log should still exist (time-based deletion disabled)
     const oldLogs = await setup.ctx.consoleLogService.getByRequestId("ancient-request");
@@ -133,9 +133,10 @@ Deno.test("LogTrimmingService trims logs exceeding max per route", async () => {
     await setup.ctx.consoleLogService.flush();
 
     // Run trimming
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    const result = await setup.trimmingService.performTrimming();
+
+    // Should have trimmed 5 logs (10 - 5 = 5)
+    expect(result.trimmedByCount).toBe(5);
 
     // Should have only 5 logs remaining
     const logs = await setup.ctx.consoleLogService.getByRouteId(1);
@@ -171,9 +172,10 @@ Deno.test("LogTrimmingService processes multiple routes independently", async ()
     await setup.ctx.consoleLogService.flush();
 
     // Run trimming
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    const result = await setup.trimmingService.performTrimming();
+
+    // Should have trimmed 2 logs from route 1 (5 - 3 = 2)
+    expect(result.trimmedByCount).toBe(2);
 
     // Route 1: 5 -> 3 (trimmed)
     const route1Logs = await setup.ctx.consoleLogService.getByRouteId(1);
@@ -218,9 +220,11 @@ Deno.test("LogTrimmingService applies time-based deletion before count-based tri
     await setup.ctx.consoleLogService.flush();
 
     // Run trimming
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    const result = await setup.trimmingService.performTrimming();
+
+    // 3 deleted by age, 0 by count (4 remaining is under limit of 5)
+    expect(result.deletedByAge).toBe(3);
+    expect(result.trimmedByCount).toBe(0);
 
     // Should have 4 new logs (old ones deleted by time, new ones under count limit)
     const logs = await setup.ctx.consoleLogService.getByRouteId(1);
@@ -232,21 +236,35 @@ Deno.test("LogTrimmingService applies time-based deletion before count-based tri
 });
 
 // =====================
-// Timer control tests
+// Execution tests
 // =====================
 
-Deno.test("LogTrimmingService can be started and stopped", async () => {
-  const setup = await createTestSetup();
+Deno.test("LogTrimmingService can be called multiple times", async () => {
+  const setup = await createTestSetup({ maxLogsPerRoute: 5 });
 
   try {
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await setup.trimmingService.stop();
+    // Store some logs
+    for (let i = 0; i < 10; i++) {
+      setup.ctx.consoleLogService.store({
+        requestId: `request-${i}`,
+        routeId: 1,
+        level: "log",
+        message: `Message ${i}`,
+      });
+    }
+    await setup.ctx.consoleLogService.flush();
 
-    // Should be able to restart
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await setup.trimmingService.stop();
+    // First trim
+    const result1 = await setup.trimmingService.performTrimming();
+    expect(result1.trimmedByCount).toBe(5);
+
+    // Second trim should do nothing (already at limit)
+    const result2 = await setup.trimmingService.performTrimming();
+    expect(result2.trimmedByCount).toBe(0);
+
+    // Logs should still be at 5
+    const logs = await setup.ctx.consoleLogService.getByRouteId(1);
+    expect(logs.length).toBe(5);
   } finally {
     await cleanup(setup);
   }
@@ -256,11 +274,14 @@ Deno.test("LogTrimmingService does nothing when no logs exist", async () => {
   const setup = await createTestSetup();
 
   try {
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    // Run trimming with no logs
+    const result = await setup.trimmingService.performTrimming();
 
-    // No errors, no logs created
+    // Nothing should be deleted
+    expect(result.deletedByAge).toBe(0);
+    expect(result.trimmedByCount).toBe(0);
+
+    // No logs created
     const logs = await setup.ctx.consoleLogService.getRecent(100);
     expect(logs.length).toBe(0);
   } finally {
@@ -295,9 +316,10 @@ Deno.test("LogTrimmingService handles logs with null routeId", async () => {
     await setup.ctx.consoleLogService.flush();
 
     // Run trimming - should not fail on null routeId
-    setup.trimmingService.start();
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    await setup.trimmingService.stop();
+    const result = await setup.trimmingService.performTrimming();
+
+    // No count-based trimming needed (under limit)
+    expect(result.trimmedByCount).toBe(0);
 
     // Orphan log should still exist (null routeId is not processed by per-route trimming)
     const orphanLogs = await setup.ctx.consoleLogService.getByRequestId("orphan-request");

@@ -10,7 +10,9 @@ import {
   JobAlreadyClaimedError,
   MaxRetriesExceededError,
   NoHandlerError as _NoHandlerError,
+  JobCancellationError,
 } from "./errors.ts";
+import { CancellationTokenImpl } from "./cancellation_token.ts";
 import { logger } from "../utils/logger.ts";
 
 /**
@@ -55,12 +57,17 @@ export class JobProcessorService {
   private readonly handlers = new Map<string, JobHandler>();
 
   private timerId: number | null = null;
+  private cancellationCheckTimerId: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
   private consecutiveFailures = 0;
 
+  /** Active cancellation tokens for running jobs (job ID -> token) */
+  private readonly activeCancellationTokens = new Map<number, CancellationTokenImpl>();
+
   private static readonly MAX_CONSECUTIVE_FAILURES = 5;
   private static readonly DEFAULT_SHUTDOWN_TIMEOUT_MS = 60000;
+  private static readonly CANCELLATION_CHECK_INTERVAL_MS = 1000;
 
   constructor(options: JobProcessorServiceOptions) {
     this.jobQueueService = options.jobQueueService;
@@ -113,6 +120,7 @@ export class JobProcessorService {
    * 1. Detects and recovers orphaned jobs from crashed instances
    * 2. Processes any pending jobs immediately
    * 3. Schedules polling interval
+   * 4. Starts cancellation check interval
    */
   start(): void {
     if (this.timerId !== null) {
@@ -160,9 +168,20 @@ export class JobProcessorService {
                   clearInterval(this.timerId);
                   this.timerId = null;
                 }
+                if (this.cancellationCheckTimerId !== null) {
+                  clearInterval(this.cancellationCheckTimerId);
+                  this.cancellationCheckTimerId = null;
+                }
               }
             });
         }, this.config.pollingIntervalSeconds * 1000);
+
+        // Start cancellation check interval
+        this.cancellationCheckTimerId = setInterval(() => {
+          this.checkCancellations().catch((error) => {
+            logger.error("[JobQueue] Cancellation check failed:", error);
+          });
+        }, JobProcessorService.CANCELLATION_CHECK_INTERVAL_MS);
       })
       .catch((error) => {
         logger.error("[JobQueue] Startup failed:", error);
@@ -172,13 +191,19 @@ export class JobProcessorService {
   /**
    * Stop the job processor gracefully.
    *
-   * Clears the polling interval and waits for any in-progress job
-   * to complete (with configurable timeout).
+   * Clears the polling interval and cancellation checker,
+   * waits for any in-progress job to complete (with configurable timeout),
+   * and cleans up active cancellation tokens.
    */
   async stop(): Promise<void> {
     if (this.timerId !== null) {
       clearInterval(this.timerId);
       this.timerId = null;
+    }
+
+    if (this.cancellationCheckTimerId !== null) {
+      clearInterval(this.cancellationCheckTimerId);
+      this.cancellationCheckTimerId = null;
     }
 
     this.stopRequested = true;
@@ -198,6 +223,9 @@ export class JobProcessorService {
       }
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
+
+    // Clean up any remaining cancellation tokens
+    this.activeCancellationTokens.clear();
 
     this.stopRequested = false;
     logger.info("[JobQueue] Stopped");
@@ -320,7 +348,7 @@ export class JobProcessorService {
 
   /**
    * Process a single job.
-   * Claims, executes handler, and marks complete/failed.
+   * Claims, executes handler with cancellation token, and marks complete/failed/cancelled.
    */
   private async processJob(job: Job): Promise<void> {
     const handler = this.handlers.get(job.type);
@@ -334,22 +362,49 @@ export class JobProcessorService {
       return;
     }
 
+    // Create cancellation token for this job
+    const cancellationToken = new CancellationTokenImpl(job.id);
+
     try {
+      // Check if job was already cancelled before we claim it
+      const preCancellation = await this.jobQueueService.getCancellationStatus(job.id);
+      if (preCancellation) {
+        logger.info(`[JobQueue] Job ${job.id} was cancelled before processing, marking as cancelled`);
+        await this.jobQueueService.markJobCancelled(job.id, preCancellation.reason);
+        return;
+      }
+
       // Claim the job
       const claimedJob = await this.jobQueueService.claimJob(job.id);
 
+      // Register token for cancellation polling
+      this.activeCancellationTokens.set(job.id, cancellationToken);
+
       logger.debug(`[JobQueue] Processing job ${job.id} (type: ${job.type})`);
 
-      // Execute handler
-      const result = await handler(claimedJob);
+      // Execute handler with cancellation token
+      const result = await handler(claimedJob, cancellationToken);
 
-      // Mark complete
-      await this.jobQueueService.completeJob(job.id, result);
-      logger.info(`[JobQueue] Completed job ${job.id} (type: ${job.type})`);
+      // Check if cancellation was requested during execution
+      if (cancellationToken.isCancelled) {
+        logger.info(`[JobQueue] Job ${job.id} completed but was cancelled, marking as cancelled`);
+        await this.jobQueueService.markJobCancelled(job.id, cancellationToken.reason);
+      } else {
+        // Mark complete
+        await this.jobQueueService.completeJob(job.id, result);
+        logger.info(`[JobQueue] Completed job ${job.id} (type: ${job.type})`);
+      }
     } catch (error) {
       if (error instanceof JobAlreadyClaimedError) {
         // Another process claimed it - not an error
         logger.debug(`[JobQueue] Job ${job.id} claimed by another process`);
+        return;
+      }
+
+      if (error instanceof JobCancellationError) {
+        // Handler threw cancellation error - mark as cancelled
+        logger.info(`[JobQueue] Job ${job.id} cancelled: ${error.reason ?? "no reason provided"}`);
+        await this.jobQueueService.markJobCancelled(job.id, error.reason);
         return;
       }
 
@@ -362,6 +417,28 @@ export class JobProcessorService {
           : { error: "Unknown", message: String(error) };
 
       await this.jobQueueService.failJob(job.id, errorDetails);
+    } finally {
+      // Always clean up the token
+      this.activeCancellationTokens.delete(job.id);
+    }
+  }
+
+  /**
+   * Poll the database for cancellation requests on active jobs.
+   * Called periodically by the cancellation check timer.
+   */
+  private async checkCancellations(): Promise<void> {
+    for (const [jobId, token] of this.activeCancellationTokens) {
+      // Skip if already cancelled
+      if (token.isCancelled) {
+        continue;
+      }
+
+      const status = await this.jobQueueService.getCancellationStatus(jobId);
+      if (status) {
+        logger.debug(`[JobQueue] Cancellation detected for job ${jobId}`);
+        token._cancel(status.reason);
+      }
     }
   }
 }

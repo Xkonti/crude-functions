@@ -134,7 +134,7 @@ async function insertApiKey(
 // Basic service tests
 // =====================
 
-Deno.test("KeyRotationService - start and stop", async () => {
+Deno.test("KeyRotationService - performRotationCheck completes successfully", async () => {
   const ctx = await createTestContext();
 
   try {
@@ -145,21 +145,22 @@ Deno.test("KeyRotationService - start and stop", async () => {
       config: { ...ctx.config, rotationIntervalDays: 365 }, // Don't trigger rotation
     });
 
-    // Start should set up timer
-    service.start();
+    // performRotationCheck should complete without error
+    const result = await service.performRotationCheck();
 
-    // Give it a moment
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    // Stop should complete
-    await service.stop();
+    // Should indicate no rotation was performed (interval not reached)
+    expect(result.rotationPerformed).toBe(false);
+    expect(result.resumedIncomplete).toBe(false);
+    expect(result.nextRunAt).toBeInstanceOf(Date);
   } finally {
     await ctx.cleanup();
   }
 });
 
-Deno.test("KeyRotationService - start is idempotent", async () => {
-  const ctx = await createTestContext();
+Deno.test("KeyRotationService - concurrent performRotationCheck calls are serialized", async () => {
+  const ctx = await createTestContext({
+    last_rotation_finished_at: new Date().toISOString(),
+  });
 
   try {
     const service = new KeyRotationService({
@@ -169,11 +170,17 @@ Deno.test("KeyRotationService - start is idempotent", async () => {
       config: { ...ctx.config, rotationIntervalDays: 365 },
     });
 
-    service.start();
-    service.start(); // Should not throw or create duplicate timers
-    service.start();
+    // Call performRotationCheck multiple times concurrently
+    const results = await Promise.all([
+      service.performRotationCheck(),
+      service.performRotationCheck(),
+      service.performRotationCheck(),
+    ]);
 
-    await service.stop();
+    // All should complete without error
+    for (const result of results) {
+      expect(result.nextRunAt).toBeInstanceOf(Date);
+    }
   } finally {
     await ctx.cleanup();
   }
@@ -200,9 +207,10 @@ Deno.test("KeyRotationService - does not rotate when interval not reached", asyn
       config: { ...ctx.config, rotationIntervalDays: 365 }, // Far in future
     });
 
-    service.start();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    await service.stop();
+    const result = await service.performRotationCheck();
+
+    // Should not have rotated
+    expect(result.rotationPerformed).toBe(false);
 
     // Secret should still be version A
     const row = await ctx.db.queryOne<{ value: string }>(
@@ -235,11 +243,11 @@ Deno.test("KeyRotationService - triggers rotation when interval exceeded", async
       config: { ...ctx.config, rotationIntervalDays: 90 }, // 90 days < 100 days ago
     });
 
-    service.start();
+    const result = await service.performRotationCheck();
 
-    // Wait for rotation to complete
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await service.stop();
+    // Should have rotated
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.resumedIncomplete).toBe(false);
 
     // Secret should now be version B
     const row = await ctx.db.queryOne<{ value: string }>(
@@ -300,9 +308,11 @@ Deno.test("KeyRotationService - resumes incomplete rotation", async () => {
       config: ctx.config,
     });
 
-    service.start();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await service.stop();
+    const result = await service.performRotationCheck();
+
+    // Should have resumed incomplete rotation
+    expect(result.rotationPerformed).toBe(true);
+    expect(result.resumedIncomplete).toBe(true);
 
     // Secret should now be version B
     const row = await ctx.db.queryOne<{ value: string }>(
@@ -345,9 +355,10 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
       config: { ...ctx.config, batchSize: 10, rotationIntervalDays: 1 }, // 10 per batch = 3 batches
     });
 
-    service.start();
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    await service.stop();
+    const result = await service.performRotationCheck();
+
+    // Should have rotated
+    expect(result.rotationPerformed).toBe(true);
 
     // All secrets should be version B
     const rows = await ctx.db.queryAll<{ name: string; value: string }>(
@@ -392,9 +403,10 @@ Deno.test("KeyRotationService - rotates apiKeys table", async () => {
       config: ctx.config,
     });
 
-    service.start();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await service.stop();
+    const result = await service.performRotationCheck();
+
+    // Should have rotated
+    expect(result.rotationPerformed).toBe(true);
 
     // All API keys should be version B
     const rows = await ctx.db.queryAll<{ value: string }>(
@@ -442,9 +454,10 @@ Deno.test("KeyRotationService - preserves data integrity after rotation", async 
       config: ctx.config,
     });
 
-    service.start();
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await service.stop();
+    const result = await service.performRotationCheck();
+
+    // Should have rotated
+    expect(result.rotationPerformed).toBe(true);
 
     // Verify all values are preserved
     for (let i = 0; i < originalValues.length; i++) {
@@ -481,38 +494,92 @@ Deno.test("KeyStorageService.getNextVersion wraps correctly through rotation", (
 });
 
 // =====================
-// Concurrent operation tests
+// Manual rotation tests
 // =====================
 
-Deno.test("KeyRotationService - handles concurrent checks safely", async () => {
-  const pastDate = new Date();
-  pastDate.setDate(pastDate.getDate() - 100);
-
+Deno.test("KeyRotationService - triggerManualRotation forces rotation", async () => {
+  // Set last_rotation to now (so scheduled rotation wouldn't trigger)
   const ctx = await createTestContext({
-    last_rotation_finished_at: pastDate.toISOString(),
+    last_rotation_finished_at: new Date().toISOString(),
   });
 
   try {
-    await insertSecret(ctx, "test-secret", "value");
+    await insertSecret(ctx, "test-secret", "secret-value");
 
     const service = new KeyRotationService({
       db: ctx.db,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
-      // Use longer rotation interval to prevent multiple rotations during the test
-      config: { ...ctx.config, checkIntervalSeconds: 0.05, rotationIntervalDays: 1 },
+      config: { ...ctx.config, rotationIntervalDays: 365 }, // Would not trigger scheduled rotation
     });
 
-    service.start();
+    // Manual rotation should always trigger
+    await service.triggerManualRotation();
 
-    // Let multiple check cycles run
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Secret should now be version B
+    const row = await ctx.db.queryOne<{ value: string }>(
+      "SELECT value FROM secrets WHERE name = ?",
+      ["test-secret"]
+    );
+    expect(row!.value.charAt(0)).toBe("B");
+  } finally {
+    await ctx.cleanup();
+  }
+});
 
-    await service.stop();
+Deno.test("KeyRotationService - triggerManualRotation rejects when rotation in progress", async () => {
+  const ctx = await createTestContext();
 
-    // Should have completed rotation without errors
-    const keys = await ctx.keyStorage.loadKeys();
-    expect(keys!.current_version).toBe("B");
+  try {
+    // Insert enough secrets to make rotation take some time
+    for (let i = 0; i < 50; i++) {
+      await insertSecret(ctx, `secret-${i}`, `value-${i}`);
+    }
+
+    const service = new KeyRotationService({
+      db: ctx.db,
+      encryptionService: ctx.encryptionService,
+      keyStorage: ctx.keyStorage,
+      config: { ...ctx.config, batchSize: 5, batchSleepMs: 50 }, // Small batches with sleep
+    });
+
+    // Start a manual rotation in the background (don't await)
+    const rotation1Promise = service.triggerManualRotation();
+
+    // Small delay to ensure rotation has started
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // Try to start another while first is in progress - should fail
+    await expect(service.triggerManualRotation()).rejects.toThrow(
+      "Key rotation is already in progress"
+    );
+
+    // Wait for first rotation to complete
+    await rotation1Promise;
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// =====================
+// Status tests
+// =====================
+
+Deno.test("KeyRotationService - getRotationStatus returns current state", async () => {
+  const ctx = await createTestContext();
+
+  try {
+    const service = new KeyRotationService({
+      db: ctx.db,
+      encryptionService: ctx.encryptionService,
+      keyStorage: ctx.keyStorage,
+      config: ctx.config,
+    });
+
+    const status = await service.getRotationStatus();
+
+    expect(status.isRotating).toBe(false);
+    expect(status.hasIncompleteRotation).toBe(false);
   } finally {
     await ctx.cleanup();
   }

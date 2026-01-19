@@ -84,3 +84,40 @@ export class MaxRetriesExceededError extends JobQueueError {
     this.maxRetries = maxRetries;
   }
 }
+
+/**
+ * Thrown when a handler detects cancellation via the cancellation token.
+ * This signals to the processor that the job should be marked as cancelled.
+ */
+export class JobCancellationError extends JobQueueError {
+  public readonly jobId: number;
+  public readonly reason?: string;
+
+  constructor(jobId: number, reason?: string) {
+    super(
+      reason
+        ? `Job ${jobId} was cancelled: ${reason}`
+        : `Job ${jobId} was cancelled`,
+    );
+    this.name = "JobCancellationError";
+    this.jobId = jobId;
+    this.reason = reason;
+  }
+}
+
+/**
+ * Thrown when attempting to cancel a job that is already completed, failed, or cancelled.
+ */
+export class JobNotCancellableError extends JobQueueError {
+  public readonly jobId: number;
+  public readonly currentStatus: string;
+
+  constructor(jobId: number, currentStatus: string) {
+    super(
+      `Job ${jobId} cannot be cancelled: current status is '${currentStatus}'`,
+    );
+    this.name = "JobNotCancellableError";
+    this.jobId = jobId;
+    this.currentStatus = currentStatus;
+  }
+}

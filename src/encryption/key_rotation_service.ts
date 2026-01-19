@@ -1,11 +1,14 @@
 /**
- * Background service for automatic encryption key rotation.
+ * Service for automatic encryption key rotation.
  *
- * Runs on a configurable interval to:
+ * Performs key rotation when invoked by the job system:
  * - Check if it's time for key rotation (based on last_rotation_finished_at)
  * - Resume incomplete rotations (if both current and phased_out keys exist)
  * - Generate new keys and re-encrypt all secrets/api_keys in batches
  * - Update Better Auth secret (causing session invalidation)
+ *
+ * This service is invoked by the job system via the scheduling service.
+ * It does not maintain its own timer - scheduling is handled externally.
  */
 
 import type { DatabaseService } from "../database/database_service.ts";
@@ -18,6 +21,8 @@ import type {
   EncryptedTable,
   EncryptedRecord,
 } from "./key_rotation_types.ts";
+import type { CancellationToken } from "../jobs/types.ts";
+import type { DynamicScheduleResult } from "../scheduling/types.ts";
 import { logger } from "../utils/logger.ts";
 
 /**
@@ -26,14 +31,15 @@ import { logger } from "../utils/logger.ts";
 const ENCRYPTED_TABLES: EncryptedTable[] = ["secrets", "apiKeys", "settings"];
 
 /**
- * Maximum consecutive failures before auto-stopping.
+ * Result of a key rotation check.
+ * Extends DynamicScheduleResult to provide the next run time for the schedule.
  */
-const MAX_CONSECUTIVE_FAILURES = 5;
-
-/**
- * Timeout for graceful stop (ms).
- */
-const STOP_TIMEOUT_MS = 60000;
+export interface KeyRotationCheckResult extends DynamicScheduleResult {
+  /** Whether a rotation was performed during this check */
+  rotationPerformed: boolean;
+  /** Whether an incomplete rotation was resumed */
+  resumedIncomplete: boolean;
+}
 
 /**
  * Service for automatic encryption key rotation.
@@ -72,11 +78,10 @@ export class KeyRotationService {
   private readonly keyStorage: KeyStorageService;
   private readonly config: KeyRotationConfig;
 
-  private timerId: number | null = null;
-  private isStarting = false;
+  /** In-memory lock to prevent concurrent rotation */
   private isRotating = false;
+  /** Flag for graceful cancellation mid-rotation */
   private stopRequested = false;
-  private consecutiveFailures = 0;
 
   constructor(options: KeyRotationServiceOptions) {
     this.db = options.db;
@@ -86,146 +91,12 @@ export class KeyRotationService {
   }
 
   /**
-   * Start the rotation check timer.
-   * Checks immediately on start, then on configured interval.
-   * Timer only starts if initial check succeeds.
-   */
-  start(): void {
-    if (this.timerId !== null) {
-      logger.warn("[KeyRotation] Already running");
-      return;
-    }
-
-    if (this.isStarting) {
-      logger.warn("[KeyRotation] Start already in progress");
-      return;
-    }
-
-    logger.info(
-      `[KeyRotation] Starting with check interval ${this.config.checkIntervalSeconds}s, ` +
-        `rotation interval ${this.config.rotationIntervalDays} days`
-    );
-
-    this.isStarting = true;
-
-    // Run initial check first, only start timer if it succeeds
-    this.checkAndRotate()
-      .then(() => {
-        this.consecutiveFailures = 0;
-
-        // Check if stop was requested during initial check
-        if (this.stopRequested) {
-          this.isStarting = false;
-          logger.debug(
-            "[KeyRotation] Stop requested during startup, timer not started"
-          );
-          return;
-        }
-
-        // Initial check succeeded, start the timer
-        this.timerId = setInterval(() => {
-          this.checkAndRotate()
-            .then(() => {
-              this.consecutiveFailures = 0;
-            })
-            .catch((error) => {
-              this.consecutiveFailures++;
-              logger.error(
-                `[KeyRotation] Check failed (${this.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
-                error
-              );
-
-              // Auto-shutdown after max failures
-              if (this.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
-                // Check if we're stopping mid-rotation
-                this.keyStorage
-                  .loadKeys()
-                  .then((keys) => {
-                    const midRotation =
-                      keys !== null && this.keyStorage.isRotationInProgress(keys);
-                    if (midRotation) {
-                      logger.error(
-                        "[KeyRotation] CRITICAL: Max consecutive failures reached while rotation in progress!"
-                      );
-                      logger.error(
-                        "[KeyRotation] The system has both current and phased_out keys. " +
-                          "Some records may be encrypted with the old key."
-                      );
-                      logger.error(
-                        "[KeyRotation] Recovery: Restart the service to automatically resume rotation, " +
-                          "or manually trigger rotation via the API."
-                      );
-                    } else {
-                      logger.error(
-                        "[KeyRotation] Max consecutive failures reached, stopping service"
-                      );
-                    }
-                  })
-                  .catch(() => {
-                    logger.error(
-                      "[KeyRotation] Max consecutive failures reached, stopping service (could not check rotation state)"
-                    );
-                  });
-
-                if (this.timerId !== null) {
-                  clearInterval(this.timerId);
-                  this.timerId = null;
-                }
-              }
-            });
-        }, this.config.checkIntervalSeconds * 1000);
-
-        this.isStarting = false;
-        logger.debug("[KeyRotation] Timer started successfully");
-      })
-      .catch((error) => {
-        this.consecutiveFailures++;
-        this.isStarting = false;
-        logger.error(
-          "[KeyRotation] Initial check failed, timer not started:",
-          error
-        );
-      });
-  }
-
-  /**
-   * Stop the rotation service.
-   * Waits for any in-progress startup or rotation to complete (with timeout).
-   */
-  async stop(): Promise<void> {
-    if (this.timerId !== null) {
-      clearInterval(this.timerId);
-      this.timerId = null;
-    }
-
-    this.stopRequested = true;
-
-    // Wait for startup or rotation to complete with timeout
-    const startTime = Date.now();
-    while (this.isStarting || this.isRotating) {
-      if (Date.now() - startTime > STOP_TIMEOUT_MS) {
-        logger.warn(
-          "[KeyRotation] Stop timeout exceeded, startup/rotation may still be running"
-        );
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-
-    this.stopRequested = false;
-    logger.info("[KeyRotation] Stopped");
-  }
-
-  /**
    * Get current rotation status for monitoring/alerting.
    * Returns information about the rotation service state.
    */
   async getRotationStatus(): Promise<{
-    isRunning: boolean;
     isRotating: boolean;
     hasIncompleteRotation: boolean;
-    consecutiveFailures: number;
-    maxConsecutiveFailures: number;
   }> {
     let hasIncompleteRotation = false;
 
@@ -239,11 +110,8 @@ export class KeyRotationService {
     }
 
     return {
-      isRunning: this.timerId !== null,
       isRotating: this.isRotating,
       hasIncompleteRotation,
-      consecutiveFailures: this.consecutiveFailures,
-      maxConsecutiveFailures: MAX_CONSECUTIVE_FAILURES,
     };
   }
 
@@ -271,78 +139,88 @@ export class KeyRotationService {
     // Check if previous rotation incomplete (resume it)
     if (this.keyStorage.isRotationInProgress(keys)) {
       logger.info("[KeyRotation] Resuming incomplete rotation");
+      this.stopRequested = false;
       await this.performRotation(keys);
       return;
     }
 
     // Start new rotation (bypass interval check)
+    this.stopRequested = false;
     await this.startNewRotation(keys);
   }
 
   /**
-   * Main rotation check - called by timer.
-   * Determines if rotation is needed and performs it.
+   * Perform rotation check. Called by job handler.
+   * Returns next run time for dynamic schedule.
+   *
+   * @param token - Optional cancellation token for graceful cancellation
+   * @returns Result including next run time for the schedule
    */
-  private async checkAndRotate(): Promise<void> {
-    // 1. Check if stop was requested
-    if (this.stopRequested) {
-      return;
-    }
+  async performRotationCheck(token?: CancellationToken): Promise<KeyRotationCheckResult> {
+    const rotationIntervalMs = this.config.rotationIntervalDays * 24 * 60 * 60 * 1000;
 
-    // 2. Check in-memory lock
+    // Check in-memory lock
     if (this.isRotating) {
-      logger.debug("[KeyRotation] Rotation already in progress, skipping");
-      return;
+      logger.debug("[KeyRotation] Rotation already in progress, will check again soon");
+      return {
+        nextRunAt: new Date(Date.now() + 60000), // Check again in 1 min
+        rotationPerformed: false,
+        resumedIncomplete: false,
+      };
     }
 
-    // 3. Load current keys
+    // Load keys
     const keys = await this.keyStorage.loadKeys();
     if (!keys) {
-      logger.error("[KeyRotation] No keys file found");
-      return;
+      throw new Error("No encryption keys found");
     }
 
-    // 4. Check if previous rotation incomplete (2 keys exist)
+    // Check for incomplete rotation
     if (this.keyStorage.isRotationInProgress(keys)) {
       logger.warn(
         "[KeyRotation] Detected incomplete rotation from previous run. " +
           "Both current and phased_out keys exist. Resuming rotation..."
       );
-      // Reset failure counter - this is a fresh attempt after restart
-      this.consecutiveFailures = 0;
-      await this.performRotation(keys);
-      return;
+      this.stopRequested = false;
+      await this.performRotation(keys, token);
+
+      return {
+        nextRunAt: new Date(Date.now() + rotationIntervalMs),
+        rotationPerformed: true,
+        resumedIncomplete: true,
+      };
     }
 
-    // 5. Check if time for new rotation
+    // Check if time for new rotation
     const lastRotation = new Date(keys.last_rotation_finished_at);
-    const nextRotation = new Date(
-      lastRotation.getTime() +
-        this.config.rotationIntervalDays * 24 * 60 * 60 * 1000
-    );
+    const nextRotationDue = new Date(lastRotation.getTime() + rotationIntervalMs);
 
-    if (new Date() < nextRotation) {
-      logger.debug(
-        `[KeyRotation] Not time for rotation yet (next: ${nextRotation.toISOString()})`
-      );
-      return;
+    if (new Date() < nextRotationDue) {
+      logger.debug(`[KeyRotation] Not time yet (next: ${nextRotationDue.toISOString()})`);
+      return {
+        nextRunAt: nextRotationDue,
+        rotationPerformed: false,
+        resumedIncomplete: false,
+      };
     }
 
-    // 6. Final check before starting rotation (in case stop was called during checks)
-    if (this.stopRequested) {
-      return;
-    }
-
-    // 7. Start new rotation
+    // Start new rotation
     logger.info("[KeyRotation] Starting new key rotation");
-    await this.startNewRotation(keys);
+    this.stopRequested = false;
+    await this.startNewRotation(keys, token);
+
+    return {
+      nextRunAt: new Date(Date.now() + rotationIntervalMs),
+      rotationPerformed: true,
+      resumedIncomplete: false,
+    };
   }
 
   /**
    * Start a new key rotation.
    * Generates new keys, swaps them, and begins re-encryption.
    */
-  private async startNewRotation(keys: EncryptionKeyFile): Promise<void> {
+  private async startNewRotation(keys: EncryptionKeyFile, token?: CancellationToken): Promise<void> {
     // Generate new encryption key and auth secret
     const [newKey, newAuthSecret] = await Promise.all([
       this.keyStorage.generateKey(),
@@ -385,13 +263,13 @@ export class KeyRotationService {
       `[KeyRotation] Keys swapped (${keys.current_version} → ${newVersion}), starting re-encryption`
     );
 
-    await this.performRotation(updatedKeys);
+    await this.performRotation(updatedKeys, token);
   }
 
   /**
    * Perform the key rotation (re-encrypt all data).
    */
-  private async performRotation(keys: EncryptionKeyFile): Promise<void> {
+  private async performRotation(keys: EncryptionKeyFile, token?: CancellationToken): Promise<void> {
     this.isRotating = true;
 
     try {
@@ -402,11 +280,14 @@ export class KeyRotationService {
 
       // Process each table
       for (const table of ENCRYPTED_TABLES) {
+        if (token?.isCancelled) {
+          this.stopRequested = true;
+        }
         if (this.stopRequested) {
           logger.info("[KeyRotation] Stop requested, pausing rotation");
           return;
         }
-        await this.reencryptTable(table, keys.phased_out_version);
+        await this.reencryptTable(table, keys.phased_out_version, token);
       }
 
       // Complete rotation - clear phased out key
@@ -450,12 +331,21 @@ export class KeyRotationService {
    */
   private async reencryptTable(
     table: EncryptedTable,
-    phasedOutVersion: string
+    phasedOutVersion: string,
+    token?: CancellationToken
   ): Promise<void> {
     logger.info(`[KeyRotation] Starting re-encryption of ${table}`);
     let totalProcessed = 0;
 
-    while (!this.stopRequested) {
+    while (true) {
+      // Check for cancellation
+      if (token?.isCancelled) {
+        this.stopRequested = true;
+      }
+      if (this.stopRequested) {
+        return;
+      }
+
       // a. Lock encryption service
       {
         using _lock = await this.encryptionService.acquireRotationLock();
@@ -472,7 +362,7 @@ export class KeyRotationService {
         }
 
         // d. Re-encrypt batch
-        const processed = await this.reencryptBatch(table, records);
+        const processed = await this.reencryptBatch(table, records, token);
         totalProcessed += processed;
 
         logger.debug(
@@ -527,11 +417,16 @@ export class KeyRotationService {
    */
   private async reencryptBatch(
     table: EncryptedTable,
-    records: EncryptedRecord[]
+    records: EncryptedRecord[],
+    token?: CancellationToken
   ): Promise<number> {
     let successCount = 0;
 
     for (const record of records) {
+      // Check for cancellation
+      if (token?.isCancelled) {
+        this.stopRequested = true;
+      }
       if (this.stopRequested) {
         break;
       }
