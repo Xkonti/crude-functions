@@ -1,4 +1,5 @@
 import { Mutex } from "@core/asyncutil/mutex";
+import type { BindValue } from "@db/sqlite";
 import type { DatabaseService } from "../database/database_service.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { Job } from "../jobs/types.ts";
@@ -8,6 +9,8 @@ import {
   type Schedule,
   type NewSchedule,
   type CancelScheduleOptions,
+  type ScheduleUpdate,
+  type UpdateScheduleOptions,
   type SchedulingServiceOptions,
   type SchedulingServiceConfig,
   type ScheduleRow,
@@ -522,6 +525,110 @@ export class SchedulingService {
     logger.info(`[Scheduling] Deleted schedule '${name}'`);
   }
 
+  /**
+   * Update an existing schedule.
+   *
+   * @param name - Schedule name
+   * @param update - Fields to update
+   * @param options - Update options
+   * @returns The updated schedule
+   * @throws {ScheduleNotFoundError} If schedule doesn't exist
+   * @throws {ScheduleStateError} If schedule is completed or in error state
+   * @throws {InvalidScheduleConfigError} If update is invalid for schedule type
+   */
+  async updateSchedule(
+    name: string,
+    update: ScheduleUpdate,
+    options?: UpdateScheduleOptions,
+  ): Promise<Schedule> {
+    using _lock = await this.writeMutex.acquire();
+
+    // Fetch and validate schedule exists
+    const schedule = await this.getScheduleByNameInternal(name);
+    if (!schedule) {
+      throw new ScheduleNotFoundError(name);
+    }
+
+    // Validate state (reject completed/error)
+    if (schedule.status === "completed" || schedule.status === "error") {
+      throw new ScheduleStateError(name, schedule.status, "update");
+    }
+
+    // Validate update values for schedule type
+    this.validateScheduleUpdate(schedule, update);
+
+    // Build update fields
+    const fields: string[] = [];
+    const values: BindValue[] = [];
+
+    if (update.description !== undefined) {
+      fields.push("description = ?");
+      values.push(update.description);
+    }
+
+    if (update.intervalMs !== undefined) {
+      fields.push("intervalMs = ?");
+      values.push(update.intervalMs);
+    }
+
+    if (update.jobPayload !== undefined) {
+      fields.push("jobPayload = ?");
+      values.push(JSON.stringify(update.jobPayload));
+    }
+
+    if (update.jobPriority !== undefined) {
+      fields.push("jobPriority = ?");
+      values.push(update.jobPriority);
+    }
+
+    if (update.jobMaxRetries !== undefined) {
+      fields.push("jobMaxRetries = ?");
+      values.push(update.jobMaxRetries);
+    }
+
+    if (update.maxConsecutiveFailures !== undefined) {
+      fields.push("maxConsecutiveFailures = ?");
+      values.push(update.maxConsecutiveFailures);
+    }
+
+    // Calculate nextRunAt if interval changed or explicitly provided
+    const newNextRunAt = this.calculateUpdatedNextRunAt(
+      schedule,
+      update,
+      options,
+    );
+    if (newNextRunAt !== undefined) {
+      fields.push("nextRunAt = ?");
+      values.push(newNextRunAt?.toISOString() ?? null);
+    }
+
+    // Add updatedAt
+    fields.push("updatedAt = CURRENT_TIMESTAMP");
+
+    // Execute update if there are fields to update
+    if (fields.length > 1) {
+      // > 1 because updatedAt is always added
+      values.push(schedule.id);
+      await this.db.execute(
+        `UPDATE schedules SET ${fields.join(", ")} WHERE id = ?`,
+        values,
+      );
+    }
+
+    const updated = await this.getScheduleInternal(schedule.id);
+    if (!updated) {
+      throw new Error("Failed to retrieve updated schedule");
+    }
+
+    // Reschedule if service is running
+    if (this.isRunning()) {
+      this.requestReschedule();
+    }
+
+    logger.info(`[Scheduling] Updated schedule '${name}'`);
+    return updated;
+  }
+
   // ============== Internal Implementation ==============
 
   /**
@@ -594,6 +701,71 @@ export class SchedulingService {
         "intervalMs must be positive for interval-based schedules",
       );
     }
+  }
+
+  /**
+   * Validate schedule update values for the schedule type.
+   */
+  private validateScheduleUpdate(
+    schedule: Schedule,
+    update: ScheduleUpdate,
+  ): void {
+    // intervalMs only valid for interval types
+    if (update.intervalMs !== undefined) {
+      if (
+        schedule.type !== "sequential_interval" &&
+        schedule.type !== "concurrent_interval"
+      ) {
+        throw new InvalidScheduleConfigError(
+          `Cannot update intervalMs on ${schedule.type} schedule`,
+        );
+      }
+      if (update.intervalMs <= 0) {
+        throw new InvalidScheduleConfigError(
+          "intervalMs must be positive",
+        );
+      }
+    }
+  }
+
+  /**
+   * Calculate the new nextRunAt value based on update and options.
+   * Returns undefined if nextRunAt should not be changed.
+   */
+  private calculateUpdatedNextRunAt(
+    schedule: Schedule,
+    update: ScheduleUpdate,
+    options?: UpdateScheduleOptions,
+  ): Date | null | undefined {
+    const behavior = options?.nextRunAtBehavior ?? "reset";
+
+    // If explicit nextRunAt provided in update
+    if (update.nextRunAt !== undefined) {
+      if (behavior === "explicit") {
+        return update.nextRunAt;
+      }
+      // Even without explicit behavior, if nextRunAt is in update, use it
+      return update.nextRunAt;
+    }
+
+    // If intervalMs changed
+    if (update.intervalMs !== undefined) {
+      // If job is currently running (activeJobId set), don't change nextRunAt
+      // The completion handler will use the new interval
+      if (schedule.activeJobId !== null) {
+        return undefined;
+      }
+
+      if (behavior === "preserve") {
+        return undefined;
+      }
+
+      // Default "reset": calculate from now + new interval
+      return new Date(Date.now() + update.intervalMs);
+    }
+
+    // No interval change and no explicit nextRunAt - don't update
+    return undefined;
   }
 
   /**

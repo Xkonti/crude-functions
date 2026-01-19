@@ -148,6 +148,33 @@ export interface CancelScheduleOptions {
 }
 
 /**
+ * Input for updating an existing schedule.
+ * All fields are optional - only provided fields are updated.
+ */
+export interface ScheduleUpdate {
+  description?: string | null;
+  intervalMs?: number;
+  jobPayload?: unknown;
+  nextRunAt?: Date | null;
+  jobPriority?: number;
+  jobMaxRetries?: number;
+  maxConsecutiveFailures?: number;
+}
+
+/**
+ * Options for updating a schedule.
+ */
+export interface UpdateScheduleOptions {
+  /**
+   * How to handle nextRunAt when intervalMs changes.
+   * - 'reset': Set to now + newIntervalMs (default)
+   * - 'preserve': Keep existing nextRunAt
+   * - 'explicit': Use the nextRunAt provided in update
+   */
+  nextRunAtBehavior?: "reset" | "preserve" | "explicit";
+}
+
+/**
  * Result from a dynamic schedule handler indicating next execution.
  * Handlers return this via job result.
  */

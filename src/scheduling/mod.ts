@@ -59,6 +59,8 @@ export type {
   ScheduleType,
   ScheduleStatus,
   CancelScheduleOptions,
+  ScheduleUpdate,
+  UpdateScheduleOptions,
   DynamicScheduleResult,
   SchedulingServiceConfig,
   SchedulingServiceOptions,

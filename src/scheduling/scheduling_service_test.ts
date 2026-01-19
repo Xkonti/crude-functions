@@ -865,3 +865,416 @@ Deno.test("SchedulingService.start is idempotent", async () => {
     await ctx.cleanup();
   }
 });
+
+// =============================================================================
+// Update Schedule
+// =============================================================================
+
+Deno.test("SchedulingService.updateSchedule updates intervalMs and recalculates nextRunAt", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "update-interval",
+      type: "sequential_interval",
+      intervalMs: 60000, // 1 minute
+      jobType: "test-job",
+    });
+
+    const beforeUpdate = await ctx.schedulingService.getSchedule("update-interval");
+    const originalNextRunAt = beforeUpdate!.nextRunAt;
+
+    // Update to 5 minute interval
+    const updated = await ctx.schedulingService.updateSchedule("update-interval", {
+      intervalMs: 300000,
+    });
+
+    expect(updated.intervalMs).toBe(300000);
+    expect(updated.nextRunAt).not.toBeNull();
+    // New nextRunAt should be approximately now + 300000ms
+    const expectedTime = Date.now() + 300000;
+    expect(updated.nextRunAt!.getTime()).toBeGreaterThan(expectedTime - 5000);
+    expect(updated.nextRunAt!.getTime()).toBeLessThan(expectedTime + 5000);
+    // Should be different from original
+    expect(updated.nextRunAt!.getTime()).not.toBe(originalNextRunAt!.getTime());
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule preserves nextRunAt with preserve option", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "preserve-next",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+    });
+
+    const beforeUpdate = await ctx.schedulingService.getSchedule("preserve-next");
+    const originalNextRunAt = beforeUpdate!.nextRunAt!.getTime();
+
+    const updated = await ctx.schedulingService.updateSchedule(
+      "preserve-next",
+      { intervalMs: 300000 },
+      { nextRunAtBehavior: "preserve" },
+    );
+
+    expect(updated.intervalMs).toBe(300000);
+    expect(updated.nextRunAt!.getTime()).toBe(originalNextRunAt);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule allows explicit nextRunAt override", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "explicit-next",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+    });
+
+    const explicitTime = new Date(Date.now() + 7200000); // 2 hours
+
+    const updated = await ctx.schedulingService.updateSchedule(
+      "explicit-next",
+      { nextRunAt: explicitTime },
+      { nextRunAtBehavior: "explicit" },
+    );
+
+    expect(updated.nextRunAt!.getTime()).toBe(explicitTime.getTime());
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule updates jobPayload", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "update-payload",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+      jobPayload: { original: true },
+    });
+
+    const updated = await ctx.schedulingService.updateSchedule("update-payload", {
+      jobPayload: { updated: true, newField: "value" },
+    });
+
+    expect(updated.jobPayload).toEqual({ updated: true, newField: "value" });
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule updates description", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "update-desc",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+      description: "Original description",
+    });
+
+    const updated = await ctx.schedulingService.updateSchedule("update-desc", {
+      description: "Updated description",
+    });
+
+    expect(updated.description).toBe("Updated description");
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule can set description to null", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "null-desc",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+      description: "Has description",
+    });
+
+    const updated = await ctx.schedulingService.updateSchedule("null-desc", {
+      description: null,
+    });
+
+    expect(updated.description).toBeNull();
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule throws for non-existent schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await expect(
+      ctx.schedulingService.updateSchedule("non-existent", { intervalMs: 1000 }),
+    ).rejects.toThrow(ScheduleNotFoundError);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule throws for completed schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "completed-update",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+    });
+
+    await ctx.schedulingService.cancelSchedule("completed-update");
+
+    await expect(
+      ctx.schedulingService.updateSchedule("completed-update", { intervalMs: 1000 }),
+    ).rejects.toThrow(ScheduleStateError);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule throws for intervalMs on one_off schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "oneoff-update",
+      type: "one_off",
+      nextRunAt: new Date(Date.now() + 3600000),
+      jobType: "test-job",
+    });
+
+    await expect(
+      ctx.schedulingService.updateSchedule("oneoff-update", { intervalMs: 60000 }),
+    ).rejects.toThrow(InvalidScheduleConfigError);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule throws for intervalMs on dynamic schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "dynamic-update",
+      type: "dynamic",
+      nextRunAt: new Date(Date.now() + 3600000),
+      jobType: "test-job",
+    });
+
+    await expect(
+      ctx.schedulingService.updateSchedule("dynamic-update", { intervalMs: 60000 }),
+    ).rejects.toThrow(InvalidScheduleConfigError);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule throws for invalid intervalMs", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "invalid-interval",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+    });
+
+    await expect(
+      ctx.schedulingService.updateSchedule("invalid-interval", { intervalMs: 0 }),
+    ).rejects.toThrow(InvalidScheduleConfigError);
+
+    await expect(
+      ctx.schedulingService.updateSchedule("invalid-interval", { intervalMs: -1000 }),
+    ).rejects.toThrow(InvalidScheduleConfigError);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule works on paused schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "paused-update",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+    });
+
+    await ctx.schedulingService.pauseSchedule("paused-update");
+
+    const updated = await ctx.schedulingService.updateSchedule("paused-update", {
+      intervalMs: 120000,
+      description: "Updated while paused",
+    });
+
+    expect(updated.status).toBe("paused");
+    expect(updated.intervalMs).toBe(120000);
+    expect(updated.description).toBe("Updated while paused");
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule updates multiple fields atomically", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "multi-update",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+      jobPriority: 0,
+      jobMaxRetries: 1,
+      maxConsecutiveFailures: 5,
+    });
+
+    const updated = await ctx.schedulingService.updateSchedule("multi-update", {
+      intervalMs: 120000,
+      description: "New description",
+      jobPayload: { key: "value" },
+      jobPriority: 10,
+      jobMaxRetries: 5,
+      maxConsecutiveFailures: 10,
+    });
+
+    expect(updated.intervalMs).toBe(120000);
+    expect(updated.description).toBe("New description");
+    expect(updated.jobPayload).toEqual({ key: "value" });
+    expect(updated.jobPriority).toBe(10);
+    expect(updated.jobMaxRetries).toBe(5);
+    expect(updated.maxConsecutiveFailures).toBe(10);
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule triggers reschedule when running", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    await ctx.schedulingService.registerSchedule({
+      name: "reschedule-test",
+      type: "sequential_interval",
+      intervalMs: 3600000, // 1 hour
+      jobType: "test-job",
+    });
+
+    ctx.schedulingService.start();
+    await new Promise((r) => setTimeout(r, 100));
+
+    const originalNextTime = ctx.schedulingService.getNextScheduledTime();
+
+    // Update to much shorter interval
+    await ctx.schedulingService.updateSchedule("reschedule-test", {
+      intervalMs: 1000,
+    });
+
+    // Wait for reschedule debounce
+    await new Promise((r) => setTimeout(r, 200));
+
+    const newNextTime = ctx.schedulingService.getNextScheduledTime();
+
+    // New next time should be much sooner
+    expect(newNextTime).not.toBeNull();
+    expect(newNextTime!.getTime()).toBeLessThan(originalNextTime!.getTime());
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule does not change nextRunAt when job is running", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    // Create schedule and manually set activeJobId to simulate running job
+    await ctx.schedulingService.registerSchedule({
+      name: "running-job-update",
+      type: "sequential_interval",
+      intervalMs: 60000,
+      jobType: "test-job",
+    });
+
+    // Trigger the schedule to set activeJobId
+    await ctx.schedulingService.triggerNow("running-job-update");
+
+    const beforeUpdate = await ctx.schedulingService.getSchedule("running-job-update");
+    expect(beforeUpdate!.activeJobId).not.toBeNull();
+
+    // nextRunAt is null when waiting for job completion
+    const updated = await ctx.schedulingService.updateSchedule("running-job-update", {
+      intervalMs: 120000,
+    });
+
+    // intervalMs should be updated but nextRunAt unchanged (still null waiting for completion)
+    expect(updated.intervalMs).toBe(120000);
+    expect(updated.nextRunAt).toBeNull();
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("SchedulingService.updateSchedule can update nextRunAt on one_off schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withScheduling().build();
+
+  try {
+    const originalTime = new Date(Date.now() + 3600000);
+    const newTime = new Date(Date.now() + 7200000);
+
+    await ctx.schedulingService.registerSchedule({
+      name: "oneoff-time-update",
+      type: "one_off",
+      nextRunAt: originalTime,
+      jobType: "test-job",
+    });
+
+    const updated = await ctx.schedulingService.updateSchedule("oneoff-time-update", {
+      nextRunAt: newTime,
+    });
+
+    expect(updated.nextRunAt!.getTime()).toBe(newTime.getTime());
+  } finally {
+    await ctx.schedulingService.stop();
+    await ctx.cleanup();
+  }
+});
