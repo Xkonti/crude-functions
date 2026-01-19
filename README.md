@@ -10,6 +10,25 @@ Crude Functions is a minimal, self-hosted serverless function platform that runs
 
 **Target use case:** Internal network services with low-to-moderate traffic. Think internal APIs, webhooks, automation scripts, or small tools for your team.
 
+🚨 ENTIRELY VIBE CODED INCLUDING THIS DOCUMENT 🚨
+
+## Who Should Use This?
+
+You should use Crude Functions if you:
+
+- Want a simple way to deploy and manage serverless-style functions internally
+- Trust the code you're running (no sandboxing - this is for internal use)
+- Don't need massive scale or complex orchestration
+- Want to avoid cloud vendor lock-in for internal tooling
+- Value simplicity over enterprise features
+
+You should NOT use this if you:
+
+- Need to run untrusted code (no sandbox)
+- Expect high traffic
+- Want a production-ready public API platform
+- Need multi-tenancy or advanced isolation
+
 ## Features
 
 - **Minimal footprint:** Single Deno process, ~25MB RAM idle
@@ -58,8 +77,6 @@ The server is now running at `http://localhost:8000`.
 2. Create your admin account
 3. Start deploying functions
 
-See the [Getting Started Guide](https://crude-functions.xkonti.tech/guides/getting-started/) for complete setup instructions.
-
 ## Your First Function
 
 Create `code/hello.ts`:
@@ -81,8 +98,6 @@ curl http://localhost:8000/run/hello
 ```
 
 Changes to your function files are hot-reloaded automatically.
-
-See the [Your First Function](https://crude-functions.xkonti.tech/guides/your-first-function/) tutorial for a complete walkthrough.
 
 ## Image Variants
 
@@ -108,14 +123,6 @@ Semver tags are also available: `:0.4.3-hardened`, `:0.4-hardened`, `:0-hardened
 ## Documentation
 
 Full documentation is available at **[crude-functions.xkonti.tech](https://crude-functions.xkonti.tech)**
-
-- [Deployment](https://crude-functions.xkonti.tech/guides/deployment/)
-- [API Keys & Authentication](https://crude-functions.xkonti.tech/guides/api-keys/)
-- [Secrets Management](https://crude-functions.xkonti.tech/guides/secrets/)
-- [Logs](https://crude-functions.xkonti.tech/guides/logs/)
-- [Metrics](https://crude-functions.xkonti.tech/guides/metrics/)
-- [API Reference](https://crude-functions.xkonti.tech/reference/api/)
-- [Handler Context](https://crude-functions.xkonti.tech/reference/handler-context/)
 
 ## Development
 
