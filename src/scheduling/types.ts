@@ -27,6 +27,22 @@ export type ScheduleType =
 export type ScheduleStatus = "active" | "paused" | "completed" | "error";
 
 /**
+ * Type guard for ScheduleType values.
+ * Used for runtime validation of database values.
+ */
+export function isScheduleType(type: string): type is ScheduleType {
+  return ["one_off", "dynamic", "sequential_interval", "concurrent_interval"].includes(type);
+}
+
+/**
+ * Type guard for ScheduleStatus values.
+ * Used for runtime validation of database values.
+ */
+export function isScheduleStatus(status: string): status is ScheduleStatus {
+  return ["active", "paused", "completed", "error"].includes(status);
+}
+
+/**
  * A schedule definition.
  */
 export interface Schedule {

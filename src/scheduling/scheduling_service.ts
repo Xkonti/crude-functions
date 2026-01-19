@@ -2,15 +2,17 @@ import { Mutex } from "@core/asyncutil/mutex";
 import type { DatabaseService } from "../database/database_service.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { Job } from "../jobs/types.ts";
-import type {
-  Schedule,
-  NewSchedule,
-  CancelScheduleOptions,
-  SchedulingServiceOptions,
-  SchedulingServiceConfig,
-  ScheduleRow,
-  DynamicScheduleResult,
-  ScheduleStatus,
+import {
+  isScheduleType,
+  isScheduleStatus,
+  type Schedule,
+  type NewSchedule,
+  type CancelScheduleOptions,
+  type SchedulingServiceOptions,
+  type SchedulingServiceConfig,
+  type ScheduleRow,
+  type DynamicScheduleResult,
+  type ScheduleStatus,
 } from "./types.ts";
 import {
   ScheduleNotFoundError,
@@ -68,6 +70,7 @@ export class SchedulingService {
   // Lifecycle state
   private timerId: number | null = null;
   private completionCheckTimerId: number | null = null;
+  private rescheduleDebounceTimer: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
   private isStarting = false;
@@ -99,7 +102,7 @@ export class SchedulingService {
    * 3. Calculates next trigger time and sets timeout
    * 4. Starts completion check interval
    */
-  start(): void {
+  async start(): Promise<void> {
     if (this.isStarting || this.timerId !== null || this.completionCheckTimerId !== null) {
       logger.warn("[Scheduling] Already running");
       return;
@@ -108,30 +111,30 @@ export class SchedulingService {
     this.isStarting = true;
     logger.info("[Scheduling] Starting service");
 
-    // Startup sequence
-    this.clearTransientSchedules()
-      .then(() => this.resetStaleActiveJobs())
-      .then(() => this.scheduleNextTrigger())
-      .then(() => {
-        if (this.stopRequested) {
-          this.isStarting = false;
-          return;
-        }
+    try {
+      await this.clearTransientSchedules();
+      if (this.stopRequested) return;
 
-        // Start completion check interval
-        this.completionCheckTimerId = setInterval(() => {
-          this.checkJobCompletions().catch((error) => {
-            logger.error("[Scheduling] Completion check failed:", error);
-          });
-        }, this.config.completionCheckIntervalMs);
+      await this.resetStaleActiveJobs();
+      if (this.stopRequested) return;
 
-        this.isStarting = false;
-        logger.info("[Scheduling] Service started");
-      })
-      .catch((error) => {
-        this.isStarting = false;
-        logger.error("[Scheduling] Startup failed:", error);
-      });
+      await this.scheduleNextTrigger();
+      if (this.stopRequested) return;
+
+      // Start completion check interval
+      this.completionCheckTimerId = setInterval(() => {
+        this.checkJobCompletions().catch((error) => {
+          logger.error("[Scheduling] Completion check failed:", error);
+        });
+      }, this.config.completionCheckIntervalMs);
+
+      logger.info("[Scheduling] Service started");
+    } catch (error) {
+      logger.error("[Scheduling] Startup failed:", error);
+      throw error;
+    } finally {
+      this.isStarting = false;
+    }
   }
 
   /**
@@ -158,6 +161,11 @@ export class SchedulingService {
     if (this.completionCheckTimerId !== null) {
       clearInterval(this.completionCheckTimerId);
       this.completionCheckTimerId = null;
+    }
+
+    if (this.rescheduleDebounceTimer !== null) {
+      clearTimeout(this.rescheduleDebounceTimer);
+      this.rescheduleDebounceTimer = null;
     }
 
     // Wait for any in-progress trigger to complete
@@ -238,7 +246,7 @@ export class SchedulingService {
         schedule.name,
         schedule.description ?? null,
         schedule.type,
-        schedule.isPersistent !== false ? 1 : 0,
+        (schedule.isPersistent ?? true) ? 1 : 0,
         nextRunAt?.toISOString() ?? null,
         schedule.intervalMs ?? null,
         schedule.jobType,
@@ -261,12 +269,7 @@ export class SchedulingService {
 
     // Reschedule if service is running
     if (this.isRunning()) {
-      this.scheduleNextTrigger().catch((error) => {
-        logger.error(
-          "[Scheduling] Failed to reschedule after registration:",
-          error,
-        );
-      });
+      this.requestReschedule();
     }
 
     logger.info(
@@ -325,7 +328,7 @@ export class SchedulingService {
 
     // Reschedule
     if (this.isRunning()) {
-      this.scheduleNextTrigger().catch(() => {});
+      this.requestReschedule();
     }
 
     logger.info(`[Scheduling] Cancelled schedule '${name}'`);
@@ -367,7 +370,7 @@ export class SchedulingService {
 
     // Reschedule
     if (this.isRunning()) {
-      this.scheduleNextTrigger().catch(() => {});
+      this.requestReschedule();
     }
 
     logger.info(`[Scheduling] Paused schedule '${name}'`);
@@ -394,15 +397,8 @@ export class SchedulingService {
       throw new ScheduleStateError(name, schedule.status, "resume");
     }
 
-    // Calculate nextRunAt based on schedule type
-    let nextRunAt: Date;
-    if (schedule.type === "one_off" || schedule.type === "dynamic") {
-      // For one-off and dynamic, use stored nextRunAt or now
-      nextRunAt = schedule.nextRunAt ?? new Date();
-    } else {
-      // For interval types, schedule from now
-      nextRunAt = new Date(Date.now() + (schedule.intervalMs ?? 0));
-    }
+    // Calculate nextRunAt - preserve stored time for one-off/dynamic schedules
+    const nextRunAt = this.calculateNextRunAtFromNow(schedule, true);
 
     await this.db.execute(
       `UPDATE schedules
@@ -420,7 +416,7 @@ export class SchedulingService {
 
     // Reschedule
     if (this.isRunning()) {
-      this.scheduleNextTrigger().catch(() => {});
+      this.requestReschedule();
     }
 
     logger.info(`[Scheduling] Resumed schedule '${name}'`);
@@ -434,7 +430,7 @@ export class SchedulingService {
    * @returns The schedule, or null if not found
    */
   async getSchedule(name: string): Promise<Schedule | null> {
-    return this.getScheduleByNameInternal(name);
+    return await this.getScheduleByNameInternal(name);
   }
 
   /**
@@ -468,15 +464,19 @@ export class SchedulingService {
    * @throws {ScheduleStateError} If schedule is completed or in error state
    */
   async triggerNow(name: string): Promise<Job> {
-    using _lock = await this.writeMutex.acquire();
-
-    const schedule = await this.getScheduleByNameInternal(name);
-    if (!schedule) {
-      throw new ScheduleNotFoundError(name);
-    }
-
-    if (schedule.status === "completed" || schedule.status === "error") {
-      throw new ScheduleStateError(name, schedule.status, "trigger");
+    // Narrow mutex scope to only cover database read - triggerScheduleInternal
+    // uses jobQueueService which has its own mutex
+    let schedule: Schedule;
+    {
+      using _lock = await this.writeMutex.acquire();
+      const temp = await this.getScheduleByNameInternal(name);
+      if (!temp) {
+        throw new ScheduleNotFoundError(name);
+      }
+      if (temp.status === "completed" || temp.status === "error") {
+        throw new ScheduleStateError(name, temp.status, "trigger");
+      }
+      schedule = temp;
     }
 
     logger.info(`[Scheduling] Manual trigger for schedule '${name}'`);
@@ -516,13 +516,50 @@ export class SchedulingService {
 
     // Reschedule
     if (this.isRunning()) {
-      this.scheduleNextTrigger().catch(() => {});
+      this.requestReschedule();
     }
 
     logger.info(`[Scheduling] Deleted schedule '${name}'`);
   }
 
   // ============== Internal Implementation ==============
+
+  /**
+   * Request a rescheduling of the next trigger with debouncing.
+   * Prevents excessive timer recalculation when multiple schedule changes occur rapidly.
+   */
+  private requestReschedule(): void {
+    if (this.rescheduleDebounceTimer !== null) {
+      clearTimeout(this.rescheduleDebounceTimer);
+    }
+
+    this.rescheduleDebounceTimer = setTimeout(() => {
+      this.rescheduleDebounceTimer = null;
+      this.scheduleNextTrigger().catch((error) => {
+        logger.error("[Scheduling] Reschedule failed:", error);
+      });
+    }, this.config.minRecalculationIntervalMs);
+  }
+
+  /**
+   * Calculate the next run time for a schedule based on its type.
+   *
+   * @param schedule - The schedule to calculate for
+   * @param preserveStoredTime - If true, use stored nextRunAt for one_off/dynamic; if false, use now
+   */
+  private calculateNextRunAtFromNow(
+    schedule: Schedule,
+    preserveStoredTime: boolean,
+  ): Date {
+    if (schedule.type === "one_off" || schedule.type === "dynamic") {
+      if (preserveStoredTime && schedule.nextRunAt) {
+        return schedule.nextRunAt;
+      }
+      return new Date();
+    }
+    // For interval types (sequential_interval, concurrent_interval)
+    return new Date(Date.now() + (schedule.intervalMs ?? 0));
+  }
 
   /**
    * Validate new schedule configuration.
@@ -819,8 +856,12 @@ export class SchedulingService {
 
   /**
    * Check for job completions and handle dynamic/sequential schedules.
+   * Includes backpressure to prevent runaway processing time.
    */
   private async checkJobCompletions(): Promise<void> {
+    const startTime = Date.now();
+    const maxProcessingTime = this.config.completionCheckIntervalMs * 0.8;
+
     // Find schedules waiting for job completion
     const waitingSchedules = await this.db.queryAll<ScheduleRow>(
       `SELECT s.* FROM schedules s
@@ -829,6 +870,12 @@ export class SchedulingService {
     );
 
     for (const row of waitingSchedules) {
+      // Backpressure: exit early if processing takes too long
+      if (Date.now() - startTime > maxProcessingTime) {
+        logger.warn("[Scheduling] Completion check timeout, will resume next interval");
+        break;
+      }
+
       const schedule = this.rowToSchedule(row);
       const job = await this.jobQueueService.getJob(schedule.activeJobId!);
 
@@ -966,15 +1013,8 @@ export class SchedulingService {
       `[Scheduling] Job for schedule '${schedule.name}' was deleted, resetting`,
     );
 
-    let nextRunAt: Date;
-    if (
-      schedule.type === "sequential_interval" ||
-      schedule.type === "concurrent_interval"
-    ) {
-      nextRunAt = new Date(Date.now() + (schedule.intervalMs ?? 0));
-    } else {
-      nextRunAt = new Date();
-    }
+    // Calculate nextRunAt - don't preserve stored time since job was deleted
+    const nextRunAt = this.calculateNextRunAtFromNow(schedule, false);
 
     await this.db.execute(
       `UPDATE schedules
@@ -1009,11 +1049,24 @@ export class SchedulingService {
   }
 
   private rowToSchedule(row: ScheduleRow): Schedule {
+    // Validate type and status from database
+    if (!isScheduleType(row.type)) {
+      throw new Error(`Invalid schedule type in database: ${row.type}`);
+    }
+    if (!isScheduleStatus(row.status)) {
+      throw new Error(`Invalid schedule status in database: ${row.status}`);
+    }
+
+    // Parse payload with error logging
     let payload: unknown = null;
     if (row.jobPayload) {
       try {
         payload = JSON.parse(row.jobPayload);
-      } catch {
+      } catch (e) {
+        logger.warn(
+          `[Scheduling] Failed to parse jobPayload for schedule ${row.id}, using raw value:`,
+          e,
+        );
         payload = row.jobPayload;
       }
     }
@@ -1022,8 +1075,8 @@ export class SchedulingService {
       id: row.id,
       name: row.name,
       description: row.description,
-      type: row.type as Schedule["type"],
-      status: row.status as Schedule["status"],
+      type: row.type,
+      status: row.status,
       isPersistent: row.isPersistent === 1,
       nextRunAt: row.nextRunAt ? new Date(row.nextRunAt) : null,
       intervalMs: row.intervalMs,

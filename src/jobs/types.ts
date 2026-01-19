@@ -29,6 +29,10 @@ export type ExecutionMode = "sequential" | "concurrent";
  *
  * Allows handlers to detect when a job has been requested for cancellation
  * and respond gracefully (e.g., save progress, clean up resources).
+ *
+ * Note: Cancellation is detected via polling (default 1 second interval).
+ * Handlers may experience 0-1000ms latency between cancellation request
+ * and token update.
  */
 export interface CancellationToken {
   /** Whether cancellation has been requested */
