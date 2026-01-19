@@ -282,3 +282,87 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_jobQueue_reference_active
 CREATE INDEX IF NOT EXISTS idx_jobQueue_completed
   ON jobQueue(status, completedAt)
   WHERE status IN ('completed', 'failed', 'cancelled');
+
+--------------------------------------------------------------------------------
+-- Scheduling
+--------------------------------------------------------------------------------
+
+-- Schedules table - stores scheduled job definitions
+-- Schedules create jobs in jobQueue when their trigger time arrives.
+-- Features:
+--   - Multiple schedule types: one_off, dynamic, sequential_interval, concurrent_interval
+--   - Transient vs persistent schedules (transient cleared on startup)
+--   - Efficient timeout-based triggering via nextRunAt index
+--   - Reference tracking for completion callbacks (dynamic/sequential schedules)
+CREATE TABLE IF NOT EXISTS schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  -- Unique schedule name (used as identifier for API operations)
+  name TEXT NOT NULL UNIQUE,
+  -- Human-readable description
+  description TEXT,
+  -- Schedule type determines execution behavior:
+  --   one_off: Execute once at nextRunAt, then status -> completed
+  --   dynamic: After job completes, handler returns next time via result
+  --   sequential_interval: Wait for job completion, then schedule next after intervalMs
+  --   concurrent_interval: Enqueue at every interval regardless of running jobs
+  type TEXT NOT NULL CHECK(type IN ('one_off', 'dynamic', 'sequential_interval', 'concurrent_interval')),
+  -- Current status:
+  --   active: Schedule is enabled and will trigger
+  --   paused: Schedule is disabled, will not trigger until resumed
+  --   completed: One-off schedule that has executed (or cancelled)
+  --   error: Schedule encountered too many failures
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'completed', 'error')),
+  -- Persistence flag: 0 = transient (cleared on startup), 1 = persistent
+  isPersistent INTEGER NOT NULL DEFAULT 1,
+  -- Next scheduled execution time (ISO8601). NULL if paused or completed.
+  nextRunAt TEXT,
+  -- Interval in milliseconds for interval-based schedules. NULL for one_off/dynamic.
+  intervalMs INTEGER,
+  -- Job type to enqueue when schedule triggers
+  jobType TEXT NOT NULL,
+  -- Job payload as JSON. Passed to job when enqueued.
+  jobPayload TEXT,
+  -- Job priority (passed to jobQueue.enqueue)
+  jobPriority INTEGER NOT NULL DEFAULT 0,
+  -- Job max retries (passed to jobQueue.enqueue)
+  jobMaxRetries INTEGER NOT NULL DEFAULT 1,
+  -- Job execution mode: sequential or concurrent
+  jobExecutionMode TEXT NOT NULL DEFAULT 'sequential'
+    CHECK(jobExecutionMode IN ('sequential', 'concurrent')),
+  -- Reference type for job (for duplicate detection in sequential mode)
+  jobReferenceType TEXT,
+  -- Reference ID for job
+  jobReferenceId INTEGER,
+  -- Currently active job ID (for tracking completion in dynamic/sequential schedules)
+  -- NULL when no job is running
+  activeJobId INTEGER,
+  -- Consecutive failure count (for error detection)
+  consecutiveFailures INTEGER NOT NULL DEFAULT 0,
+  -- Max consecutive failures before schedule enters error state
+  maxConsecutiveFailures INTEGER NOT NULL DEFAULT 5,
+  -- Error message if status is 'error'
+  lastError TEXT,
+  -- Timestamps
+  createdAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TEXT DEFAULT CURRENT_TIMESTAMP,
+  -- Last time the schedule successfully triggered
+  lastTriggeredAt TEXT,
+  -- Last time a job completed for this schedule
+  lastCompletedAt TEXT
+);
+
+-- Index for finding schedules that need to trigger (ordered by time)
+-- Used by getNextScheduledTime() to efficiently find soonest schedule
+CREATE INDEX IF NOT EXISTS idx_schedules_nextRunAt
+  ON schedules(nextRunAt)
+  WHERE status = 'active' AND nextRunAt IS NOT NULL;
+
+-- Index for finding schedules waiting for job completion
+CREATE INDEX IF NOT EXISTS idx_schedules_activeJobId
+  ON schedules(activeJobId)
+  WHERE activeJobId IS NOT NULL;
+
+-- Index for cleanup of transient schedules
+CREATE INDEX IF NOT EXISTS idx_schedules_transient
+  ON schedules(isPersistent)
+  WHERE isPersistent = 0;
