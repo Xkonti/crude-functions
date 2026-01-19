@@ -27,6 +27,9 @@ export const SettingNames = {
   // Files
   FILES_MAX_SIZE_BYTES: "files.max-size-bytes",
 
+  // Jobs
+  JOB_PROCESSOR_POLLING_INTERVAL_SECONDS: "job.processor.polling-interval-seconds",
+
   // General
   SERVER_NAME: "server.name",
 } as const;
@@ -56,6 +59,7 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS]: "100",
   [SettingNames.API_ACCESS_GROUPS]: "",
   [SettingNames.FILES_MAX_SIZE_BYTES]: "52428800", // 50 MB
+  [SettingNames.JOB_PROCESSOR_POLLING_INTERVAL_SECONDS]: "5",
   [SettingNames.SERVER_NAME]: "Crude Functions",
 };
 
@@ -70,7 +74,7 @@ export interface SettingMetadata {
   options?: readonly string[];
   min?: number;
   max?: number;
-  category: "General" | "Logging" | "Metrics" | "Encryption" | "Security";
+  category: "General" | "Logging" | "Metrics" | "Encryption" | "Security" | "Jobs";
 }
 
 /**
@@ -201,6 +205,15 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     max: 524288000,
     category: "Security",
   },
+  [SettingNames.JOB_PROCESSOR_POLLING_INTERVAL_SECONDS]: {
+    name: SettingNames.JOB_PROCESSOR_POLLING_INTERVAL_SECONDS,
+    label: "Job Processor Polling Interval",
+    description: "How often the job processor checks for pending jobs (seconds)",
+    inputType: "number",
+    min: 1,
+    max: 60,
+    category: "Jobs",
+  },
   [SettingNames.SERVER_NAME]: {
     name: SettingNames.SERVER_NAME,
     label: "Server Name",
@@ -238,5 +251,8 @@ export const SettingsByCategory = {
   Security: [
     SettingNames.API_ACCESS_GROUPS,
     SettingNames.FILES_MAX_SIZE_BYTES,
+  ],
+  Jobs: [
+    SettingNames.JOB_PROCESSOR_POLLING_INTERVAL_SECONDS,
   ],
 } as const;

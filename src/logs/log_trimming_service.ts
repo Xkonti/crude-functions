@@ -8,22 +8,28 @@ export interface LogTrimmingServiceOptions {
 }
 
 /**
+ * Result of a trimming operation.
+ */
+export interface LogTrimmingResult {
+  /** Number of logs deleted due to age (time-based retention) */
+  deletedByAge: number;
+  /** Number of logs trimmed due to count limits (per-route) */
+  trimmedByCount: number;
+}
+
+/**
  * Service for trimming console logs to limit storage per route.
  *
- * Runs on a configurable interval to:
- * - For each route with logs, keep only the N newest logs
- * - Delete oldest logs when count exceeds the limit
+ * Executes log trimming based on:
+ * - Time-based retention: Delete logs older than retention period
+ * - Count-based limits: Keep only N newest logs per route
+ *
+ * This service is invoked by the job system via the scheduling service.
+ * It does not maintain its own timer - scheduling is handled externally.
  */
 export class LogTrimmingService {
   private readonly logService: ConsoleLogService;
   private readonly config: LogTrimmingConfig;
-  private timerId: number | null = null;
-  private isProcessing = false;
-  private stopRequested = false;
-  private consecutiveFailures = 0;
-
-  private static readonly MAX_CONSECUTIVE_FAILURES = 5;
-  private static readonly STOP_TIMEOUT_MS = 30000;
 
   constructor(options: LogTrimmingServiceOptions) {
     this.logService = options.logService;
@@ -31,124 +37,39 @@ export class LogTrimmingService {
   }
 
   /**
-   * Start the trimming timer.
-   * Runs immediately on start, then on interval.
+   * Perform log trimming operation.
+   * Called by the job handler when the log-trimming job is executed.
+   *
+   * @returns Results of the trimming operation
    */
-  start(): void {
-    if (this.timerId !== null) {
-      logger.warn("[LogTrimming] Already running");
-      return;
-    }
+  async performTrimming(): Promise<LogTrimmingResult> {
+    let deletedByAge = 0;
+    let totalDeleted = 0;
 
-    const retentionInfo = this.config.retentionSeconds > 0
-      ? `${this.config.retentionSeconds}s retention`
-      : "time-based retention disabled";
-
-    logger.info(
-      `[LogTrimming] Starting with interval ${this.config.trimmingIntervalSeconds}s, ` +
-      `max ${this.config.maxLogsPerRoute} logs per route, ${retentionInfo}`
-    );
-
-    // Run immediately on start, then schedule interval
-    this.runTrimming()
-      .then(() => {
-        this.consecutiveFailures = 0;
-      })
-      .catch((error) => {
-        this.consecutiveFailures++;
-        logger.error("[LogTrimming] Initial trimming failed:", error);
-      });
-
-    this.timerId = setInterval(() => {
-      this.runTrimming()
-        .then(() => {
-          this.consecutiveFailures = 0;
-        })
-        .catch((error) => {
-          this.consecutiveFailures++;
-          logger.error(
-            `[LogTrimming] Trimming failed (${this.consecutiveFailures}/${LogTrimmingService.MAX_CONSECUTIVE_FAILURES}):`,
-            error
-          );
-
-          if (this.consecutiveFailures >= LogTrimmingService.MAX_CONSECUTIVE_FAILURES) {
-            logger.error("[LogTrimming] Max consecutive failures reached, stopping service");
-            if (this.timerId !== null) {
-              clearInterval(this.timerId);
-              this.timerId = null;
-            }
-          }
-        });
-    }, this.config.trimmingIntervalSeconds * 1000);
-  }
-
-  /**
-   * Stop the trimming timer.
-   * Waits for any in-progress trimming to complete (with timeout).
-   */
-  async stop(): Promise<void> {
-    if (this.timerId !== null) {
-      clearInterval(this.timerId);
-      this.timerId = null;
-    }
-
-    this.stopRequested = true;
-
-    // Wait for any in-progress processing to complete with timeout
-    const startTime = Date.now();
-    while (this.isProcessing) {
-      if (Date.now() - startTime > LogTrimmingService.STOP_TIMEOUT_MS) {
-        logger.warn("[LogTrimming] Stop timeout exceeded, processing may still be running");
-        break;
+    // STEP 1: Time-based deletion (global)
+    if (this.config.retentionSeconds > 0) {
+      const cutoffDate = new Date(Date.now() - this.config.retentionSeconds * 1000);
+      deletedByAge = await this.logService.deleteOlderThan(cutoffDate);
+      if (deletedByAge > 0) {
+        logger.info(`[LogTrimming] Deleted ${deletedByAge} logs older than ${cutoffDate.toISOString()}`);
       }
-      await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    this.stopRequested = false;
-    logger.info("[LogTrimming] Stopped");
-  }
+    // STEP 2: Count-based trimming per route
+    const routeIds = await this.logService.getDistinctRouteIds();
 
-  /**
-   * Main trimming loop - called by timer.
-   */
-  private async runTrimming(): Promise<void> {
-    if (this.isProcessing) {
-      logger.debug("[LogTrimming] Skipping, already processing");
-      return;
+    for (const routeId of routeIds) {
+      const deleted = await this.logService.trimToLimit(
+        routeId,
+        this.config.maxLogsPerRoute
+      );
+      totalDeleted += deleted;
     }
 
-    this.isProcessing = true;
-    try {
-      // STEP 1: Time-based deletion (global)
-      if (this.config.retentionSeconds > 0) {
-        const cutoffDate = new Date(Date.now() - this.config.retentionSeconds * 1000);
-        const deletedByAge = await this.logService.deleteOlderThan(cutoffDate);
-        if (deletedByAge > 0) {
-          logger.info(`[LogTrimming] Deleted ${deletedByAge} logs older than ${cutoffDate.toISOString()}`);
-        }
-      }
-
-      if (this.stopRequested) return;
-
-      // STEP 2: Count-based trimming per route
-      const routeIds = await this.logService.getDistinctRouteIds();
-
-      let totalDeleted = 0;
-      for (const routeId of routeIds) {
-        if (this.stopRequested) return;
-
-        const deleted = await this.logService.trimToLimit(
-          routeId,
-          this.config.maxLogsPerRoute
-        );
-        totalDeleted += deleted;
-      }
-
-      if (totalDeleted > 0) {
-        logger.info(`[LogTrimming] Trimmed ${totalDeleted} logs across ${routeIds.length} routes`);
-      }
-    } finally {
-      this.isProcessing = false;
+    if (totalDeleted > 0) {
+      logger.info(`[LogTrimming] Trimmed ${totalDeleted} logs across ${routeIds.length} routes`);
     }
+
+    return { deletedByAge, trimmedByCount: totalDeleted };
   }
 }

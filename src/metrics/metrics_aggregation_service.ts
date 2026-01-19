@@ -1,6 +1,7 @@
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
 import type { MetricsStateService } from "./metrics_state_service.ts";
 import type { MetricsAggregationConfig } from "./types.ts";
+import type { CancellationToken } from "../jobs/types.ts";
 import { logger } from "../utils/logger.ts";
 
 export interface MetricsAggregationServiceOptions {
@@ -22,19 +23,16 @@ export interface MetricsAggregationServiceOptions {
  * Global metrics (routeId=NULL) combine data from all functions.
  * Watermarks track progress to ensure crash recovery with minimal reprocessing.
  * Cleanup happens at the end of all passes.
+ *
+ * This service is invoked by the job system via the scheduling service.
+ * It does not maintain its own timer - scheduling is handled externally.
  */
 export class MetricsAggregationService {
   private readonly metricsService: ExecutionMetricsService;
   private readonly stateService: MetricsStateService;
   private readonly config: MetricsAggregationConfig;
   private readonly maxMinutesPerRun: number;
-  private timerId: number | null = null;
-  private isProcessing = false;
-  private stopRequested = false;
-  private consecutiveFailures = 0;
 
-  private static readonly MAX_CONSECUTIVE_FAILURES = 5;
-  private static readonly STOP_TIMEOUT_MS = 30000;
   private static readonly DEFAULT_MAX_MINUTES_PER_RUN = 60;
 
   constructor(options: MetricsAggregationServiceOptions) {
@@ -47,143 +45,51 @@ export class MetricsAggregationService {
   }
 
   /**
-   * Start the aggregation timer.
-   * Performs catch-up processing on first run.
-   */
-  start(): void {
-    if (this.timerId !== null) {
-      logger.warn("[MetricsAggregation] Already running");
-      return;
-    }
-
-    logger.info(
-      `[MetricsAggregation] Starting with interval ${this.config.aggregationIntervalSeconds}s, ` +
-        `retention ${this.config.retentionDays} days`
-    );
-
-    // Run immediately on start, then schedule interval
-    this.runAggregation()
-      .then(() => {
-        this.consecutiveFailures = 0;
-      })
-      .catch((error) => {
-        this.consecutiveFailures++;
-        logger.error("[MetricsAggregation] Initial aggregation failed:", error);
-      });
-
-    this.timerId = setInterval(() => {
-      this.runAggregation()
-        .then(() => {
-          this.consecutiveFailures = 0;
-        })
-        .catch((error) => {
-          this.consecutiveFailures++;
-          logger.error(
-            `[MetricsAggregation] Aggregation failed (${this.consecutiveFailures}/${MetricsAggregationService.MAX_CONSECUTIVE_FAILURES}):`,
-            error
-          );
-
-          if (
-            this.consecutiveFailures >=
-            MetricsAggregationService.MAX_CONSECUTIVE_FAILURES
-          ) {
-            logger.error(
-              "[MetricsAggregation] Max consecutive failures reached, stopping service"
-            );
-            if (this.timerId !== null) {
-              clearInterval(this.timerId);
-              this.timerId = null;
-            }
-          }
-        });
-    }, this.config.aggregationIntervalSeconds * 1000);
-  }
-
-  /**
    * Run aggregation once and wait for completion.
    * Useful for testing and one-off catch-up processing.
    */
   async runOnce(): Promise<void> {
-    await this.runAggregation();
+    await this.performAggregation();
   }
 
   /**
-   * Stop the aggregation timer.
-   * Waits for any in-progress aggregation to complete (with timeout).
+   * Perform the aggregation operation.
+   * Called by the job handler when the metrics-aggregation job is executed.
+   *
+   * @param token - Optional cancellation token for graceful cancellation
    */
-  async stop(): Promise<void> {
-    if (this.timerId !== null) {
-      clearInterval(this.timerId);
-      this.timerId = null;
-    }
+  async performAggregation(token?: CancellationToken): Promise<void> {
+    const now = new Date();
 
-    // Wait for any in-progress processing to complete with timeout.
-    // IMPORTANT: Don't set stopRequested until AFTER waiting, otherwise
-    // runAggregation() will see the flag and abort early, causing race
-    // conditions in tests and potential data loss.
-    const startTime = Date.now();
-    while (this.isProcessing) {
-      if (Date.now() - startTime > MetricsAggregationService.STOP_TIMEOUT_MS) {
-        logger.warn(
-          "[MetricsAggregation] Stop timeout exceeded, signaling stop request"
-        );
-        this.stopRequested = true;
-        break;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    // Clean up all old metrics first (any type)
+    await this.cleanupOldMetrics();
 
-    // Reset for potential future restart
-    this.stopRequested = false;
-    logger.info("[MetricsAggregation] Stopped");
-  }
+    token?.throwIfCancelled();
 
-  /**
-   * Main aggregation loop - called by timer.
-   * Runs three passes (minutes, hours, days) then cleans up old records.
-   */
-  private async runAggregation(): Promise<void> {
-    if (this.isProcessing) {
-      logger.debug("[MetricsAggregation] Skipping, already processing");
-      return;
-    }
+    // PASS 1: Process minutes (execution → minute)
+    await this.processMinutesPass(now, token);
 
-    this.isProcessing = true;
-    try {
-      const now = new Date();
+    token?.throwIfCancelled();
 
-      // Clean up all old metrics first (any type)
-      await this.cleanupOldMetrics();
+    // PASS 2: Process hours (minute → hour)
+    await this.processHoursPass(now, token);
 
-      if (this.stopRequested) return;
+    token?.throwIfCancelled();
 
-      // PASS 1: Process minutes (execution → minute)
-      await this.processMinutesPass(now);
+    // PASS 3: Process days (hour → day)
+    await this.processDaysPass(now, token);
 
-      if (this.stopRequested) return;
+    token?.throwIfCancelled();
 
-      // PASS 2: Process hours (minute → hour)
-      await this.processHoursPass(now);
-
-      if (this.stopRequested) return;
-
-      // PASS 3: Process days (hour → day)
-      await this.processDaysPass(now);
-
-      if (this.stopRequested) return;
-
-      // CLEANUP: Delete processed source records
-      await this.cleanupProcessedRecords();
-    } finally {
-      this.isProcessing = false;
-    }
+    // CLEANUP: Delete processed source records
+    await this.cleanupProcessedRecords();
   }
 
   /**
    * MINUTES PASS: Aggregate execution records into minute records.
    * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processMinutesPass(now: Date): Promise<void> {
+  private async processMinutesPass(now: Date, token?: CancellationToken): Promise<void> {
     const currentMinute = this.floorToMinute(now);
 
     // Get or initialize marker
@@ -195,7 +101,7 @@ export class MetricsAggregationService {
 
     // Process each complete minute
     while (marker < currentMinute) {
-      if (this.stopRequested) return;
+      token?.throwIfCancelled();
 
       // Limit processing per run
       if (minutesProcessed >= this.maxMinutesPerRun) {
@@ -303,7 +209,7 @@ export class MetricsAggregationService {
    * HOURS PASS: Aggregate minute records into hour records.
    * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processHoursPass(now: Date): Promise<void> {
+  private async processHoursPass(now: Date, token?: CancellationToken): Promise<void> {
     const currentHour = this.floorToHour(now);
 
     // Get or initialize marker
@@ -314,7 +220,7 @@ export class MetricsAggregationService {
 
     // Process each complete hour
     while (marker < currentHour) {
-      if (this.stopRequested) return;
+      token?.throwIfCancelled();
 
       const windowStart = marker;
       const windowEnd = new Date(marker.getTime() + 60 * 60 * 1000);
@@ -394,7 +300,7 @@ export class MetricsAggregationService {
    * DAYS PASS: Aggregate hour records into day records.
    * Creates both global (routeId=NULL) and per-route records.
    */
-  private async processDaysPass(now: Date): Promise<void> {
+  private async processDaysPass(now: Date, token?: CancellationToken): Promise<void> {
     const currentDay = this.floorToDay(now);
 
     // Get or initialize marker
@@ -405,7 +311,7 @@ export class MetricsAggregationService {
 
     // Process each complete day
     while (marker < currentDay) {
-      if (this.stopRequested) return;
+      token?.throwIfCancelled();
 
       const windowStart = marker;
       const windowEnd = new Date(marker.getTime() + 24 * 60 * 60 * 1000);

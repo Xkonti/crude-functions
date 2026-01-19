@@ -50,6 +50,10 @@ import { SettingNames } from "./src/settings/types.ts";
 import { UserService } from "./src/users/user_service.ts";
 import { createUserRoutes } from "./src/users/user_routes.ts";
 import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
+import { InstanceIdService } from "./src/instance/instance_id_service.ts";
+import { JobQueueService } from "./src/jobs/job_queue_service.ts";
+import { JobProcessorService } from "./src/jobs/job_processor_service.ts";
+import { SchedulingService } from "./src/scheduling/scheduling_service.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -147,6 +151,15 @@ console.log("✓ Settings initialized");
 // Initialize logger with settings service (enables periodic log level refresh)
 initializeLogger(settingsService);
 
+// Initialize instance ID service (for job ownership tracking)
+const instanceIdService = new InstanceIdService();
+
+// Initialize job queue service
+const jobQueueService = new JobQueueService({
+  db,
+  instanceIdService,
+});
+
 /**
  * Helper to read an integer setting from the database.
  * Returns defaultValue if setting is missing or invalid.
@@ -203,7 +216,6 @@ const metricsAggregationService = new MetricsAggregationService({
   stateService: metricsStateService,
   config: metricsAggregationConfig,
 });
-metricsAggregationService.start();
 
 // Initialize and start log trimming service
 const logTrimmingConfig: LogTrimmingConfig = {
@@ -215,7 +227,6 @@ const logTrimmingService = new LogTrimmingService({
   logService: consoleLogService,
   config: logTrimmingConfig,
 });
-logTrimmingService.start();
 
 // Initialize and start key rotation service
 const keyRotationConfig: KeyRotationConfig = {
@@ -230,7 +241,22 @@ const keyRotationService = new KeyRotationService({
   keyStorage: keyStorageService,
   config: keyRotationConfig,
 });
-keyRotationService.start();
+
+// Initialize job processor service
+const jobProcessorService = new JobProcessorService({
+  jobQueueService,
+  instanceIdService,
+  config: {
+    pollingIntervalSeconds: await getIntSetting(SettingNames.JOB_PROCESSOR_POLLING_INTERVAL_SECONDS, 5),
+    shutdownTimeoutMs: 60000,
+  },
+});
+
+// Initialize scheduling service
+const schedulingService = new SchedulingService({
+  db,
+  jobQueueService,
+});
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -267,6 +293,83 @@ const functionRouter = new FunctionRouter({
   secretsService,
   codeDirectory: "./code",
 });
+
+// ============================================================================
+// Job Processing and Scheduling Setup
+// ============================================================================
+
+// Start job processor
+jobProcessorService.start();
+
+// Register job handlers
+jobProcessorService.registerHandler("log-trimming", async (_job, token) => {
+  token.throwIfCancelled();
+  return await logTrimmingService.performTrimming();
+});
+
+jobProcessorService.registerHandler("metrics-aggregation", async (_job, token) => {
+  await metricsAggregationService.performAggregation(token);
+  return { success: true };
+});
+
+jobProcessorService.registerHandler("key-rotation", async (_job, token) => {
+  return await keyRotationService.performRotationCheck(token);
+});
+
+// Start scheduling service (clears transient schedules, loads persistent)
+await schedulingService.start();
+
+// Register transient schedules (re-registered on each restart)
+await schedulingService.registerSchedule({
+  name: "log-trimming",
+  description: "Trims console logs based on retention and count limits",
+  type: "sequential_interval",
+  isPersistent: false,
+  intervalMs: logTrimmingConfig.trimmingIntervalSeconds * 1000,
+  jobType: "log-trimming",
+});
+
+await schedulingService.registerSchedule({
+  name: "metrics-aggregation",
+  description: "Aggregates execution metrics into time-based summaries",
+  type: "sequential_interval",
+  isPersistent: false,
+  intervalMs: metricsAggregationConfig.aggregationIntervalSeconds * 1000,
+  jobType: "metrics-aggregation",
+});
+
+// Register persistent key rotation schedule (only if not exists)
+const existingKeyRotationSchedule = await schedulingService.getSchedule("key-rotation");
+if (!existingKeyRotationSchedule) {
+  const keys = await keyStorageService.loadKeys();
+  let nextRunAt: Date;
+
+  if (keys && keyStorageService.isRotationInProgress(keys)) {
+    // Incomplete rotation - resume soon
+    nextRunAt = new Date(Date.now() + 60000);
+  } else if (keys) {
+    // Calculate when rotation is due
+    const lastRotation = new Date(keys.last_rotation_finished_at);
+    const rotationIntervalMs = keyRotationConfig.rotationIntervalDays * 24 * 60 * 60 * 1000;
+    nextRunAt = new Date(lastRotation.getTime() + rotationIntervalMs);
+    if (nextRunAt < new Date()) {
+      nextRunAt = new Date(); // Past due, run now
+    }
+  } else {
+    nextRunAt = new Date(); // No keys yet, run immediately
+  }
+
+  await schedulingService.registerSchedule({
+    name: "key-rotation",
+    description: "Automatic encryption key rotation",
+    type: "dynamic",
+    isPersistent: true,
+    nextRunAt,
+    jobType: "key-rotation",
+  });
+}
+
+console.log("✓ Job processor and scheduling services started");
 
 // Better Auth handler - handles /api/auth/* endpoints
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
@@ -308,6 +411,7 @@ app.route("/api/encryption-keys", createRotationRoutes({
   keyRotationService,
   keyStorageService,
   settingsService,
+  schedulingService,
 }));
 
 // Settings API (hybrid auth)
@@ -315,6 +419,8 @@ app.use("/api/settings/*", hybridAuth);
 app.use("/api/settings", hybridAuth);
 app.route("/api/settings", createSettingsRoutes({
   settingsService,
+  schedulingService,
+  keyStorageService,
 }));
 
 // Secrets API (hybrid auth)
@@ -383,7 +489,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator };
+export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
@@ -408,19 +514,15 @@ async function gracefulShutdown(signal: string) {
     await consoleLogService.shutdown();
     console.log("Console log service flushed");
 
-    // 5. Stop log trimming service (waits for current processing)
-    await logTrimmingService.stop();
-    console.log("Log trimming service stopped");
+    // 5. Stop scheduling service (stops triggering new jobs)
+    await schedulingService.stop();
+    console.log("Scheduling service stopped");
 
-    // 6. Stop aggregation service (waits for current processing)
-    await metricsAggregationService.stop();
-    console.log("Metrics aggregation service stopped");
+    // 6. Stop job processor (waits for current job)
+    await jobProcessorService.stop();
+    console.log("Job processor stopped");
 
-    // 7. Stop key rotation service (waits for current rotation batch)
-    await keyRotationService.stop();
-    console.log("Key rotation service stopped");
-
-    // 8. Close database last
+    // 7. Close database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {
