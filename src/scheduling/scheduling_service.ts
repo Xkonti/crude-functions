@@ -1098,6 +1098,8 @@ export class SchedulingService {
         logger.info(
           `[Scheduling] Dynamic schedule '${schedule.name}' completed (no next time)`,
         );
+        // Reschedule to update timer for remaining schedules
+        await this.scheduleNextTrigger();
         return;
       }
     } else if (schedule.type === "sequential_interval") {
@@ -1150,6 +1152,8 @@ export class SchedulingService {
       logger.error(
         `[Scheduling] Schedule '${schedule.name}' entered error state after ${newFailureCount} job failures`,
       );
+      // Reschedule to update timer for remaining schedules
+      await this.scheduleNextTrigger();
     } else {
       // Retry: schedule next run
       let nextRunAt: Date;
