@@ -2,24 +2,34 @@
   "version": "5",
   "specifiers": {
     "jsr:@core/asyncutil@*": "1.2.0",
+    "jsr:@da/bcrypt@1.0.1": "1.0.1",
     "jsr:@db/sqlite@*": "0.13.0",
     "jsr:@denosaurs/plug@1": "1.1.0",
     "jsr:@hono/hono@*": "4.11.3",
     "jsr:@soapbox/kysely-deno-sqlite@*": "2.2.0",
+    "jsr:@std/assert@^1.0.14": "1.0.16",
+    "jsr:@std/assert@^1.0.15": "1.0.16",
+    "jsr:@std/assert@^1.0.16": "1.0.16",
     "jsr:@std/dotenv@*": "0.225.6",
     "jsr:@std/encoding@1": "1.0.10",
+    "jsr:@std/expect@*": "1.0.17",
     "jsr:@std/fmt@1": "1.0.8",
     "jsr:@std/fs@1": "1.0.21",
+    "jsr:@std/internal@^1.0.10": "1.0.12",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/path@1": "1.1.4",
     "jsr:@std/path@1.0": "1.0.9",
     "jsr:@std/path@^1.1.4": "1.1.4",
+    "jsr:@std/testing@*": "1.0.16",
     "npm:better-auth@^1.4.10": "1.4.10_@better-auth+utils@0.3.0_@better-fetch+fetch@1.1.21_better-call@1.1.7__zod@4.3.4_jose@6.1.3_kysely@0.28.9_nanostores@1.1.0_@better-auth+core@1.4.10__@better-auth+utils@0.3.0__@better-fetch+fetch@1.1.21__better-call@1.1.7___zod@4.3.4__jose@6.1.3__kysely@0.28.9__nanostores@1.1.0__zod@4.3.4_zod@4.3.4",
     "npm:kysely@~0.27.2": "0.27.6"
   },
   "jsr": {
     "@core/asyncutil@1.2.0": {
       "integrity": "9967f15190c60df032c13f72ce5ac73d185c34f31c53dc918d8800025854c118"
+    },
+    "@da/bcrypt@1.0.1": {
+      "integrity": "d2172d3acbcff52e0465557a1a48b1ff1c92df08c90712dae5372255a8c45eb3"
     },
     "@db/sqlite@0.13.0": {
       "integrity": "4545c635e0b3d4ddfdc0f2240f932f24b8ad0178e9c2e3a0f9403e7b18ae2fb5",
@@ -46,11 +56,24 @@
         "npm:kysely"
       ]
     },
+    "@std/assert@1.0.16": {
+      "integrity": "6a7272ed1eaa77defe76e5ff63ca705d9c495077e2d5fd0126d2b53fc5bd6532",
+      "dependencies": [
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
     "@std/dotenv@0.225.6": {
       "integrity": "1d6f9db72f565bd26790fa034c26e45ecb260b5245417be76c2279e5734c421b"
     },
     "@std/encoding@1.0.10": {
       "integrity": "8783c6384a2d13abd5e9e87a7ae0520a30e9f56aeeaa3bdf910a3eaaf5c811a1"
+    },
+    "@std/expect@1.0.17": {
+      "integrity": "316b47dd65c33e3151344eb3267bf42efba17d1415425f07ed96185d67fc04d9",
+      "dependencies": [
+        "jsr:@std/assert@^1.0.14",
+        "jsr:@std/internal@^1.0.10"
+      ]
     },
     "@std/fmt@1.0.8": {
       "integrity": "71e1fc498787e4434d213647a6e43e794af4fd393ef8f52062246e06f7e372b7"
@@ -58,7 +81,7 @@
     "@std/fs@1.0.21": {
       "integrity": "d720fe1056d78d43065a4d6e0eeb2b19f34adb8a0bc7caf3a4dbf1d4178252cd",
       "dependencies": [
-        "jsr:@std/internal",
+        "jsr:@std/internal@^1.0.12",
         "jsr:@std/path@^1.1.4"
       ]
     },
@@ -71,7 +94,14 @@
     "@std/path@1.1.4": {
       "integrity": "1d2d43f39efb1b42f0b1882a25486647cb851481862dc7313390b2bb044314b5",
       "dependencies": [
-        "jsr:@std/internal"
+        "jsr:@std/internal@^1.0.12"
+      ]
+    },
+    "@std/testing@1.0.16": {
+      "integrity": "a917ffdeb5924c9be436dc78bc32e511760e14d3a96e49c607fc5ecca86d0092",
+      "dependencies": [
+        "jsr:@std/assert@^1.0.15",
+        "jsr:@std/internal@^1.0.12"
       ]
     }
   },
