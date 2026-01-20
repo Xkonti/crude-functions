@@ -1,6 +1,5 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
-import { SchedulingService } from "./scheduling_service.ts";
 import { JobProcessorService } from "../jobs/job_processor_service.ts";
 import {
   ScheduleNotFoundError,

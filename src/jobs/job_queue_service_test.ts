@@ -5,7 +5,6 @@ import {
   JobAlreadyClaimedError,
   JobNotFoundError,
   MaxRetriesExceededError,
-  JobNotCancellableError,
 } from "./errors.ts";
 
 // =============================================================================
