@@ -32,14 +32,13 @@ This plan outlines the research and design work needed before implementing the "
 2. **Interval sync** - Simple interval in seconds (e.g., 300 = every 5 minutes)
 3. **Webhook sync** - Per-source configurable secret token (or none)
 
-### Job Queue System
+### Sync Job Behavior
 
-- Generic job queue stored in database
-- **Queue** sync jobs when one is already running
-- Track **process instance ID** (UUID at startup) to detect orphaned jobs
-- **Orphaned jobs** (from crashed container) retry once
-- **Failed jobs stay failed** (no auto-retry)
-- Interval/webhook syncs continue normally regardless of past errors
+Sync operations use the existing job queue and scheduling infrastructure:
+
+- **One sync at a time per source** - enforced via job queue's sequential mode
+- **Orphaned jobs** (from crashed container) retry once automatically
+- **Failed jobs stay failed** - interval/webhook syncs continue normally regardless of past errors
 
 ### Web UI
 
@@ -64,7 +63,8 @@ This plan outlines the research and design work needed before implementing the "
 
 ### 2. Existing Patterns to Follow
 
-- [ ] Background service pattern (LogTrimmingService, MetricsAggregationService)
+- [ ] Job queue pattern (JobQueueService, JobProcessorService)
+- [ ] Scheduling pattern (SchedulingService for interval-based triggering)
 - [ ] Encryption patterns (VersionedEncryptionService, SecretsService)
 - [ ] Service ownership pattern (DatabaseService access)
 - [ ] TestSetupBuilder for testing
@@ -194,6 +194,7 @@ interface SyncSettings {
 |---------|----------|----------------|
 | **JobQueueService** | `src/jobs/job_queue_service.ts` | Generic queue, orphan detection, process tracking |
 | **JobProcessorService** | `src/jobs/job_processor_service.ts` | Background job processing with handler registration |
+| **SchedulingService** | `src/scheduling/scheduling_service.ts` | Time-based job scheduling (interval triggers) |
 | **InstanceIdService** | `src/instance/instance_id_service.ts` | Unique process instance ID for orphan detection |
 
 **New Services (to create):**
@@ -204,7 +205,6 @@ interface SyncSettings {
 | **SyncService** | `src/sources/sync_service.ts` | Orchestrates syncs, delegates to providers |
 | **GitSyncProvider** | `src/sources/git_sync_provider.ts` | Clone/pull/checkout using isomorphic-git |
 | **ManualSourceProvider** | `src/sources/manual_source_provider.ts` | Scoped file operations for manual sources |
-| **SyncSchedulerService** | `src/sources/sync_scheduler_service.ts` | Background interval checking, triggers sync jobs |
 
 ### 3. API Endpoints
 
@@ -276,6 +276,28 @@ try {
 }
 ```
 
+**Interval Scheduling:**
+
+Use `SchedulingService` for interval-based sync triggers. When a source is created/updated with `intervalSeconds > 0`, create a schedule:
+
+```typescript
+// Create interval schedule for a source
+await schedulingService.createSchedule({
+  name: `source_sync_${sourceId}`,
+  type: 'sequential_interval',  // Waits for job completion before scheduling next
+  intervalMs: source.syncSettings.intervalSeconds * 1000,
+  jobType: 'source_sync',
+  jobPayload: { sourceId },
+  jobReferenceType: 'code_source',
+  jobReferenceId: sourceId,
+  isPersistent: true,
+});
+
+// When source is updated, update or recreate the schedule
+// When source is deleted, delete the schedule
+await schedulingService.deleteSchedule(scheduleId);
+```
+
 **Path Scoping:**
 
 ```typescript
@@ -299,14 +321,15 @@ try {
 1. Implement `GitSyncProvider` (with isomorphic-git)
 2. Implement `ManualSourceProvider`
 3. Implement `SyncService`
-4. Implement `SyncSchedulerService` (registers handler with existing `JobProcessorService`)
+4. Register `source_sync` handler with `JobProcessorService`
 
 ### Phase 3: API & Integration
 
 1. Create `source_routes.ts`
 2. Create `webhook_routes.ts`
 3. Update `file_routes.ts` for source-scoping
-4. Update `main.ts` to initialize source services and register sync job handler
+4. Update `main.ts` to initialize source services
+5. Set up interval schedules via `SchedulingService` when sources are created/updated
 
 ### Phase 4: Web UI
 
@@ -326,8 +349,8 @@ try {
 
 **Modify:**
 
-- `migrations/000-init.sql` - Add `codeSources` table (jobQueue already exists)
-- `main.ts` - Initialize source services, register sync handler with `JobProcessorService`
+- `migrations/000-init.sql` - Add `codeSources` table
+- `main.ts` - Initialize source services, register `source_sync` job handler
 - `src/files/file_service.ts` - Enforce source-scoped paths
 - `src/web/code_pages.ts` - Source-aware file browsing
 - `src/test/test_setup_builder.ts` - Add source service support
@@ -338,7 +361,6 @@ try {
 - `src/sources/sync_service.ts`
 - `src/sources/git_sync_provider.ts`
 - `src/sources/manual_source_provider.ts`
-- `src/sources/sync_scheduler_service.ts`
 - `src/sources/source_routes.ts`
 - `src/sources/webhook_routes.ts`
 - `src/web/sources_pages.ts`
