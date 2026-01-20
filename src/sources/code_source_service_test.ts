@@ -81,12 +81,19 @@ function createMockProvider(
 Deno.test("CodeSourceService.isValidSourceName accepts valid names", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // Lowercase
     expect(ctx.codeSourceService.isValidSourceName("utils")).toBe(true);
     expect(ctx.codeSourceService.isValidSourceName("my-project")).toBe(true);
     expect(ctx.codeSourceService.isValidSourceName("backend_v2")).toBe(true);
     expect(ctx.codeSourceService.isValidSourceName("a")).toBe(true);
     expect(ctx.codeSourceService.isValidSourceName("a1")).toBe(true);
     expect(ctx.codeSourceService.isValidSourceName("test123")).toBe(true);
+
+    // Uppercase (now allowed)
+    expect(ctx.codeSourceService.isValidSourceName("MyProject")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("UTILS")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("Backend-V2")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("A")).toBe(true);
   } finally {
     await ctx.cleanup();
   }
@@ -98,10 +105,6 @@ Deno.test("CodeSourceService.isValidSourceName rejects invalid names", async () 
     // Empty/whitespace
     expect(ctx.codeSourceService.isValidSourceName("")).toBe(false);
     expect(ctx.codeSourceService.isValidSourceName("  ")).toBe(false);
-
-    // Uppercase not allowed
-    expect(ctx.codeSourceService.isValidSourceName("MyProject")).toBe(false);
-    expect(ctx.codeSourceService.isValidSourceName("UTILS")).toBe(false);
 
     // Spaces not allowed
     expect(ctx.codeSourceService.isValidSourceName("my project")).toBe(false);

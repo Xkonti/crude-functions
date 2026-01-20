@@ -123,7 +123,7 @@ export interface CodeSource {
  * Input for creating a new code source.
  */
 export interface NewCodeSource {
-  /** Directory name (lowercase alphanumeric, hyphens, underscores, 1-64 chars) */
+  /** Directory name (alphanumeric, hyphens, underscores, 1-64 chars, starts with alphanumeric) */
   name: string;
   /** Source type */
   type: CodeSourceType;

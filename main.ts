@@ -24,7 +24,10 @@ import { RoutesService } from "./src/routes/routes_service.ts";
 import { createFunctionsRoutes } from "./src/routes/functions_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
-import { createFileRoutes } from "./src/files/file_routes.ts";
+import { SourceFileService } from "./src/files/source_file_service.ts";
+import { createSourceFileRoutes } from "./src/files/source_file_routes.ts";
+import { CodeSourceService } from "./src/sources/code_source_service.ts";
+import { ManualCodeSourceProvider } from "./src/sources/manual_code_source_provider.ts";
 import { createSettingsRoutes } from "./src/settings/settings_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
@@ -258,6 +261,22 @@ const schedulingService = new SchedulingService({
   jobQueueService,
 });
 
+// Initialize code source service
+const codeSourceService = new CodeSourceService({
+  db,
+  encryptionService,
+  jobQueueService,
+  schedulingService,
+  codeDirectory: "./code",
+});
+
+// Register manual code source provider
+const manualCodeSourceProvider = new ManualCodeSourceProvider({
+  codeDirectory: "./code",
+});
+codeSourceService.registerProvider(manualCodeSourceProvider);
+console.log("✓ Code source service initialized");
+
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
   db,
@@ -391,16 +410,22 @@ app.use("/api/functions/*", hybridAuth);
 app.use("/api/functions", hybridAuth);
 app.route("/api/functions", createFunctionsRoutes(routesService));
 
-// Initialize file service
+// Initialize file service (used by web UI and function router)
 const fileService = new FileService({
   basePath: "./code",
 });
 
-// Protected file management routes
-app.use("/api/files/*", hybridAuth);
-app.use("/api/files", hybridAuth);
-app.route("/api/files", createFileRoutes({
-  fileService,
+// Initialize source file service (source-aware file operations)
+const sourceFileService = new SourceFileService({
+  codeSourceService,
+  codeDirectory: "./code",
+});
+
+// Protected source file management routes
+app.use("/api/sources/*/files/*", hybridAuth);
+app.use("/api/sources/*/files", hybridAuth);
+app.route("/api/sources", createSourceFileRoutes({
+  sourceFileService,
   settingsService,
 }));
 
@@ -489,7 +514,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
+export { app, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

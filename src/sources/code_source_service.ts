@@ -29,8 +29,8 @@ import {
 } from "./errors.ts";
 import { logger } from "../utils/logger.ts";
 
-/** Regex for validating source names: lowercase alphanumeric, hyphens, underscores, 1-64 chars */
-const SOURCE_NAME_REGEX = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** Regex for validating source names: alphanumeric (a-z, A-Z, 0-9), hyphens, underscores, 1-64 chars */
+const SOURCE_NAME_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
 
 /**
  * Constant-time string comparison to prevent timing attacks.
@@ -815,7 +815,8 @@ export class CodeSourceService {
 
   /**
    * Check if a source name is valid.
-   * Must be: lowercase alphanumeric, hyphens, underscores, 1-64 chars.
+   * Must be: alphanumeric (a-z, A-Z, 0-9), hyphens, underscores, 1-64 chars.
+   * Must start with alphanumeric (not hyphen or underscore).
    */
   isValidSourceName(name: string): boolean {
     return SOURCE_NAME_REGEX.test(name);
@@ -827,7 +828,7 @@ export class CodeSourceService {
   private validateNewSource(input: NewCodeSource): void {
     if (!input.name || !this.isValidSourceName(input.name)) {
       throw new InvalidSourceConfigError(
-        "Source name must be 1-64 chars, lowercase alphanumeric with hyphens/underscores, starting with alphanumeric",
+        "Source name must be 1-64 chars, alphanumeric with hyphens/underscores, starting with alphanumeric",
       );
     }
 
