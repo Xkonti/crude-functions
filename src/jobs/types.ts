@@ -30,9 +30,8 @@ export type ExecutionMode = "sequential" | "concurrent";
  * Allows handlers to detect when a job has been requested for cancellation
  * and respond gracefully (e.g., save progress, clean up resources).
  *
- * Note: Cancellation is detected via polling (default 1 second interval).
- * Handlers may experience 0-1000ms latency between cancellation request
- * and token update.
+ * Cancellation is detected via event subscription - when cancelJob() is called,
+ * the token is notified immediately.
  */
 export interface CancellationToken {
   /** Whether cancellation has been requested */
@@ -177,6 +176,44 @@ export interface JobRow {
   cancelledAt: string | null;
   cancelReason: string | null;
 }
+
+// ============== Job Event Types ==============
+
+/**
+ * Type of job completion event.
+ */
+export type JobCompletionType = "completed" | "failed" | "cancelled";
+
+/**
+ * Event emitted when a job reaches a terminal state.
+ * Subscribers receive the full job data before the job is deleted from the database.
+ */
+export interface JobCompletionEvent {
+  /** The type of completion */
+  type: JobCompletionType;
+  /** Full job data including result/error */
+  job: Job;
+}
+
+/**
+ * Subscriber callback for job completion events.
+ */
+export type JobCompletionSubscriber = (event: JobCompletionEvent) => void | Promise<void>;
+
+/**
+ * Event emitted when a cancellation is requested for a running job.
+ */
+export interface JobCancellationRequestEvent {
+  /** The job ID being cancelled */
+  jobId: number;
+  /** Optional reason for cancellation */
+  reason?: string;
+}
+
+/**
+ * Subscriber callback for job cancellation request events.
+ */
+export type JobCancellationSubscriber = (event: JobCancellationRequestEvent) => void | Promise<void>;
 
 // Forward declaration to avoid circular imports
 // The actual class is in job_queue_service.ts

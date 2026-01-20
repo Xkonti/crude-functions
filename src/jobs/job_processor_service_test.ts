@@ -99,17 +99,21 @@ Deno.test("JobProcessorService.processOne processes pending job", async () => {
       return { processed: true };
     });
 
-    await ctx.jobQueueService.enqueue({
+    const enqueued = await ctx.jobQueueService.enqueue({
       type: "test-job",
       payload: { value: 42 },
     });
 
     const result = await processor.processOne();
 
+    // processOne returns the job state after completion (before deletion)
     expect(result).not.toBeNull();
     expect(result!.status).toBe("completed");
     expect(result!.result).toEqual({ processed: true });
     expect(processedPayload).toEqual({ value: 42 });
+
+    // Job is deleted from DB after completion
+    expect(await ctx.jobQueueService.getJob(enqueued.id)).toBeNull();
   } finally {
     await processor.stop();
     await ctx.cleanup();
@@ -150,7 +154,7 @@ Deno.test("JobProcessorService.processOne marks job failed when handler throws",
       throw new Error("Handler failed!");
     });
 
-    await ctx.jobQueueService.enqueue({ type: "failing-job" });
+    const enqueued = await ctx.jobQueueService.enqueue({ type: "failing-job" });
 
     const result = await processor.processOne();
 
@@ -161,6 +165,9 @@ Deno.test("JobProcessorService.processOne marks job failed when handler throws",
       message: "Handler failed!",
       stack: expect.any(String),
     });
+
+    // Job is deleted from DB after failure
+    expect(await ctx.jobQueueService.getJob(enqueued.id)).toBeNull();
   } finally {
     await processor.stop();
     await ctx.cleanup();
@@ -178,7 +185,7 @@ Deno.test("JobProcessorService.processOne fails job when no handler registered",
 
   try {
     // No handler registered for this type
-    await ctx.jobQueueService.enqueue({ type: "unknown-job" });
+    const enqueued = await ctx.jobQueueService.enqueue({ type: "unknown-job" });
 
     const result = await processor.processOne();
 
@@ -188,6 +195,9 @@ Deno.test("JobProcessorService.processOne fails job when no handler registered",
       error: "NoHandlerError",
       message: "No handler registered for job type: unknown-job",
     });
+
+    // Job is deleted from DB after failure
+    expect(await ctx.jobQueueService.getJob(enqueued.id)).toBeNull();
   } finally {
     await processor.stop();
     await ctx.cleanup();
@@ -222,6 +232,11 @@ Deno.test("JobProcessorService.processOne processes highest priority job first",
     await processor.processOne();
 
     expect(processedTypes).toEqual(["high-priority"]);
+
+    // High priority job is now deleted, low priority still pending
+    const jobs = await ctx.jobQueueService.getJobsByStatus("pending");
+    expect(jobs.length).toBe(1);
+    expect(jobs[0].type).toBe("low-priority");
   } finally {
     await processor.stop();
     await ctx.cleanup();
@@ -285,8 +300,9 @@ Deno.test("JobProcessorService.start processes pending jobs", async () => {
 
     expect(handlerCalled).toBe(true);
 
-    const job = (await ctx.jobQueueService.getJobsByType("auto-process"))[0];
-    expect(job.status).toBe("completed");
+    // Jobs are deleted after completion, so nothing should remain
+    const jobs = await ctx.jobQueueService.getJobsByType("auto-process");
+    expect(jobs.length).toBe(0);
   } finally {
     await processor.stop();
     await ctx.cleanup();
@@ -354,9 +370,9 @@ Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
 
     expect(handlerCalled).toBe(true);
 
+    // Jobs are deleted after completion
     const jobs = await ctx.jobQueueService.getJobsByType("orphaned-job");
-    expect(jobs[0].status).toBe("completed");
-    expect(jobs[0].retryCount).toBe(1); // Was reset with incremented count
+    expect(jobs.length).toBe(0);
   } finally {
     await ctx.cleanup();
   }
@@ -390,15 +406,9 @@ Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async (
 
     await processor.stop();
 
-    // Job should be marked as failed
+    // Job should be deleted after being marked as failed
     const jobs = await ctx.jobQueueService.getJobsByType("exhausted-job");
-    expect(jobs[0].status).toBe("failed");
-    expect(jobs[0].result).toEqual({
-      error: "MaxRetriesExceeded",
-      message: "Job exceeded maximum retries after orphan recovery",
-      retryCount: 1,
-      maxRetries: 1,
-    });
+    expect(jobs.length).toBe(0);
   } finally {
     await ctx.cleanup();
   }
@@ -437,9 +447,9 @@ Deno.test("JobProcessorService processes multiple jobs in sequence", async () =>
 
     expect(processedIds.length).toBe(3);
 
-    // All should be completed
+    // All jobs are deleted after completion
     const jobs = await ctx.jobQueueService.getJobsByType("sequential-job");
-    expect(jobs.every((j) => j.status === "completed")).toBe(true);
+    expect(jobs.length).toBe(0);
   } finally {
     await processor.stop();
     await ctx.cleanup();
@@ -547,16 +557,16 @@ Deno.test("JobProcessorService marks job cancelled when handler throws JobCancel
     expect(result!.status).toBe("cancelled");
     expect(result!.cancelReason).toBe("Handler decided to cancel");
 
-    // Verify in database
+    // Job is deleted after cancellation
     const job = await ctx.jobQueueService.getJob(enqueued.id);
-    expect(job!.status).toBe("cancelled");
+    expect(job).toBeNull();
   } finally {
     await processor.stop();
     await ctx.cleanup();
   }
 });
 
-Deno.test("JobProcessorService marks pre-cancelled job as cancelled without running handler", async () => {
+Deno.test("JobProcessorService does not process deleted cancelled jobs", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -576,18 +586,17 @@ Deno.test("JobProcessorService marks pre-cancelled job as cancelled without runn
     // Enqueue a job
     const job = await ctx.jobQueueService.enqueue({ type: "pre-cancel-test" });
 
-    // Cancel it before processing
+    // Cancel it before processing (pending cancelled jobs are deleted immediately)
     await ctx.jobQueueService.cancelJob(job.id, { reason: "Pre-cancelled" });
 
-    // Try to process - handler should not be called
-    await processor.processOne();
+    // Verify job is already deleted
+    expect(await ctx.jobQueueService.getJob(job.id)).toBeNull();
+
+    // Try to process - should return null since no jobs in queue
+    const result = await processor.processOne();
 
     expect(handlerCalled).toBe(false);
-
-    // Verify job is cancelled
-    const updated = await ctx.jobQueueService.getJob(job.id);
-    expect(updated!.status).toBe("cancelled");
-    expect(updated!.cancelReason).toBe("Pre-cancelled");
+    expect(result).toBeNull();
   } finally {
     await processor.stop();
     await ctx.cleanup();

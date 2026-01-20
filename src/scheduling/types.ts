@@ -201,12 +201,6 @@ export interface SchedulingServiceConfig {
    * Default: 2147483647 (max 32-bit signed int, ~24.8 days)
    */
   maxTimeoutMs?: number;
-  /**
-   * Interval for checking job completions (ms).
-   * Used for dynamic and sequential_interval schedules.
-   * Default: 1000
-   */
-  completionCheckIntervalMs?: number;
 }
 
 /**
