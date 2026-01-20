@@ -962,7 +962,15 @@ export class CodeSourceService {
       return {} as T;
     }
     const json = await this.encryptionService.decrypt(encrypted);
-    return JSON.parse(json) as T;
+    try {
+      return JSON.parse(json) as T;
+    } catch (error) {
+      logger.error(
+        `[CodeSource] Failed to parse decrypted settings, returning empty object:`,
+        error,
+      );
+      return {} as T;
+    }
   }
 
   /**

@@ -213,7 +213,16 @@ export class RoutesService {
     );
 
     for (const existing of existingRoutes) {
-      const existingMethods = JSON.parse(existing.methods) as string[];
+      let existingMethods: string[];
+      try {
+        existingMethods = JSON.parse(existing.methods) as string[];
+      } catch (error) {
+        globalThis.console.error(
+          `[RoutesService] Failed to parse methods for route '${existing.name}': ${existing.methods}`,
+          error,
+        );
+        existingMethods = [];
+      }
       for (const method of route.methods) {
         if (existingMethods.includes(method)) {
           throw new Error(
@@ -299,7 +308,16 @@ export class RoutesService {
     );
 
     for (const existingRoute of existingRoutes) {
-      const existingMethods = JSON.parse(existingRoute.methods) as string[];
+      let existingMethods: string[];
+      try {
+        existingMethods = JSON.parse(existingRoute.methods) as string[];
+      } catch (error) {
+        globalThis.console.error(
+          `[RoutesService] Failed to parse methods for route '${existingRoute.name}': ${existingRoute.methods}`,
+          error,
+        );
+        existingMethods = [];
+      }
       for (const method of route.methods) {
         if (existingMethods.includes(method)) {
           throw new Error(
