@@ -106,6 +106,7 @@ import type {
   InstanceIdContext,
   JobQueueContext,
   SchedulingContext,
+  CodeSourcesContext,
   RouteOptions,
   DeferredUser,
   DeferredKeyGroup,
@@ -143,6 +144,7 @@ import {
   createInstanceIdService,
   createJobQueueService,
   createSchedulingService,
+  createCodeSourceService,
   createCleanupFunction,
 } from "./service_factories.ts";
 
@@ -342,6 +344,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     return this as unknown as TestSetupBuilder<TContext & SchedulingContext>;
   }
 
+  /**
+   * Include CodeSourceService in the test context.
+   * Auto-enables: schedulingService, jobQueueService, instanceIdService, encryptionService.
+   */
+  withCodeSourceService(): TestSetupBuilder<TContext & CodeSourcesContext> {
+    enableServiceWithDependencies(this.flags, "codeSourceService");
+    return this as unknown as TestSetupBuilder<TContext & CodeSourcesContext>;
+  }
+
   // =============================================================================
   // Convenience Methods (Compose Multiple Services)
   // =============================================================================
@@ -447,6 +458,16 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   withScheduling(): TestSetupBuilder<TContext & SchedulingContext> {
     return this.withSchedulingService() as unknown as TestSetupBuilder<
       TContext & SchedulingContext
+    >;
+  }
+
+  /**
+   * Include code source service and its dependencies.
+   * Alias for withCodeSourceService() for semantic clarity.
+   */
+  withCodeSources(): TestSetupBuilder<TContext & CodeSourcesContext> {
+    return this.withCodeSourceService() as unknown as TestSetupBuilder<
+      TContext & CodeSourcesContext
     >;
   }
 
@@ -841,14 +862,25 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 13: Create scheduling service if needed
-    if (this.flags.schedulingService) {
+    if (this.flags.schedulingService || this.flags.codeSourceService) {
       context.schedulingService = createSchedulingService(
         db,
         context.jobQueueService,
       );
     }
 
-    // STEP 14: Create cleanup function
+    // STEP 14: Create code source service if needed
+    if (this.flags.codeSourceService) {
+      context.codeSourceService = createCodeSourceService(
+        db,
+        context.encryptionService,
+        context.jobQueueService,
+        context.schedulingService,
+        codeDir,
+      );
+    }
+
+    // STEP 15: Create cleanup function
     context.cleanup = createCleanupFunction(
       db,
       tempDir,

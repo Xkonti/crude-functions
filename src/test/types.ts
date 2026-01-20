@@ -44,6 +44,7 @@ import type { InstanceIdService } from "../instance/instance_id_service.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { JobStatus, ExecutionMode } from "../jobs/types.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
+import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { betterAuth } from "better-auth";
 import type { SettingName } from "../settings/types.ts";
 
@@ -198,6 +199,15 @@ export interface SchedulingContext extends JobQueueContext {
   schedulingService: SchedulingService;
 }
 
+/**
+ * Context with code source service.
+ * Requires scheduling service (which requires job queue and instance ID).
+ */
+export interface CodeSourcesContext extends SchedulingContext, EncryptionContext {
+  /** Code source service instance */
+  codeSourceService: CodeSourceService;
+}
+
 // =============================================================================
 // Full Context (All Services)
 // =============================================================================
@@ -217,7 +227,8 @@ export type FullTestContext = BaseTestContext &
   SecretsContext &
   UsersContext &
   JobQueueContext &
-  SchedulingContext;
+  SchedulingContext &
+  CodeSourcesContext;
 
 /**
  * Alias for FullTestContext (backward compatibility).

@@ -23,6 +23,7 @@ import { SecretsService } from "../secrets/secrets_service.ts";
 import { InstanceIdService } from "../instance/instance_id_service.ts";
 import { JobQueueService } from "../jobs/job_queue_service.ts";
 import { SchedulingService } from "../scheduling/scheduling_service.ts";
+import { CodeSourceService } from "../sources/code_source_service.ts";
 import { createAuth } from "../auth/auth.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
 import type { betterAuth } from "better-auth";
@@ -344,6 +345,30 @@ export function createSchedulingService(
   return new SchedulingService({
     db,
     jobQueueService,
+  });
+}
+
+// =============================================================================
+// Code Source Factory
+// =============================================================================
+
+/**
+ * Creates the CodeSourceService.
+ * Requires database, encryption service, job queue service, scheduling service, and code directory.
+ */
+export function createCodeSourceService(
+  db: DatabaseService,
+  encryptionService: VersionedEncryptionService,
+  jobQueueService: JobQueueService,
+  schedulingService: SchedulingService,
+  codeDir: string,
+): CodeSourceService {
+  return new CodeSourceService({
+    db,
+    encryptionService,
+    jobQueueService,
+    schedulingService,
+    codeDirectory: codeDir,
   });
 }
 
