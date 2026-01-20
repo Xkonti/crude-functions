@@ -156,7 +156,9 @@ Deno.test("CodeSourceService.getProvider returns registered provider", async () 
 Deno.test("CodeSourceService.getProvider throws for unregistered type", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
-    expect(() => ctx.codeSourceService.getProvider("git")).toThrow(
+    // Use a type that isn't registered (manual and git are registered by default)
+    // Cast to bypass type check since we're intentionally testing an invalid type
+    expect(() => ctx.codeSourceService.getProvider("s3" as "manual")).toThrow(
       ProviderNotFoundError,
     );
   } finally {
@@ -167,7 +169,9 @@ Deno.test("CodeSourceService.getProvider throws for unregistered type", async ()
 Deno.test("CodeSourceService.hasProvider returns false for unregistered type", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
-    expect(ctx.codeSourceService.hasProvider("git")).toBe(false);
+    // Use a type that isn't registered (manual and git are registered by default)
+    // Cast to bypass type check since we're intentionally testing an invalid type
+    expect(ctx.codeSourceService.hasProvider("s3" as "manual")).toBe(false);
   } finally {
     await ctx.cleanup();
   }
@@ -266,10 +270,23 @@ Deno.test("CodeSourceService.create throws on invalid name", async () => {
 });
 
 Deno.test("CodeSourceService.create throws on unregistered provider", async () => {
+  // Get a context with code sources to access dependencies, but create a fresh
+  // CodeSourceService without registering any providers
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // Import CodeSourceService to create a fresh instance without providers
+    const { CodeSourceService } = await import("./code_source_service.ts");
+    const freshService = new CodeSourceService({
+      db: ctx.db,
+      encryptionService: ctx.encryptionService,
+      jobQueueService: ctx.jobQueueService,
+      schedulingService: ctx.schedulingService,
+      codeDirectory: ctx.codeDir,
+    });
+
+    // Now "manual" has no provider registered in this fresh instance
     await expect(
-      ctx.codeSourceService.create({ name: "test", type: "manual" }),
+      freshService.create({ name: "test", type: "manual" }),
     ).rejects.toThrow(ProviderNotFoundError);
   } finally {
     await ctx.cleanup();

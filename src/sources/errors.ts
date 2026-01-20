@@ -113,3 +113,17 @@ export class ProviderNotFoundError extends CodeSourceError {
     this.name = "ProviderNotFoundError";
   }
 }
+
+/**
+ * Thrown when a git operation fails.
+ */
+export class GitOperationError extends CodeSourceError {
+  constructor(
+    public readonly operation: string,
+    public readonly exitCode: number,
+    public readonly stderr: string,
+  ) {
+    super(`Git ${operation} failed (exit ${exitCode}): ${stderr}`);
+    this.name = "GitOperationError";
+  }
+}

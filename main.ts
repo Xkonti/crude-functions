@@ -28,6 +28,9 @@ import { SourceFileService } from "./src/files/source_file_service.ts";
 import { createSourceFileRoutes } from "./src/files/source_file_routes.ts";
 import { CodeSourceService } from "./src/sources/code_source_service.ts";
 import { ManualCodeSourceProvider } from "./src/sources/manual_code_source_provider.ts";
+import { GitCodeSourceProvider } from "./src/sources/git_code_source_provider.ts";
+import { createSourceRoutes } from "./src/sources/source_routes.ts";
+import type { SyncJobPayload } from "./src/sources/types.ts";
 import { createSettingsRoutes } from "./src/settings/settings_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
@@ -270,12 +273,17 @@ const codeSourceService = new CodeSourceService({
   codeDirectory: "./code",
 });
 
-// Register manual code source provider
+// Register code source providers
 const manualCodeSourceProvider = new ManualCodeSourceProvider({
   codeDirectory: "./code",
 });
 codeSourceService.registerProvider(manualCodeSourceProvider);
-console.log("✓ Code source service initialized");
+
+const gitCodeSourceProvider = new GitCodeSourceProvider({
+  codeDirectory: "./code",
+});
+codeSourceService.registerProvider(gitCodeSourceProvider);
+console.log("✓ Code source service initialized (manual, git)");
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
@@ -333,6 +341,11 @@ jobProcessorService.registerHandler("metrics-aggregation", async (_job, token) =
 
 jobProcessorService.registerHandler("key-rotation", async (_job, token) => {
   return await keyRotationService.performRotationCheck(token);
+});
+
+jobProcessorService.registerHandler("source_sync", async (job, token) => {
+  const payload = job.payload as SyncJobPayload;
+  return await codeSourceService.syncSource(payload.sourceId, token);
 });
 
 // Start scheduling service (clears transient schedules, loads persistent)
@@ -421,7 +434,15 @@ const sourceFileService = new SourceFileService({
   codeDirectory: "./code",
 });
 
-// Protected source file management routes
+// Protected source management routes (MUST be before file routes for route ordering)
+// Note: webhook endpoint is NOT protected by hybridAuth - it uses its own secret validation
+app.use("/api/sources/:id/sync", hybridAuth);
+app.use("/api/sources/:id/status", hybridAuth);
+app.use("/api/sources/:id", hybridAuth);
+app.use("/api/sources", hybridAuth);
+app.route("/api/sources", createSourceRoutes({ codeSourceService }));
+
+// Protected source file management routes (after source routes)
 app.use("/api/sources/*/files/*", hybridAuth);
 app.use("/api/sources/*/files", hybridAuth);
 app.route("/api/sources", createSourceFileRoutes({

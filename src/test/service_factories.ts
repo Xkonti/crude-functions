@@ -24,6 +24,8 @@ import { InstanceIdService } from "../instance/instance_id_service.ts";
 import { JobQueueService } from "../jobs/job_queue_service.ts";
 import { SchedulingService } from "../scheduling/scheduling_service.ts";
 import { CodeSourceService } from "../sources/code_source_service.ts";
+import { ManualCodeSourceProvider } from "../sources/manual_code_source_provider.ts";
+import { GitCodeSourceProvider } from "../sources/git_code_source_provider.ts";
 import { createAuth } from "../auth/auth.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
 import type { betterAuth } from "better-auth";
@@ -353,7 +355,7 @@ export function createSchedulingService(
 // =============================================================================
 
 /**
- * Creates the CodeSourceService.
+ * Creates the CodeSourceService with providers registered.
  * Requires database, encryption service, job queue service, scheduling service, and code directory.
  */
 export function createCodeSourceService(
@@ -363,13 +365,23 @@ export function createCodeSourceService(
   schedulingService: SchedulingService,
   codeDir: string,
 ): CodeSourceService {
-  return new CodeSourceService({
+  const service = new CodeSourceService({
     db,
     encryptionService,
     jobQueueService,
     schedulingService,
     codeDirectory: codeDir,
   });
+
+  // Register providers (manual and git)
+  service.registerProvider(
+    new ManualCodeSourceProvider({ codeDirectory: codeDir }),
+  );
+  service.registerProvider(
+    new GitCodeSourceProvider({ codeDirectory: codeDir }),
+  );
+
+  return service;
 }
 
 // =============================================================================
