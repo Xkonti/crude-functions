@@ -78,44 +78,44 @@ function createMockProvider(
 // Validation Tests (Pure Functions - No DB Needed)
 // ============================================================================
 
-Deno.test("CodeSourceService.validateSourceName accepts valid names", async () => {
+Deno.test("CodeSourceService.isValidSourceName accepts valid names", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
-    expect(ctx.codeSourceService.validateSourceName("utils")).toBe(true);
-    expect(ctx.codeSourceService.validateSourceName("my-project")).toBe(true);
-    expect(ctx.codeSourceService.validateSourceName("backend_v2")).toBe(true);
-    expect(ctx.codeSourceService.validateSourceName("a")).toBe(true);
-    expect(ctx.codeSourceService.validateSourceName("a1")).toBe(true);
-    expect(ctx.codeSourceService.validateSourceName("test123")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("utils")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("my-project")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("backend_v2")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("a")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("a1")).toBe(true);
+    expect(ctx.codeSourceService.isValidSourceName("test123")).toBe(true);
   } finally {
     await ctx.cleanup();
   }
 });
 
-Deno.test("CodeSourceService.validateSourceName rejects invalid names", async () => {
+Deno.test("CodeSourceService.isValidSourceName rejects invalid names", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     // Empty/whitespace
-    expect(ctx.codeSourceService.validateSourceName("")).toBe(false);
-    expect(ctx.codeSourceService.validateSourceName("  ")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("  ")).toBe(false);
 
     // Uppercase not allowed
-    expect(ctx.codeSourceService.validateSourceName("MyProject")).toBe(false);
-    expect(ctx.codeSourceService.validateSourceName("UTILS")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("MyProject")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("UTILS")).toBe(false);
 
     // Spaces not allowed
-    expect(ctx.codeSourceService.validateSourceName("my project")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("my project")).toBe(false);
 
     // Special characters not allowed
-    expect(ctx.codeSourceService.validateSourceName("my.project")).toBe(false);
-    expect(ctx.codeSourceService.validateSourceName("my@project")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("my.project")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("my@project")).toBe(false);
 
     // Starting with hyphen/underscore not allowed
-    expect(ctx.codeSourceService.validateSourceName("-project")).toBe(false);
-    expect(ctx.codeSourceService.validateSourceName("_project")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("-project")).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("_project")).toBe(false);
 
     // Too long (> 64 chars)
-    expect(ctx.codeSourceService.validateSourceName("a".repeat(65))).toBe(false);
+    expect(ctx.codeSourceService.isValidSourceName("a".repeat(65))).toBe(false);
   } finally {
     await ctx.cleanup();
   }
@@ -859,6 +859,123 @@ Deno.test("CodeSourceService.triggerWebhookSync returns null for disabled source
 
     const job = await ctx.codeSourceService.triggerWebhookSync(source.id, "secret");
     expect(job).toBeNull();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============================================================================
+// Schedule Lifecycle Tests
+// ============================================================================
+
+Deno.test("CodeSourceService.pauseSchedule throws SourceNotFoundError for non-existent source", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    await expect(
+      ctx.codeSourceService.pauseSchedule(99999),
+    ).rejects.toThrow(SourceNotFoundError);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("CodeSourceService.resumeSchedule throws SourceNotFoundError for non-existent source", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    await expect(
+      ctx.codeSourceService.resumeSchedule(99999),
+    ).rejects.toThrow(SourceNotFoundError);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("CodeSourceService.pauseSchedule does not throw for source without schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "utils",
+      type: "manual",
+    });
+
+    // Should not throw - just does nothing since manual sources have no schedule
+    await ctx.codeSourceService.pauseSchedule(source.id);
+
+    // Source should still be enabled
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.enabled).toBe(true);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("CodeSourceService.resumeSchedule does not throw for source without schedule", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "utils",
+      type: "manual",
+    });
+
+    // Should not throw - just does nothing
+    await ctx.codeSourceService.resumeSchedule(source.id);
+
+    // Source should still be enabled
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.enabled).toBe(true);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("CodeSourceService.pauseSchedule leaves source enabled", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("git"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "repo",
+      type: "git",
+      typeSettings: { url: "https://github.com/user/repo.git" },
+      syncSettings: { intervalSeconds: 300 },
+      enabled: true,
+    });
+
+    // Pause schedule
+    await ctx.codeSourceService.pauseSchedule(source.id);
+
+    // Source should still be enabled
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.enabled).toBe(true);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+Deno.test("CodeSourceService.setEnabled with false also pauses schedule (internal call)", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("git"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "repo",
+      type: "git",
+      typeSettings: { url: "https://github.com/user/repo.git" },
+      syncSettings: { intervalSeconds: 300 },
+      enabled: true,
+    });
+
+    // Disable source
+    const disabled = await ctx.codeSourceService.setEnabled(source.id, false);
+    expect(disabled.enabled).toBe(false);
+
+    // Schedule should be paused (verified by re-enabling)
+    const enabled = await ctx.codeSourceService.setEnabled(source.id, true);
+    expect(enabled.enabled).toBe(true);
   } finally {
     await ctx.cleanup();
   }

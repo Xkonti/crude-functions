@@ -17,7 +17,6 @@ import type {
   CodeSourceProvider,
   CodeSourceServiceOptions,
   SyncJobPayload,
-  GitTypeSettings,
 } from "./types.ts";
 import { isCodeSourceType } from "./types.ts";
 import {
@@ -32,6 +31,20 @@ import { logger } from "../utils/logger.ts";
 
 /** Regex for validating source names: lowercase alphanumeric, hyphens, underscores, 1-64 chars */
 const SOURCE_NAME_REGEX = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Returns true if strings are equal, false otherwise.
+ */
+function constantTimeCompare(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
 
 /**
  * Service for managing code sources.
@@ -499,48 +512,67 @@ export class CodeSourceService {
           reason: "Source deleted",
         });
       }
-    } catch {
-      // Schedule might not exist
+    } catch (error) {
+      // Log but don't fail - schedule cleanup is best-effort
+      logger.debug(
+        `[CodeSource] Schedule cleanup for source ${sourceId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   /**
-   * Pause the sync schedule when source is disabled.
+   * Pause the sync schedule for a source.
+   * Does nothing if source has no schedule or schedule is already paused.
    *
    * @param sourceId - Source ID
+   * @throws {SourceNotFoundError} If source doesn't exist
    */
-  private async pauseSchedule(sourceId: number): Promise<void> {
+  async pauseSchedule(sourceId: number): Promise<void> {
+    const source = await this.getById(sourceId);
+    if (!source) {
+      throw new SourceNotFoundError(sourceId);
+    }
+
     const scheduleName = this.getScheduleName(sourceId);
     try {
       const schedule = await this.schedulingService.getSchedule(scheduleName);
       if (schedule && schedule.status === "active") {
         await this.schedulingService.pauseSchedule(scheduleName);
-        logger.info(
-          `[CodeSource] Paused schedule for source ${sourceId}`,
-        );
+        logger.info(`[CodeSource] Paused schedule for source '${source.name}'`);
       }
-    } catch {
-      // Schedule might not exist
+    } catch (error) {
+      // Log but don't fail - schedule operations are best-effort
+      logger.debug(
+        `[CodeSource] Schedule pause for source ${sourceId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   /**
-   * Resume the sync schedule when source is enabled.
+   * Resume the sync schedule for a source.
+   * Does nothing if source has no schedule or schedule is already active.
    *
    * @param sourceId - Source ID
+   * @throws {SourceNotFoundError} If source doesn't exist
    */
-  private async resumeSchedule(sourceId: number): Promise<void> {
+  async resumeSchedule(sourceId: number): Promise<void> {
+    const source = await this.getById(sourceId);
+    if (!source) {
+      throw new SourceNotFoundError(sourceId);
+    }
+
     const scheduleName = this.getScheduleName(sourceId);
     try {
       const schedule = await this.schedulingService.getSchedule(scheduleName);
       if (schedule && schedule.status === "paused") {
         await this.schedulingService.resumeSchedule(scheduleName);
-        logger.info(
-          `[CodeSource] Resumed schedule for source ${sourceId}`,
-        );
+        logger.info(`[CodeSource] Resumed schedule for source '${source.name}'`);
       }
-    } catch {
-      // Schedule might not exist
+    } catch (error) {
+      // Log but don't fail - schedule operations are best-effort
+      logger.debug(
+        `[CodeSource] Schedule resume for source ${sourceId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
@@ -619,9 +651,9 @@ export class CodeSourceService {
       throw new SourceNotFoundError(id);
     }
 
-    // Validate webhook secret
+    // Validate webhook secret using constant-time comparison to prevent timing attacks
     const expectedSecret = source.syncSettings.webhookSecret;
-    if (!expectedSecret || expectedSecret !== providedSecret) {
+    if (!expectedSecret || !constantTimeCompare(expectedSecret, providedSecret)) {
       throw new WebhookAuthError(source.name);
     }
 
@@ -782,10 +814,10 @@ export class CodeSourceService {
   // ============== Validation ==============
 
   /**
-   * Validate source name format.
+   * Check if a source name is valid.
    * Must be: lowercase alphanumeric, hyphens, underscores, 1-64 chars.
    */
-  validateSourceName(name: string): boolean {
+  isValidSourceName(name: string): boolean {
     return SOURCE_NAME_REGEX.test(name);
   }
 
@@ -793,7 +825,7 @@ export class CodeSourceService {
    * Validate new source input.
    */
   private validateNewSource(input: NewCodeSource): void {
-    if (!input.name || !this.validateSourceName(input.name)) {
+    if (!input.name || !this.isValidSourceName(input.name)) {
       throw new InvalidSourceConfigError(
         "Source name must be 1-64 chars, lowercase alphanumeric with hyphens/underscores, starting with alphanumeric",
       );
@@ -816,56 +848,66 @@ export class CodeSourceService {
 
   /**
    * Validate type settings for a source type.
+   * @throws {InvalidSourceConfigError} If settings are invalid
    */
-  validateTypeSettings(type: CodeSourceType, settings: unknown): boolean {
+  validateTypeSettings(type: CodeSourceType, settings: unknown): void {
     if (settings === null || settings === undefined) {
-      return true; // Empty settings are valid
+      return; // Empty settings are valid
     }
 
     if (typeof settings !== "object") {
       throw new InvalidSourceConfigError("typeSettings must be an object");
     }
 
-    if (type === "git") {
-      const gitSettings = settings as GitTypeSettings;
-      if (!gitSettings.url || typeof gitSettings.url !== "string") {
-        throw new InvalidSourceConfigError(
-          "Git source requires a valid URL in typeSettings",
-        );
-      }
+    switch (type) {
+      case "git":
+        this.validateGitSettings(settings);
+        break;
+      case "manual":
+        // Manual settings currently empty - no validation needed
+        break;
+    }
+  }
 
-      // Validate URL format (basic check)
-      if (
-        !gitSettings.url.startsWith("https://") &&
-        !gitSettings.url.startsWith("git@")
-      ) {
-        throw new InvalidSourceConfigError(
-          "Git URL must start with https:// or git@",
-        );
-      }
+  /**
+   * Validate git-specific type settings.
+   * @throws {InvalidSourceConfigError} If settings are invalid
+   */
+  private validateGitSettings(settings: unknown): void {
+    const s = settings as Record<string, unknown>;
 
-      // Check mutually exclusive ref settings
-      const refCount = [
-        gitSettings.branch,
-        gitSettings.tag,
-        gitSettings.commit,
-      ].filter(Boolean).length;
-      if (refCount > 1) {
-        throw new InvalidSourceConfigError(
-          "Git source: only one of branch, tag, or commit can be specified",
-        );
-      }
+    if (!s.url || typeof s.url !== "string") {
+      throw new InvalidSourceConfigError(
+        "Git source requires a valid URL in typeSettings",
+      );
     }
 
-    return true;
+    // Validate URL format (basic check)
+    if (
+      !s.url.startsWith("https://") &&
+      !s.url.startsWith("git@")
+    ) {
+      throw new InvalidSourceConfigError(
+        "Git URL must start with https:// or git@",
+      );
+    }
+
+    // Check mutually exclusive ref settings
+    const refCount = [s.branch, s.tag, s.commit].filter(Boolean).length;
+    if (refCount > 1) {
+      throw new InvalidSourceConfigError(
+        "Git source: only one of branch, tag, or commit can be specified",
+      );
+    }
   }
 
   /**
    * Validate sync settings.
+   * @throws {InvalidSourceConfigError} If settings are invalid
    */
-  validateSyncSettings(settings: unknown): boolean {
+  validateSyncSettings(settings: unknown): void {
     if (settings === null || settings === undefined) {
-      return true;
+      return;
     }
 
     if (typeof settings !== "object") {
@@ -892,8 +934,6 @@ export class CodeSourceService {
         "syncSettings.webhookSecret must be a string",
       );
     }
-
-    return true;
   }
 
   // ============== Internal Helpers ==============
