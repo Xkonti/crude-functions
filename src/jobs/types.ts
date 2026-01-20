@@ -44,8 +44,11 @@ export interface CancellationToken {
 
 /**
  * Represents a job in the queue with all metadata.
+ *
+ * @template TPayload - Type of the job payload (defaults to unknown for backwards compatibility)
+ * @template TResult - Type of the job result (defaults to unknown for backwards compatibility)
  */
-export interface Job {
+export interface Job<TPayload = unknown, TResult = unknown> {
   /** Unique job identifier */
   id: number;
   /** Job type - used to dispatch to correct handler */
@@ -55,9 +58,9 @@ export interface Job {
   /** Execution mode - sequential (default) or concurrent */
   executionMode: ExecutionMode;
   /** JSON payload (decrypted if encryption is enabled) */
-  payload: unknown | null;
+  payload: TPayload | null;
   /** JSON result from execution (error details on failure) */
-  result: unknown | null;
+  result: TResult | null;
   /** Instance ID of the process that claimed this job */
   processInstanceId: string | null;
   /** Number of times this job has been retried (orphan recovery) */
@@ -85,12 +88,14 @@ export interface Job {
 /**
  * Input for creating a new job.
  * System fields (id, status, processInstanceId, retryCount, timestamps) are auto-generated.
+ *
+ * @template TPayload - Type of the job payload (defaults to unknown for backwards compatibility)
  */
-export interface NewJob {
+export interface NewJob<TPayload = unknown> {
   /** Job type - used to dispatch to correct handler */
   type: string;
   /** Payload data (will be JSON serialized) */
-  payload?: unknown;
+  payload?: TPayload;
   /** Maximum retry attempts (default: 1) */
   maxRetries?: number;
   /** Processing priority (default: 0, higher = processed first) */
@@ -113,11 +118,16 @@ export interface NewJob {
  * Handlers can be either synchronous or asynchronous.
  * For sync handlers, the return value is automatically wrapped in a resolved Promise.
  *
+ * @template TPayload - Type of the job payload (defaults to unknown for backwards compatibility)
+ * @template TResult - Type of the job result (defaults to unknown for backwards compatibility)
  * @param job - The job being processed (includes payload)
  * @param cancellationToken - Token to check for cancellation requests
  * @returns Result data on success, or throws on failure
  */
-export type JobHandler = (job: Job, cancellationToken: CancellationToken) => unknown | Promise<unknown>;
+export type JobHandler<TPayload = unknown, TResult = unknown> = (
+  job: Job<TPayload, TResult>,
+  cancellationToken: CancellationToken,
+) => TResult | Promise<TResult>;
 
 /**
  * Configuration for JobProcessorService.
@@ -187,18 +197,26 @@ export type JobCompletionType = "completed" | "failed" | "cancelled";
 /**
  * Event emitted when a job reaches a terminal state.
  * Subscribers receive the full job data before the job is deleted from the database.
+ *
+ * @template TPayload - Type of the job payload (defaults to unknown for backwards compatibility)
+ * @template TResult - Type of the job result (defaults to unknown for backwards compatibility)
  */
-export interface JobCompletionEvent {
+export interface JobCompletionEvent<TPayload = unknown, TResult = unknown> {
   /** The type of completion */
   type: JobCompletionType;
   /** Full job data including result/error */
-  job: Job;
+  job: Job<TPayload, TResult>;
 }
 
 /**
  * Subscriber callback for job completion events.
+ *
+ * @template TPayload - Type of the job payload (defaults to unknown for backwards compatibility)
+ * @template TResult - Type of the job result (defaults to unknown for backwards compatibility)
  */
-export type JobCompletionSubscriber = (event: JobCompletionEvent) => void | Promise<void>;
+export type JobCompletionSubscriber<TPayload = unknown, TResult = unknown> = (
+  event: JobCompletionEvent<TPayload, TResult>,
+) => void | Promise<void>;
 
 /**
  * Event emitted when a cancellation is requested for a running job.

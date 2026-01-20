@@ -853,8 +853,11 @@ export class JobQueueService {
       try {
         result = JSON.parse(row.result);
       } catch {
-        // If parsing fails, return raw string
-        result = row.result;
+        // If parsing fails, return null for type safety
+        globalThis.console.error(
+          `[JobQueue] Failed to parse result JSON for job ${row.id}, returning null`,
+        );
+        result = null;
       }
     }
 
@@ -922,8 +925,11 @@ export class JobQueueService {
     try {
       return JSON.parse(jsonStr);
     } catch {
-      // If parsing fails, return raw string
-      return jsonStr;
+      // If parsing fails, return null for type safety
+      globalThis.console.error(
+        "[JobQueue] Failed to parse payload JSON, returning null",
+      );
+      return null;
     }
   }
 }
