@@ -136,51 +136,71 @@ export function createSourcePages(
     const error = c.req.query("error");
     const sources = await codeSourceService.getAll();
 
-    const sourceCards = sources.map((source) => {
-      const gitSettings = source.type === "git" ? source.typeSettings as GitTypeSettings : null;
-
-      let infoSection = "";
-      if (source.type === "git" && gitSettings) {
-        infoSection = `<p style="margin: 0.5rem 0;"><small>
-          <strong>Repository:</strong> <code>${escapeHtml(gitSettings.url)}</code>
-          <br><strong>Ref:</strong> ${gitRefDisplay(gitSettings)}
-          ${source.lastSyncAt ? `<br><strong>Last Sync:</strong> ${formatDate(source.lastSyncAt)}` : ""}
-          ${source.lastSyncError ? `<br><span style="color: #d32f2f;"><strong>Sync Error:</strong> ${escapeHtml(source.lastSyncError)}</span>` : ""}
-          ${source.lastSyncStartedAt ? `<br><span style="color: #1976d2;"><strong>Syncing...</strong></span>` : ""}
-        </small></p>`;
+    const sourceRows = sources.map((source) => {
+      // Last sync column content
+      let lastSyncContent = "-";
+      if (source.type === "git") {
+        if (source.lastSyncStartedAt) {
+          lastSyncContent = `<span style="color: #1976d2;" title="Sync in progress">Syncing...</span>`;
+        } else if (source.lastSyncError) {
+          lastSyncContent = `<span style="color: #d32f2f;" title="${escapeHtml(source.lastSyncError)}">Error</span>`;
+        } else if (source.lastSyncAt) {
+          lastSyncContent = formatDate(source.lastSyncAt);
+        } else {
+          lastSyncContent = `<span style="color: #856404;">Never</span>`;
+        }
       }
 
+      // Action buttons (icons)
       const syncButton = source.type === "git"
-        ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline;">
-            <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;" ${source.lastSyncStartedAt ? "disabled" : ""}>
-              ${source.lastSyncStartedAt ? "Syncing..." : "Sync"}
+        ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline; margin: 0;">
+            <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="Sync" ${source.lastSyncStartedAt ? "disabled" : ""}>
+              🔄
             </button>
           </form>`
         : "";
 
       return `
-        <article style="margin-bottom: 1rem;">
-          <header style="padding-bottom: 0.5rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
-              <div>
-                <strong>${escapeHtml(source.name)}</strong>
-                ${sourceTypeBadge(source.type)}
-                ${!source.enabled ? disabledBadge() : ""}
-              </div>
-              <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
-                ${syncButton}
-                <a href="/web/code/sources/${source.id}/edit" role="button" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Edit</a>
-                <a href="/web/code/sources/${source.id}/delete" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete</a>
-              </div>
-            </div>
-          </header>
-          ${infoSection}
-          <footer style="padding-top: 0.5rem;">
-            <a href="/web/code/sources/${source.id}" role="button" class="outline" style="padding: 0.25rem 0.75rem;">View Files</a>
-          </footer>
-        </article>
+        <tr>
+          <td>
+            <a href="/web/code/sources/${source.id}" style="text-decoration: none;">
+              <strong>${escapeHtml(source.name)}</strong>
+            </a>
+            ${!source.enabled ? disabledBadge() : ""}
+          </td>
+          <td>${sourceTypeBadge(source.type)}</td>
+          <td>${lastSyncContent}</td>
+          <td style="white-space: nowrap;">
+            <a href="/web/code/sources/${source.id}" class="outline" role="button" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="View Files">📁</a>
+            ${syncButton}
+            <a href="/web/code/sources/${source.id}/edit" class="outline secondary" role="button" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="Edit">✏️</a>
+            <a href="/web/code/sources/${source.id}/delete" class="outline contrast" role="button" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="Delete">🗑️</a>
+          </td>
+        </tr>
       `;
     }).join("");
+
+    const tableContent = sources.length > 0
+      ? `<table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Type</th>
+              <th>Last Sync</th>
+              <th style="width: 1%;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sourceRows}
+          </tbody>
+        </table>`
+      : `<article>
+          <p>No code sources configured yet.</p>
+          <p>Code sources are directories containing TypeScript handlers that can be executed as HTTP endpoints.</p>
+          <footer>
+            <a href="/web/code/sources/new" role="button">Create Your First Source</a>
+          </footer>
+        </article>`;
 
     const content = `
       <h1>Code Sources</h1>
@@ -188,16 +208,7 @@ export function createSourcePages(
       <p>
         ${buttonLink("/web/code/sources/new", "New Code Source")}
       </p>
-      ${sources.length === 0
-        ? `<article>
-            <p>No code sources configured yet.</p>
-            <p>Code sources are directories containing TypeScript handlers that can be executed as HTTP endpoints.</p>
-            <footer>
-              <a href="/web/code/sources/new" role="button">Create Your First Source</a>
-            </footer>
-          </article>`
-        : sourceCards
-      }
+      ${tableContent}
     `;
 
     return c.html(await layout("Code Sources", content, getLayoutUser(c), settingsService));
@@ -607,7 +618,7 @@ export function createSourcePages(
               <th>Path</th>
               <th>Size</th>
               <th>Modified</th>
-              ${isEditable ? '<th class="actions">Actions</th>' : ""}
+              <th class="actions">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -616,12 +627,13 @@ export function createSourcePages(
                 <td><code>${escapeHtml(file.path)}</code></td>
                 <td>${formatSize(file.size)}</td>
                 <td>${formatDate(file.mtime)}</td>
-                ${isEditable ? `
-                  <td class="actions">
+                <td class="actions">
+                  <a href="/web/code/sources/${source.id}/files/view?path=${encodeURIComponent(file.path)}" title="View" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">👁️</a>
+                  ${isEditable ? `
                     <a href="/web/code/sources/${source.id}/files/edit?path=${encodeURIComponent(file.path)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
                     <a href="/web/code/sources/${source.id}/files/delete?path=${encodeURIComponent(file.path)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
-                  </td>
-                ` : ""}
+                  ` : ""}
+                </td>
               </tr>
             `).join("")}
           </tbody>
@@ -1130,6 +1142,89 @@ export function createSourcePages(
     `;
 
     return c.html(await layout(`Upload File - ${source.name}`, content, getLayoutUser(c), settingsService));
+  });
+
+  // ============================================================================
+  // File View (All Sources)
+  // ============================================================================
+
+  routes.get("/sources/:id/files/view", async (c) => {
+    const id = parseSourceId(c.req.param("id"));
+    if (id === null) {
+      return c.redirect("/web/code?error=" + encodeURIComponent("Invalid source ID"));
+    }
+
+    const source = await codeSourceService.getById(id);
+    if (!source) {
+      return c.redirect("/web/code?error=" + encodeURIComponent("Source not found"));
+    }
+
+    const path = c.req.query("path");
+
+    if (!path) {
+      return c.redirect(`/web/code/sources/${id}?error=` + encodeURIComponent("No file path specified"));
+    }
+
+    const bytes = await sourceFileService.getFileBytes(source.name, path);
+    if (bytes === null) {
+      return c.redirect(`/web/code/sources/${id}?error=` + encodeURIComponent(`File not found: ${path}`));
+    }
+
+    const contentType = getContentType(path);
+    const isText = isTextContentType(contentType);
+    const canViewInTextarea = isText && bytes.length <= MAX_EDITABLE_SIZE;
+    const isEditable = await codeSourceService.isEditable(id);
+
+    let pageContent: string;
+
+    if (canViewInTextarea) {
+      const fileContent = new TextDecoder().decode(bytes);
+      const editButton = isEditable
+        ? `<a href="/web/code/sources/${source.id}/files/edit?path=${encodeURIComponent(path)}" role="button" class="secondary">Edit File</a>`
+        : "";
+
+      pageContent = `
+        <h1>View File</h1>
+        <p>
+          <a href="/web/code/sources/${source.id}" role="button" class="secondary outline">Back</a>
+          ${editButton}
+        </p>
+        <p><strong>Path:</strong> <code>${escapeHtml(path)}</code></p>
+        <p><strong>Size:</strong> ${formatSize(bytes.length)}</p>
+        <textarea readonly rows="25" style="font-family: monospace; background: var(--pico-form-element-disabled-background-color);">${escapeHtml(fileContent)}</textarea>
+        <p>
+          <a href="/api/sources/${encodeURIComponent(source.name)}/files/${encodeURIComponent(path)}" role="button" class="outline" download="${escapeHtml(path.split("/").pop() || path)}">Download</a>
+        </p>
+      `;
+    } else {
+      const reason = !isText
+        ? "This is a binary file and cannot be previewed in the browser."
+        : "This file is too large to preview in the browser (over 1 MB).";
+
+      const editButton = isEditable
+        ? `<a href="/web/code/sources/${source.id}/files/edit?path=${encodeURIComponent(path)}" role="button" class="secondary">Replace File</a>`
+        : "";
+
+      pageContent = `
+        <h1>View File</h1>
+        <p>
+          <a href="/web/code/sources/${source.id}" role="button" class="secondary outline">Back</a>
+        </p>
+        <article>
+          <header><strong>File Information</strong></header>
+          <p><strong>Path:</strong> <code>${escapeHtml(path)}</code></p>
+          <p><strong>Size:</strong> ${formatSize(bytes.length)}</p>
+          <p><strong>Type:</strong> ${escapeHtml(contentType)}</p>
+          <p><small>${reason}</small></p>
+          <footer>
+            <a href="/api/sources/${encodeURIComponent(source.name)}/files/${encodeURIComponent(path)}" role="button" class="secondary" download="${escapeHtml(path.split("/").pop() || path)}">Download</a>
+            ${editButton}
+          </footer>
+        </article>
+      `;
+    }
+
+    return c.html(await layout(`View File - ${source.name}`, pageContent, getLayoutUser(c), settingsService));
   });
 
   // ============================================================================
