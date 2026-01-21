@@ -2,7 +2,7 @@ import { Mutex } from "@core/asyncutil/mutex";
 import type { BindValue } from "@db/sqlite";
 import type { DatabaseService } from "../database/database_service.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
-import type { Job } from "../jobs/types.ts";
+import type { Job, JobCompletionEvent } from "../jobs/types.ts";
 import {
   isScheduleType,
   isScheduleStatus,
@@ -72,17 +72,16 @@ export class SchedulingService {
 
   // Lifecycle state
   private timerId: number | null = null;
-  private completionCheckTimerId: number | null = null;
   private rescheduleDebounceTimer: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
   private isStarting = false;
+  private isRunningState = false;
   private nextScheduledTime: Date | null = null;
 
   private static readonly DEFAULT_CONFIG: Required<SchedulingServiceConfig> = {
     minRecalculationIntervalMs: 100,
     maxTimeoutMs: 2147483647, // Max 32-bit signed int
-    completionCheckIntervalMs: 1000,
   };
 
   constructor(options: SchedulingServiceOptions) {
@@ -102,11 +101,11 @@ export class SchedulingService {
    * On startup:
    * 1. Clears transient schedules
    * 2. Resets activeJobId for schedules with stale references
-   * 3. Calculates next trigger time and sets timeout
-   * 4. Starts completion check interval
+   * 3. Re-subscribes to active jobs that may have been orphaned
+   * 4. Calculates next trigger time and sets timeout
    */
   async start(): Promise<void> {
-    if (this.isStarting || this.timerId !== null || this.completionCheckTimerId !== null) {
+    if (this.isStarting || this.isRunningState) {
       logger.warn("[Scheduling] Already running");
       return;
     }
@@ -121,16 +120,14 @@ export class SchedulingService {
       await this.resetStaleActiveJobs();
       if (this.stopRequested) return;
 
+      // Re-subscribe to active jobs (orphaned subscriptions from crash)
+      await this.resubscribeToActiveJobs();
+      if (this.stopRequested) return;
+
       await this.scheduleNextTrigger();
       if (this.stopRequested) return;
 
-      // Start completion check interval
-      this.completionCheckTimerId = setInterval(() => {
-        this.checkJobCompletions().catch((error) => {
-          logger.error("[Scheduling] Completion check failed:", error);
-        });
-      }, this.config.completionCheckIntervalMs);
-
+      this.isRunningState = true;
       logger.info("[Scheduling] Service started");
     } catch (error) {
       logger.error("[Scheduling] Startup failed:", error);
@@ -161,11 +158,6 @@ export class SchedulingService {
       this.timerId = null;
     }
 
-    if (this.completionCheckTimerId !== null) {
-      clearInterval(this.completionCheckTimerId);
-      this.completionCheckTimerId = null;
-    }
-
     if (this.rescheduleDebounceTimer !== null) {
       clearTimeout(this.rescheduleDebounceTimer);
       this.rescheduleDebounceTimer = null;
@@ -182,6 +174,7 @@ export class SchedulingService {
     }
 
     this.stopRequested = false;
+    this.isRunningState = false;
     this.nextScheduledTime = null;
     logger.info("[Scheduling] Service stopped");
   }
@@ -190,7 +183,7 @@ export class SchedulingService {
    * Check if the service is running.
    */
   isRunning(): boolean {
-    return this.isStarting || this.timerId !== null || this.completionCheckTimerId !== null;
+    return this.isStarting || this.isRunningState;
   }
 
   /**
@@ -974,6 +967,9 @@ export class SchedulingService {
          WHERE id = ?`,
         [job.id, schedule.id],
       );
+
+      // Subscribe to job completion events
+      this.subscribeToJobCompletion(schedule.id, job.id);
     } else if (schedule.type === "concurrent_interval") {
       // Concurrent: schedule next immediately
       const nextRunAt = new Date(Date.now() + schedule.intervalMs!);
@@ -1027,42 +1023,67 @@ export class SchedulingService {
   }
 
   /**
-   * Check for job completions and handle dynamic/sequential schedules.
-   * Includes backpressure to prevent runaway processing time.
+   * Subscribe to job completion events for a schedule.
+   * Called when a schedule triggers a job that needs completion tracking.
    */
-  private async checkJobCompletions(): Promise<void> {
-    const startTime = Date.now();
-    const maxProcessingTime = this.config.completionCheckIntervalMs * 0.8;
+  private subscribeToJobCompletion(scheduleId: number, jobId: number): void {
+    this.jobQueueService.subscribeToCompletion(jobId, async (event: JobCompletionEvent) => {
+      await this.handleJobCompletionEvent(scheduleId, event);
+    });
+  }
 
-    // Find schedules waiting for job completion
+  /**
+   * Handle a job completion event from the subscription.
+   */
+  private async handleJobCompletionEvent(scheduleId: number, event: JobCompletionEvent): Promise<void> {
+    const schedule = await this.getScheduleInternal(scheduleId);
+    if (!schedule) {
+      logger.warn(`[Scheduling] Schedule ${scheduleId} not found for job ${event.job.id} completion`);
+      return;
+    }
+
+    // Verify this is still the active job for this schedule
+    if (schedule.activeJobId !== event.job.id) {
+      logger.debug(
+        `[Scheduling] Job ${event.job.id} completion ignored for schedule '${schedule.name}' ` +
+        `(activeJobId is ${schedule.activeJobId})`
+      );
+      return;
+    }
+
+    if (event.type === "completed") {
+      await this.handleJobCompletion(schedule, event.job);
+    } else {
+      // failed or cancelled
+      await this.handleJobFailure(schedule, event.job);
+    }
+  }
+
+  /**
+   * Re-subscribe to active jobs on startup (handles orphaned subscriptions from crash).
+   */
+  private async resubscribeToActiveJobs(): Promise<void> {
     const waitingSchedules = await this.db.queryAll<ScheduleRow>(
-      `SELECT s.* FROM schedules s
-       WHERE s.activeJobId IS NOT NULL
-       AND s.status = 'active'`,
+      `SELECT * FROM schedules
+       WHERE activeJobId IS NOT NULL
+       AND status = 'active'`,
     );
 
     for (const row of waitingSchedules) {
-      // Backpressure: exit early if processing takes too long
-      if (Date.now() - startTime > maxProcessingTime) {
-        logger.warn("[Scheduling] Completion check timeout, will resume next interval");
-        break;
-      }
-
       const schedule = this.rowToSchedule(row);
       const job = await this.jobQueueService.getJob(schedule.activeJobId!);
 
       if (!job) {
-        // Job was deleted - reset schedule
+        // Job was deleted (completed before we restarted) - reset schedule
         await this.resetScheduleAfterJobGone(schedule);
         continue;
       }
 
-      if (job.status === "completed") {
-        await this.handleJobCompletion(schedule, job);
-      } else if (job.status === "failed" || job.status === "cancelled") {
-        await this.handleJobFailure(schedule, job);
-      }
-      // If still pending/running, do nothing - wait for next check
+      // Job still exists - re-subscribe
+      logger.debug(
+        `[Scheduling] Re-subscribing to job ${job.id} for schedule '${schedule.name}'`
+      );
+      this.subscribeToJobCompletion(schedule.id, job.id);
     }
   }
 

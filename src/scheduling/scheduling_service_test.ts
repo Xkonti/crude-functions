@@ -1,6 +1,5 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
-import { SchedulingService } from "./scheduling_service.ts";
 import { JobProcessorService } from "../jobs/job_processor_service.ts";
 import {
   ScheduleNotFoundError,
@@ -689,12 +688,8 @@ Deno.test("SchedulingService sequential_interval waits for job completion", asyn
     config: { pollingIntervalSeconds: 60 },
   });
 
-  // Use a new scheduling service with shorter check interval for testing
-  const schedulingService = new SchedulingService({
-    db: ctx.db,
-    jobQueueService: ctx.jobQueueService,
-    config: { completionCheckIntervalMs: 50 },
-  });
+  // Use the scheduling service from context (event-based completion detection)
+  const schedulingService = ctx.schedulingService;
 
   try {
     processor.registerHandler("seq-interval-job", () => {
@@ -714,11 +709,11 @@ Deno.test("SchedulingService sequential_interval waits for job completion", asyn
     // Wait for first trigger
     await new Promise((r) => setTimeout(r, 150));
 
-    // Process the job
+    // Process the job (completion event is delivered synchronously)
     await processor.processOne();
 
-    // Wait for completion to be detected
-    await new Promise((r) => setTimeout(r, 200));
+    // Event-based: no polling delay needed, completion is immediate
+    await new Promise((r) => setTimeout(r, 50));
 
     // Check schedule has new nextRunAt and completion was recorded
     const schedule = await schedulingService.getSchedule("seq-interval");
@@ -748,11 +743,8 @@ Deno.test("SchedulingService dynamic schedule uses handler result for next time"
     config: { pollingIntervalSeconds: 60 },
   });
 
-  const schedulingService = new SchedulingService({
-    db: ctx.db,
-    jobQueueService: ctx.jobQueueService,
-    config: { completionCheckIntervalMs: 50 },
-  });
+  // Use the scheduling service from context (event-based completion detection)
+  const schedulingService = ctx.schedulingService;
 
   try {
     const nextTime = new Date(Date.now() + 60000);
@@ -773,11 +765,11 @@ Deno.test("SchedulingService dynamic schedule uses handler result for next time"
     // Wait for trigger
     await new Promise((r) => setTimeout(r, 150));
 
-    // Process the job
+    // Process the job (completion event is delivered synchronously)
     await processor.processOne();
 
-    // Wait for completion detection
-    await new Promise((r) => setTimeout(r, 200));
+    // Event-based: no polling delay needed
+    await new Promise((r) => setTimeout(r, 50));
 
     const schedule = await schedulingService.getSchedule("dynamic");
     expect(schedule!.nextRunAt?.getTime()).toBe(nextTime.getTime());
@@ -798,11 +790,8 @@ Deno.test("SchedulingService dynamic schedule completes when handler returns no 
     config: { pollingIntervalSeconds: 60 },
   });
 
-  const schedulingService = new SchedulingService({
-    db: ctx.db,
-    jobQueueService: ctx.jobQueueService,
-    config: { completionCheckIntervalMs: 50 },
-  });
+  // Use the scheduling service from context (event-based completion detection)
+  const schedulingService = ctx.schedulingService;
 
   try {
     processor.registerHandler("dynamic-final-job", () => {
@@ -820,7 +809,8 @@ Deno.test("SchedulingService dynamic schedule completes when handler returns no 
 
     await new Promise((r) => setTimeout(r, 150));
     await processor.processOne();
-    await new Promise((r) => setTimeout(r, 200));
+    // Event-based: no polling delay needed
+    await new Promise((r) => setTimeout(r, 50));
 
     const schedule = await schedulingService.getSchedule("dynamic-final");
     expect(schedule!.status).toBe("completed");

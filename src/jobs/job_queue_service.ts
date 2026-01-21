@@ -9,7 +9,11 @@ import type {
   ExecutionMode,
   JobQueueServiceOptions,
   JobRow,
+  JobCompletionType,
+  JobCompletionSubscriber,
+  JobCancellationSubscriber,
 } from "./types.ts";
+import { logger } from "../utils/logger.ts";
 import {
   JobNotFoundError,
   JobAlreadyClaimedError,
@@ -52,6 +56,11 @@ export class JobQueueService {
   private readonly instanceIdService: InstanceIdService;
   private readonly encryptionService?: IEncryptionService;
   private readonly writeMutex = new Mutex();
+
+  /** Per-job subscribers for completion events (completed/failed/cancelled) */
+  private readonly completionSubscribers = new Map<number, JobCompletionSubscriber[]>();
+  /** Per-job subscribers for cancellation request events */
+  private readonly cancellationSubscribers = new Map<number, JobCancellationSubscriber[]>();
 
   constructor(options: JobQueueServiceOptions) {
     this.db = options.db;
@@ -321,10 +330,11 @@ export class JobQueueService {
 
   /**
    * Mark a job as completed with result data.
+   * Notifies all completion subscribers and deletes the job from the database.
    *
    * @param id - Job ID
    * @param result - Result data (will be JSON serialized)
-   * @returns The completed job
+   * @returns The completed job (note: job is deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    */
   async completeJob(id: number, result?: unknown): Promise<Job> {
@@ -349,15 +359,20 @@ export class JobQueueService {
     if (!completed) {
       throw new Error("Failed to retrieve completed job");
     }
+
+    // Notify subscribers and delete job
+    await this.notifyCompletionAndDelete(completed, "completed");
+
     return completed;
   }
 
   /**
    * Mark a job as failed with error details.
+   * Notifies all completion subscribers and deletes the job from the database.
    *
    * @param id - Job ID
    * @param error - Error details (will be JSON serialized)
-   * @returns The failed job
+   * @returns The failed job (note: job is deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    */
   async failJob(id: number, error: unknown): Promise<Job> {
@@ -382,6 +397,10 @@ export class JobQueueService {
     if (!failed) {
       throw new Error("Failed to retrieve failed job");
     }
+
+    // Notify subscribers and delete job
+    await this.notifyCompletionAndDelete(failed, "failed");
+
     return failed;
   }
 
@@ -456,13 +475,12 @@ export class JobQueueService {
   /**
    * Cancel a single job by ID.
    *
-   * For pending jobs: Sets cancelledAt and status to 'cancelled' immediately.
-   * For running jobs: Sets cancelledAt to signal handler to stop (status remains 'running'
-   * until handler completes or is marked cancelled via markJobCancelled).
+   * For pending jobs: Sets status to 'cancelled', notifies subscribers, and deletes the job.
+   * For running jobs: Sets cancelledAt to signal handler to stop via cancellation event.
    *
    * @param id - Job ID to cancel
    * @param options - Optional cancellation options
-   * @returns The updated job
+   * @returns The updated job (note: pending jobs are deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    * @throws {JobNotCancellableError} If job is already completed/failed/cancelled
    */
@@ -497,6 +515,16 @@ export class JobQueueService {
          WHERE id = ?`,
         [reason, id],
       );
+
+      const cancelled = await this.getJobInternal(id);
+      if (!cancelled) {
+        throw new Error("Failed to retrieve cancelled job");
+      }
+
+      // Notify subscribers and delete job
+      await this.notifyCompletionAndDelete(cancelled, "cancelled");
+
+      return cancelled;
     } else {
       // Running jobs: set cancelledAt to signal handler
       await this.db.execute(
@@ -506,17 +534,22 @@ export class JobQueueService {
          WHERE id = ?`,
         [reason, id],
       );
-    }
 
-    const updated = await this.getJobInternal(id);
-    if (!updated) {
-      throw new Error("Failed to retrieve cancelled job");
+      // Notify cancellation subscribers (processor will handle the token)
+      this.notifyCancellationRequest(id, reason ?? undefined);
+
+      const updated = await this.getJobInternal(id);
+      if (!updated) {
+        throw new Error("Failed to retrieve cancelled job");
+      }
+      return updated;
     }
-    return updated;
   }
 
   /**
    * Cancel multiple jobs by criteria.
+   * For pending jobs: notifies subscribers and deletes them.
+   * For running jobs: notifies cancellation subscribers.
    *
    * @param options - Filter criteria and cancellation reason
    * @returns Number of jobs cancelled
@@ -530,7 +563,7 @@ export class JobQueueService {
     using _lock = await this.writeMutex.acquire();
 
     const conditions: string[] = ["status IN ('pending', 'running')", "cancelledAt IS NULL"];
-    const params: (string | number | null)[] = [];
+    const params: (string | number)[] = [];
 
     if (options.type) {
       conditions.push("type = ?");
@@ -547,27 +580,54 @@ export class JobQueueService {
 
     const reason = options.reason ?? null;
 
-    // For pending jobs, mark as cancelled immediately
-    const pendingResult = await this.db.execute(
-      `UPDATE jobQueue
-       SET status = 'cancelled',
-           cancelledAt = CURRENT_TIMESTAMP,
-           cancelReason = ?,
-           completedAt = CURRENT_TIMESTAMP
-       WHERE status = 'pending' AND ${conditions.slice(1).join(" AND ")}`,
-      [reason, ...params],
+    // Find all matching jobs first
+    const rows = await this.db.queryAll<JobRow>(
+      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
+              retryCount, maxRetries, priority, referenceType, referenceId,
+              createdAt, startedAt, completedAt, cancelledAt, cancelReason
+       FROM jobQueue
+       WHERE ${conditions.join(" AND ")}`,
+      params,
     );
 
-    // For running jobs, just set cancelledAt
-    const runningResult = await this.db.execute(
-      `UPDATE jobQueue
-       SET cancelledAt = CURRENT_TIMESTAMP,
-           cancelReason = ?
-       WHERE status = 'running' AND cancelledAt IS NULL AND ${conditions.slice(1).filter(c => c !== "cancelledAt IS NULL").join(" AND ") || "1=1"}`,
-      [reason, ...params],
-    );
+    let cancelledCount = 0;
 
-    return pendingResult.changes + runningResult.changes;
+    for (const row of rows) {
+      const job = await this.rowToJob(row);
+
+      if (job.status === "pending") {
+        // Cancel pending jobs immediately
+        await this.db.execute(
+          `UPDATE jobQueue
+           SET status = 'cancelled',
+               cancelledAt = CURRENT_TIMESTAMP,
+               cancelReason = ?,
+               completedAt = CURRENT_TIMESTAMP
+           WHERE id = ?`,
+          [reason, job.id],
+        );
+
+        const cancelled = await this.getJobInternal(job.id);
+        if (cancelled) {
+          await this.notifyCompletionAndDelete(cancelled, "cancelled");
+        }
+        cancelledCount++;
+      } else {
+        // For running jobs, set cancelledAt and notify
+        await this.db.execute(
+          `UPDATE jobQueue
+           SET cancelledAt = CURRENT_TIMESTAMP,
+               cancelReason = ?
+           WHERE id = ?`,
+          [reason, job.id],
+        );
+
+        this.notifyCancellationRequest(job.id, reason ?? undefined);
+        cancelledCount++;
+      }
+    }
+
+    return cancelledCount;
   }
 
   /**
@@ -596,10 +656,11 @@ export class JobQueueService {
   /**
    * Mark a running job as cancelled (final state).
    * Called by processor when handler finishes after cancellation was requested.
+   * Notifies all completion subscribers and deletes the job from the database.
    *
    * @param id - Job ID
    * @param reason - Optional reason (uses existing cancelReason if not provided)
-   * @returns The cancelled job
+   * @returns The cancelled job (note: job is deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    */
   async markJobCancelled(id: number, reason?: string): Promise<Job> {
@@ -627,32 +688,71 @@ export class JobQueueService {
     if (!cancelled) {
       throw new Error("Failed to retrieve cancelled job");
     }
+
+    // Notify subscribers and delete job
+    await this.notifyCompletionAndDelete(cancelled, "cancelled");
+
     return cancelled;
   }
 
-  // ============== Cleanup Operations ==============
+  // ============== Event Subscription ==============
 
   /**
-   * Delete completed/failed/cancelled jobs older than the specified date.
-   * Does not delete pending or running jobs.
+   * Subscribe to completion events for a specific job.
+   * Subscriber will be called when the job reaches a terminal state
+   * (completed, failed, or cancelled).
    *
-   * @param olderThan - Cutoff date
-   * @returns Number of jobs deleted
+   * @param jobId - Job ID to subscribe to
+   * @param subscriber - Callback function
+   * @returns Unsubscribe function
    */
-  async deleteOldJobs(olderThan: Date): Promise<number> {
-    using _lock = await this.writeMutex.acquire();
+  subscribeToCompletion(jobId: number, subscriber: JobCompletionSubscriber): () => void {
+    const subscribers = this.completionSubscribers.get(jobId) ?? [];
+    subscribers.push(subscriber);
+    this.completionSubscribers.set(jobId, subscribers);
 
-    const cutoff = olderThan.toISOString();
-
-    const result = await this.db.execute(
-      `DELETE FROM jobQueue
-       WHERE status IN ('completed', 'failed', 'cancelled')
-       AND completedAt < ?`,
-      [cutoff],
-    );
-
-    return result.changes;
+    return () => {
+      const current = this.completionSubscribers.get(jobId);
+      if (current) {
+        const index = current.indexOf(subscriber);
+        if (index !== -1) {
+          current.splice(index, 1);
+        }
+        if (current.length === 0) {
+          this.completionSubscribers.delete(jobId);
+        }
+      }
+    };
   }
+
+  /**
+   * Subscribe to cancellation request events for a specific job.
+   * Subscriber will be called when cancelJob() is called on a running job.
+   *
+   * @param jobId - Job ID to subscribe to
+   * @param subscriber - Callback function
+   * @returns Unsubscribe function
+   */
+  subscribeToCancellation(jobId: number, subscriber: JobCancellationSubscriber): () => void {
+    const subscribers = this.cancellationSubscribers.get(jobId) ?? [];
+    subscribers.push(subscriber);
+    this.cancellationSubscribers.set(jobId, subscribers);
+
+    return () => {
+      const current = this.cancellationSubscribers.get(jobId);
+      if (current) {
+        const index = current.indexOf(subscriber);
+        if (index !== -1) {
+          current.splice(index, 1);
+        }
+        if (current.length === 0) {
+          this.cancellationSubscribers.delete(jobId);
+        }
+      }
+    };
+  }
+
+  // ============== Stats Operations ==============
 
   /**
    * Get count of jobs by status for monitoring.
@@ -686,6 +786,60 @@ export class JobQueueService {
   // ============== Private Helpers ==============
 
   /**
+   * Notify completion subscribers and delete the job from the database.
+   * Called after job reaches terminal state (completed/failed/cancelled).
+   *
+   * @param job - The completed job with full data
+   * @param type - The type of completion
+   */
+  private async notifyCompletionAndDelete(job: Job, type: JobCompletionType): Promise<void> {
+    const subscribers = this.completionSubscribers.get(job.id) ?? [];
+
+    // Notify all subscribers with full job data
+    for (const subscriber of subscribers) {
+      try {
+        await subscriber({ type, job });
+      } catch (error) {
+        logger.error(`[JobQueue] Completion subscriber error for job ${job.id}:`, error);
+        // Continue notifying other subscribers even if one fails
+      }
+    }
+
+    // Clean up subscribers
+    this.completionSubscribers.delete(job.id);
+    this.cancellationSubscribers.delete(job.id);
+
+    // Delete the job from the database
+    await this.db.execute(`DELETE FROM jobQueue WHERE id = ?`, [job.id]);
+    logger.debug(`[JobQueue] Deleted job ${job.id} after ${type}`);
+  }
+
+  /**
+   * Notify cancellation subscribers when a cancellation is requested.
+   * Called by cancelJob() for running jobs.
+   *
+   * @param jobId - The job ID being cancelled
+   * @param reason - Optional cancellation reason
+   */
+  private notifyCancellationRequest(jobId: number, reason?: string): void {
+    const subscribers = this.cancellationSubscribers.get(jobId) ?? [];
+
+    for (const subscriber of subscribers) {
+      try {
+        // Fire-and-forget for cancellation notifications
+        const result = subscriber({ jobId, reason });
+        if (result instanceof Promise) {
+          result.catch((error) => {
+            logger.error(`[JobQueue] Cancellation subscriber error for job ${jobId}:`, error);
+          });
+        }
+      } catch (error) {
+        logger.error(`[JobQueue] Cancellation subscriber error for job ${jobId}:`, error);
+      }
+    }
+  }
+
+  /**
    * Transform database row to Job object.
    * Handles JSON parsing, date conversion, and payload decryption.
    */
@@ -699,8 +853,11 @@ export class JobQueueService {
       try {
         result = JSON.parse(row.result);
       } catch {
-        // If parsing fails, return raw string
-        result = row.result;
+        // If parsing fails, return null for type safety
+        globalThis.console.error(
+          `[JobQueue] Failed to parse result JSON for job ${row.id}, returning null`,
+        );
+        result = null;
       }
     }
 
@@ -768,8 +925,11 @@ export class JobQueueService {
     try {
       return JSON.parse(jsonStr);
     } catch {
-      // If parsing fails, return raw string
-      return jsonStr;
+      // If parsing fails, return null for type safety
+      globalThis.console.error(
+        "[JobQueue] Failed to parse payload JSON, returning null",
+      );
+      return null;
     }
   }
 }

@@ -57,17 +57,17 @@ export class JobProcessorService {
   private readonly handlers = new Map<string, JobHandler>();
 
   private timerId: number | null = null;
-  private cancellationCheckTimerId: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
   private consecutiveFailures = 0;
 
   /** Active cancellation tokens for running jobs (job ID -> token) */
   private readonly activeCancellationTokens = new Map<number, CancellationTokenImpl>();
+  /** Unsubscribe functions for active cancellation subscriptions */
+  private readonly cancellationUnsubscribers = new Map<number, () => void>();
 
   private static readonly MAX_CONSECUTIVE_FAILURES = 5;
   private static readonly DEFAULT_SHUTDOWN_TIMEOUT_MS = 60000;
-  private static readonly CANCELLATION_CHECK_INTERVAL_MS = 1000;
 
   constructor(options: JobProcessorServiceOptions) {
     this.jobQueueService = options.jobQueueService;
@@ -119,8 +119,7 @@ export class JobProcessorService {
    * On startup:
    * 1. Detects and recovers orphaned jobs from crashed instances
    * 2. Processes any pending jobs immediately
-   * 3. Schedules polling interval
-   * 4. Starts cancellation check interval
+   * 3. Schedules polling interval for new jobs
    */
   start(): void {
     if (this.timerId !== null) {
@@ -144,7 +143,7 @@ export class JobProcessorService {
           return;
         }
 
-        // Start polling interval
+        // Start polling interval for new jobs
         this.timerId = setInterval(() => {
           this.processLoop()
             .then(() => {
@@ -168,20 +167,9 @@ export class JobProcessorService {
                   clearInterval(this.timerId);
                   this.timerId = null;
                 }
-                if (this.cancellationCheckTimerId !== null) {
-                  clearInterval(this.cancellationCheckTimerId);
-                  this.cancellationCheckTimerId = null;
-                }
               }
             });
         }, this.config.pollingIntervalSeconds * 1000);
-
-        // Start cancellation check interval
-        this.cancellationCheckTimerId = setInterval(() => {
-          this.checkCancellations().catch((error) => {
-            logger.error("[JobQueue] Cancellation check failed:", error);
-          });
-        }, JobProcessorService.CANCELLATION_CHECK_INTERVAL_MS);
       })
       .catch((error) => {
         logger.error("[JobQueue] Startup failed:", error);
@@ -191,19 +179,14 @@ export class JobProcessorService {
   /**
    * Stop the job processor gracefully.
    *
-   * Clears the polling interval and cancellation checker,
+   * Clears the polling interval,
    * waits for any in-progress job to complete (with configurable timeout),
-   * and cleans up active cancellation tokens.
+   * and cleans up active cancellation tokens and subscriptions.
    */
   async stop(): Promise<void> {
     if (this.timerId !== null) {
       clearInterval(this.timerId);
       this.timerId = null;
-    }
-
-    if (this.cancellationCheckTimerId !== null) {
-      clearInterval(this.cancellationCheckTimerId);
-      this.cancellationCheckTimerId = null;
     }
 
     this.stopRequested = true;
@@ -224,8 +207,12 @@ export class JobProcessorService {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
-    // Clean up any remaining cancellation tokens
+    // Clean up any remaining cancellation tokens and subscriptions
     this.activeCancellationTokens.clear();
+    for (const unsubscribe of this.cancellationUnsubscribers.values()) {
+      unsubscribe();
+    }
+    this.cancellationUnsubscribers.clear();
 
     this.stopRequested = false;
     logger.info("[JobQueue] Stopped");
@@ -235,7 +222,7 @@ export class JobProcessorService {
    * Process one job synchronously (for testing).
    * Does not start the polling loop.
    *
-   * @returns The processed job, or null if queue was empty
+   * @returns The processed job in its final state, or null if queue was empty
    */
   async processOne(): Promise<Job | null> {
     const job = await this.jobQueueService.getNextPendingJob();
@@ -243,8 +230,19 @@ export class JobProcessorService {
       return null;
     }
 
-    await this.processJob(job);
-    return this.jobQueueService.getJob(job.id);
+    // Subscribe to capture the final job state before it's deleted
+    let finalJob: Job | null = null;
+    const unsubscribe = this.jobQueueService.subscribeToCompletion(job.id, (event) => {
+      finalJob = event.job;
+    });
+
+    try {
+      await this.processJob(job);
+    } finally {
+      unsubscribe();
+    }
+
+    return finalJob;
   }
 
   // ============== Status ==============
@@ -377,8 +375,13 @@ export class JobProcessorService {
       // Claim the job
       const claimedJob = await this.jobQueueService.claimJob(job.id);
 
-      // Register token for cancellation polling
+      // Register token and subscribe to cancellation events
       this.activeCancellationTokens.set(job.id, cancellationToken);
+      const unsubscribe = this.jobQueueService.subscribeToCancellation(job.id, (event) => {
+        logger.debug(`[JobQueue] Cancellation event received for job ${job.id}`);
+        cancellationToken._cancel(event.reason);
+      });
+      this.cancellationUnsubscribers.set(job.id, unsubscribe);
 
       logger.debug(`[JobQueue] Processing job ${job.id} (type: ${job.type})`);
 
@@ -418,26 +421,12 @@ export class JobProcessorService {
 
       await this.jobQueueService.failJob(job.id, errorDetails);
     } finally {
-      // Always clean up the token
+      // Always clean up the token and subscription
       this.activeCancellationTokens.delete(job.id);
-    }
-  }
-
-  /**
-   * Poll the database for cancellation requests on active jobs.
-   * Called periodically by the cancellation check timer.
-   */
-  private async checkCancellations(): Promise<void> {
-    for (const [jobId, token] of this.activeCancellationTokens) {
-      // Skip if already cancelled
-      if (token.isCancelled) {
-        continue;
-      }
-
-      const status = await this.jobQueueService.getCancellationStatus(jobId);
-      if (status) {
-        logger.debug(`[JobQueue] Cancellation detected for job ${jobId}`);
-        token._cancel(status.reason);
+      const unsubscribe = this.cancellationUnsubscribers.get(job.id);
+      if (unsubscribe) {
+        unsubscribe();
+        this.cancellationUnsubscribers.delete(job.id);
       }
     }
   }

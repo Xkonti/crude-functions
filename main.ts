@@ -24,7 +24,13 @@ import { RoutesService } from "./src/routes/routes_service.ts";
 import { createFunctionsRoutes } from "./src/routes/functions_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
-import { createFileRoutes } from "./src/files/file_routes.ts";
+import { SourceFileService } from "./src/files/source_file_service.ts";
+import { createSourceFileRoutes } from "./src/files/source_file_routes.ts";
+import { CodeSourceService } from "./src/sources/code_source_service.ts";
+import { ManualCodeSourceProvider } from "./src/sources/manual_code_source_provider.ts";
+import { GitCodeSourceProvider } from "./src/sources/git_code_source_provider.ts";
+import { createSourceRoutes } from "./src/sources/source_routes.ts";
+import type { SyncJobPayload } from "./src/sources/types.ts";
 import { createSettingsRoutes } from "./src/settings/settings_routes.ts";
 import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
@@ -258,6 +264,27 @@ const schedulingService = new SchedulingService({
   jobQueueService,
 });
 
+// Initialize code source service
+const codeSourceService = new CodeSourceService({
+  db,
+  encryptionService,
+  jobQueueService,
+  schedulingService,
+  codeDirectory: "./code",
+});
+
+// Register code source providers
+const manualCodeSourceProvider = new ManualCodeSourceProvider({
+  codeDirectory: "./code",
+});
+codeSourceService.registerProvider(manualCodeSourceProvider);
+
+const gitCodeSourceProvider = new GitCodeSourceProvider({
+  codeDirectory: "./code",
+});
+codeSourceService.registerProvider(gitCodeSourceProvider);
+console.log("✓ Code source service initialized (manual, git)");
+
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
   db,
@@ -314,6 +341,11 @@ jobProcessorService.registerHandler("metrics-aggregation", async (_job, token) =
 
 jobProcessorService.registerHandler("key-rotation", async (_job, token) => {
   return await keyRotationService.performRotationCheck(token);
+});
+
+jobProcessorService.registerHandler("source_sync", async (job, token) => {
+  const payload = job.payload as SyncJobPayload;
+  return await codeSourceService.syncSource(payload.sourceId, token);
 });
 
 // Start scheduling service (clears transient schedules, loads persistent)
@@ -391,16 +423,30 @@ app.use("/api/functions/*", hybridAuth);
 app.use("/api/functions", hybridAuth);
 app.route("/api/functions", createFunctionsRoutes(routesService));
 
-// Initialize file service
+// Initialize file service (used by web UI and function router)
 const fileService = new FileService({
   basePath: "./code",
 });
 
-// Protected file management routes
-app.use("/api/files/*", hybridAuth);
-app.use("/api/files", hybridAuth);
-app.route("/api/files", createFileRoutes({
-  fileService,
+// Initialize source file service (source-aware file operations)
+const sourceFileService = new SourceFileService({
+  codeSourceService,
+  codeDirectory: "./code",
+});
+
+// Protected source management routes (MUST be before file routes for route ordering)
+// Note: webhook endpoint is NOT protected by hybridAuth - it uses its own secret validation
+app.use("/api/sources/:id/sync", hybridAuth);
+app.use("/api/sources/:id/status", hybridAuth);
+app.use("/api/sources/:id", hybridAuth);
+app.use("/api/sources", hybridAuth);
+app.route("/api/sources", createSourceRoutes({ codeSourceService }));
+
+// Protected source file management routes (after source routes)
+app.use("/api/sources/*/files/*", hybridAuth);
+app.use("/api/sources/*/files", hybridAuth);
+app.route("/api/sources", createSourceFileRoutes({
+  sourceFileService,
   settingsService,
 }));
 
@@ -475,13 +521,14 @@ app.route("/web", createWebRoutes({
   auth,
   db,
   userService,
-  fileService,
   routesService,
   apiKeyService,
   consoleLogService,
   executionMetricsService,
   encryptionService,
   settingsService,
+  codeSourceService,
+  sourceFileService,
 }));
 
 // Dynamic function router - catch all /run/* requests
@@ -489,7 +536,7 @@ app.all("/run/*", (c) => functionRouter.handle(c));
 app.all("/run", (c) => functionRouter.handle(c));
 
 // Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
+export { app, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

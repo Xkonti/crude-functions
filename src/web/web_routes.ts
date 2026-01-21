@@ -3,7 +3,7 @@ import { createAuthPages } from "./auth_pages.ts";
 import { createSetupPages } from "./setup_pages.ts";
 import { createPasswordPages } from "./password_pages.ts";
 import { createUsersPages } from "./users_pages.ts";
-import { createCodePages } from "./code_pages.ts";
+import { createSourcePages } from "./source_pages.ts";
 import { createFunctionsPages } from "./functions_pages.ts";
 import { createKeysPages } from "./keys_pages.ts";
 import { createSecretsPages } from "./secrets_pages.ts";
@@ -12,7 +12,6 @@ import { layout, getLayoutUser } from "./templates.ts";
 import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
 import type { Auth } from "../auth/auth.ts";
 import type { DatabaseService } from "../database/database_service.ts";
-import type { FileService } from "../files/file_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
@@ -21,22 +20,25 @@ import type { IEncryptionService } from "../encryption/types.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import type { UserService } from "../users/user_service.ts";
+import type { CodeSourceService } from "../sources/code_source_service.ts";
+import type { SourceFileService } from "../files/source_file_service.ts";
 
 export interface WebRoutesOptions {
   auth: Auth;
   db: DatabaseService;
   userService: UserService;
-  fileService: FileService;
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
   encryptionService: IEncryptionService;
   settingsService: SettingsService;
+  codeSourceService: CodeSourceService;
+  sourceFileService: SourceFileService;
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { auth, db, userService, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService } = options;
+  const { auth, db, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
@@ -112,7 +114,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   // Mount sub-routers
   routes.route("/password", createPasswordPages(settingsService));
   routes.route("/users", createUsersPages({ userService, settingsService }));
-  routes.route("/code", createCodePages(fileService, settingsService));
+  routes.route("/code", createSourcePages(codeSourceService, sourceFileService, settingsService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService));
   routes.route("/keys", createKeysPages(apiKeyService, secretsService, settingsService));
   routes.route("/secrets", createSecretsPages({ db, encryptionService, settingsService }));

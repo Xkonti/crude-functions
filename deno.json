@@ -17,6 +17,7 @@
     "better-auth": "npm:better-auth@^1.4.10",
     "better-auth/plugins": "npm:better-auth@^1.4.10/plugins",
     "better-auth/plugins/access": "npm:better-auth@^1.4.10/plugins/access",
+    "isomorphic-git": "npm:isomorphic-git@^1.27.2"
   },
   "test": {
     "exclude": [
