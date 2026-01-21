@@ -3,9 +3,7 @@
 ARG BASE_IMAGE=denoland/deno:2.6.4
 ARG BUILD_VERSION=dev
 
-# ==============================================================================
-# Stage 1: Build Deno application
-# ==============================================================================
+# Builder stage - uses standard deno image for shell utilities
 FROM denoland/deno:2.6.4 AS builder
 
 WORKDIR /app
@@ -20,20 +18,17 @@ COPY src/ ./src/
 COPY migrations/ ./migrations/
 
 # Generate version file with build-time version
-ARG BUILD_VERSION=dev
 RUN echo "export const APP_VERSION = \"${BUILD_VERSION}\";" > src/version.ts
 
 # Create directories for volumes
 RUN mkdir -p /app/config /app/code
 
-# ==============================================================================
-# Stage 2: Final runtime image
-# ==============================================================================
+# Final stage - uses specified base image (standard or hardened)
 FROM ${BASE_IMAGE}
 
 WORKDIR /app
 
-# Copy Deno cache and application
+# Copy everything from builder including Deno cache
 COPY --from=builder --chown=deno:deno /deno-dir /deno-dir
 COPY --from=builder --chown=deno:deno /app /app
 
@@ -44,6 +39,5 @@ ENV PORT=8000
 EXPOSE 8000
 
 # Run the application with necessary permissions
-# Note: No --allow-run needed - git operations use isomorphic-git (pure JS)
 ENTRYPOINT []
 CMD ["deno", "run", "--allow-net", "--allow-env", "--allow-read", "--allow-write", "--allow-ffi", "main.ts"]
