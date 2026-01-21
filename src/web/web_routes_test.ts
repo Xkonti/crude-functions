@@ -4,7 +4,6 @@ import { createWebRoutes } from "./web_routes.ts";
 import { DatabaseService } from "../database/database_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
 import { RoutesService } from "../routes/routes_service.ts";
-import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import { EncryptionService } from "../encryption/encryption_service.ts";
@@ -12,6 +11,9 @@ import { HashService } from "../encryption/hash_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
 import { UserService } from "../users/user_service.ts";
 import type { Auth } from "../auth/auth.ts";
+import type { CodeSourceService } from "../sources/code_source_service.ts";
+import type { SourceFileService } from "../files/source_file_service.ts";
+import type { CodeSource } from "../sources/types.ts";
 
 // Test encryption key (32 bytes base64-encoded)
 const TEST_ENCRYPTION_KEY = "YzJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
@@ -38,6 +40,72 @@ function createMockAuth(options: { authenticated: boolean } = { authenticated: t
     },
     handler: () => new Response("OK"),
   } as unknown as Auth;
+}
+
+/**
+ * Creates a mock CodeSourceService for testing.
+ * Returns empty sources by default.
+ */
+function createMockCodeSourceService(): CodeSourceService {
+  const sources: CodeSource[] = [];
+
+  return {
+    getAll: () => Promise.resolve(sources),
+    getById: (id: number) => Promise.resolve(sources.find((s) => s.id === id) ?? null),
+    getByName: (name: string) => Promise.resolve(sources.find((s) => s.name === name) ?? null),
+    create: (input: { name: string; type: "manual" | "git"; typeSettings?: object; syncSettings?: object; enabled?: boolean }) => {
+      const source: CodeSource = {
+        id: sources.length + 1,
+        name: input.name,
+        type: input.type,
+        typeSettings: input.typeSettings ?? {},
+        syncSettings: input.syncSettings ?? {},
+        lastSyncStartedAt: null,
+        lastSyncAt: null,
+        lastSyncError: null,
+        enabled: input.enabled ?? true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      sources.push(source);
+      return Promise.resolve(source);
+    },
+    update: (id: number, updates: { typeSettings?: object; syncSettings?: object; enabled?: boolean }) => {
+      const source = sources.find((s) => s.id === id);
+      if (!source) return Promise.reject(new Error("Source not found"));
+      if (updates.typeSettings !== undefined) source.typeSettings = updates.typeSettings;
+      if (updates.syncSettings !== undefined) source.syncSettings = updates.syncSettings;
+      if (updates.enabled !== undefined) source.enabled = updates.enabled;
+      source.updatedAt = new Date();
+      return Promise.resolve(source);
+    },
+    delete: (id: number) => {
+      const index = sources.findIndex((s) => s.id === id);
+      if (index === -1) return Promise.reject(new Error("Source not found"));
+      sources.splice(index, 1);
+      return Promise.resolve();
+    },
+    isSyncable: () => Promise.resolve(false),
+    isEditable: () => Promise.resolve(true),
+    triggerManualSync: () => Promise.resolve(null),
+    registerProvider: () => {},
+  } as unknown as CodeSourceService;
+}
+
+/**
+ * Creates a mock SourceFileService for testing.
+ * Returns empty file lists by default.
+ */
+function createMockSourceFileService(): SourceFileService {
+  return {
+    listFiles: () => Promise.resolve([]),
+    listFilesWithMetadata: () => Promise.resolve([]),
+    getFile: () => Promise.resolve(""),
+    writeFile: () => Promise.resolve(),
+    deleteFile: () => Promise.resolve(),
+    fileExists: () => Promise.resolve(false),
+    getFileMetadata: () => Promise.resolve(null),
+  } as unknown as SourceFileService;
 }
 
 const API_KEYS_SCHEMA = `
@@ -134,7 +202,8 @@ interface TestContext {
   db: DatabaseService;
   apiKeyService: ApiKeyService;
   routesService: RoutesService;
-  fileService: FileService;
+  codeSourceService: CodeSourceService;
+  sourceFileService: SourceFileService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
   settingsService: SettingsService;
@@ -174,11 +243,16 @@ async function createTestApp(
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
   const routesService = new RoutesService({ db });
-  const fileService = new FileService({ basePath: codePath });
   const settingsService = new SettingsService({ db, encryptionService });
   await settingsService.bootstrapGlobalSettings();
   const consoleLogService = new ConsoleLogService({ db, settingsService });
   const executionMetricsService = new ExecutionMetricsService({ db });
+
+  // Create mock code source service (returns empty sources by default)
+  const codeSourceService = createMockCodeSourceService();
+
+  // Create mock source file service
+  const sourceFileService = createMockSourceFileService();
 
   // Add initial routes
   for (const route of initialRoutes) {
@@ -190,10 +264,10 @@ async function createTestApp(
   const userService = new UserService({ db, auth });
   app.route(
     "/web",
-    createWebRoutes({ auth, db, userService, fileService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService })
+    createWebRoutes({ auth, db, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService })
   );
 
-  return { app, tempDir, db, apiKeyService, routesService, fileService, consoleLogService, executionMetricsService, settingsService };
+  return { app, tempDir, db, apiKeyService, routesService, codeSourceService, sourceFileService, consoleLogService, executionMetricsService, settingsService };
 }
 
 async function cleanup(db: DatabaseService, tempDir: string) {
@@ -241,46 +315,56 @@ Deno.test("Dashboard contains links to all sections", async () => {
   }
 });
 
-// Code pages tests
-Deno.test("GET /web/code lists files", async () => {
-  const { app, db, tempDir, fileService } = await createTestApp();
+// Code sources pages tests
+Deno.test("GET /web/code lists sources", async () => {
+  const { app, db, tempDir } = await createTestApp();
   try {
-    await fileService.writeFile("test.ts", "console.log('test');");
-
     const res = await app.request("/web/code");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("test.ts");
-    expect(html).toContain("Upload New File");
+    expect(html).toContain("Code Sources");
+    expect(html).toContain("New Code Source");
   } finally {
     await cleanup(db, tempDir);
   }
 });
 
-Deno.test("GET /web/code/edit shows file content", async () => {
-  const { app, db, tempDir, fileService } = await createTestApp();
-  try {
-    await fileService.writeFile("hello.ts", "export default () => 'hello';");
-
-    const res = await app.request("/web/code/edit?path=hello.ts");
-    expect(res.status).toBe(200);
-    const html = await res.text();
-    expect(html).toContain("export default () =&gt; &#039;hello&#039;;");
-    expect(html).toContain("hello.ts");
-  } finally {
-    await cleanup(db, tempDir);
-  }
-});
-
-Deno.test("GET /web/code/upload shows form", async () => {
+Deno.test("GET /web/code/sources/new shows type selection", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/code/upload");
+    const res = await app.request("/web/code/sources/new");
     expect(res.status).toBe(200);
     const html = await res.text();
-    expect(html).toContain("Upload New File");
-    expect(html).toContain('name="path"');
-    expect(html).toContain('name="content"');
+    expect(html).toContain("New Code Source");
+    expect(html).toContain("Manual Source");
+    expect(html).toContain("Git Source");
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/code/sources/new/manual shows manual source form", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/code/sources/new/manual");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Create Manual Source");
+    expect(html).toContain('name="name"');
+  } finally {
+    await cleanup(db, tempDir);
+  }
+});
+
+Deno.test("GET /web/code/sources/new/git shows git source form", async () => {
+  const { app, db, tempDir } = await createTestApp();
+  try {
+    const res = await app.request("/web/code/sources/new/git");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("Create Git Source");
+    expect(html).toContain('name="name"');
+    expect(html).toContain('name="url"');
   } finally {
     await cleanup(db, tempDir);
   }
@@ -613,10 +697,10 @@ Deno.test("POST /web/keys/delete-group rejects group with keys", async () => {
 });
 
 // Error handling tests
-Deno.test("GET /web/code/edit without path redirects with error", async () => {
+Deno.test("GET /web/code/sources/999 returns error for non-existent source", async () => {
   const { app, db, tempDir } = await createTestApp();
   try {
-    const res = await app.request("/web/code/edit");
+    const res = await app.request("/web/code/sources/999");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
