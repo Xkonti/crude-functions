@@ -40,7 +40,7 @@ function createTestSource(
 }
 
 // =============================================================================
-// Unit Tests - These don't require git to be installed
+// Unit Tests
 // =============================================================================
 
 Deno.test("GitCodeSourceProvider.getCapabilities returns correct values", () => {
@@ -57,7 +57,7 @@ Deno.test("GitCodeSourceProvider.type returns 'git'", () => {
 });
 
 // =============================================================================
-// Directory Operation Tests - Require filesystem access but not git
+// Directory Operation Tests - Require filesystem access
 // =============================================================================
 
 Deno.test("GitCodeSourceProvider.ensureDirectory creates directory", async () => {
@@ -135,29 +135,11 @@ Deno.test("GitCodeSourceProvider.directoryExists returns false for non-existing 
 });
 
 // =============================================================================
-// Git Integration Tests - Require git to be installed
+// Git Integration Tests - Using isomorphic-git (no external git binary needed)
 // =============================================================================
-
-/**
- * Check if git is available on the system.
- */
-async function isGitAvailable(): Promise<boolean> {
-  try {
-    const command = new Deno.Command("git", {
-      args: ["--version"],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code } = await command.output();
-    return code === 0;
-  } catch {
-    return false;
-  }
-}
 
 Deno.test({
   name: "GitCodeSourceProvider.sync clones public repository",
-  ignore: !(await isGitAvailable()),
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {
@@ -184,7 +166,8 @@ Deno.test({
 
 Deno.test({
   name: "GitCodeSourceProvider.sync handles invalid URL",
-  ignore: !(await isGitAvailable()),
+  // isomorphic-git's HTTP client may not fully consume error responses
+  sanitizeResources: false,
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {
@@ -208,7 +191,6 @@ Deno.test({
 
 Deno.test({
   name: "GitCodeSourceProvider.sync respects cancellation token",
-  ignore: !(await isGitAvailable()),
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {

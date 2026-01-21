@@ -1,4 +1,6 @@
 import { join } from "@std/path";
+import * as git from "isomorphic-git";
+import http from "isomorphic-git/http/web";
 import type {
   CodeSource,
   CodeSourceProvider,
@@ -14,17 +16,123 @@ export interface GitCodeSourceProviderOptions {
   codeDirectory: string;
 }
 
-interface GitCommandResult {
-  success: boolean;
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
 interface TargetRef {
   type: "branch" | "tag" | "commit";
   value: string;
 }
+
+/**
+ * Deno file system adapter for isomorphic-git.
+ * Maps isomorphic-git's expected fs interface to Deno's file system APIs.
+ */
+const denoFs = {
+  promises: {
+    async readFile(
+      path: string,
+      options?: { encoding?: string },
+    ): Promise<Uint8Array | string> {
+      const data = await Deno.readFile(path);
+      if (options?.encoding === "utf8") {
+        return new TextDecoder().decode(data);
+      }
+      return data;
+    },
+
+    async writeFile(
+      path: string,
+      data: Uint8Array | string,
+      options?: { mode?: number },
+    ): Promise<void> {
+      const bytes = typeof data === "string"
+        ? new TextEncoder().encode(data)
+        : data;
+      await Deno.writeFile(path, bytes, { mode: options?.mode });
+    },
+
+    async unlink(path: string): Promise<void> {
+      await Deno.remove(path);
+    },
+
+    async readdir(path: string): Promise<string[]> {
+      const entries: string[] = [];
+      for await (const entry of Deno.readDir(path)) {
+        entries.push(entry.name);
+      }
+      return entries;
+    },
+
+    async mkdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+      await Deno.mkdir(path, { recursive: options?.recursive ?? false });
+    },
+
+    async rmdir(path: string, options?: { recursive?: boolean }): Promise<void> {
+      await Deno.remove(path, { recursive: options?.recursive ?? false });
+    },
+
+    async stat(
+      path: string,
+    ): Promise<{
+      isFile(): boolean;
+      isDirectory(): boolean;
+      isSymbolicLink(): boolean;
+      size: number;
+      mtimeMs: number;
+      ctimeMs: number;
+      mode: number;
+    }> {
+      const stat = await Deno.stat(path);
+      return {
+        isFile: () => stat.isFile,
+        isDirectory: () => stat.isDirectory,
+        isSymbolicLink: () => stat.isSymlink,
+        size: stat.size,
+        mtimeMs: stat.mtime?.getTime() ?? 0,
+        ctimeMs: stat.ctime?.getTime() ?? stat.mtime?.getTime() ?? 0,
+        mode: stat.mode ?? 0o644,
+      };
+    },
+
+    async lstat(
+      path: string,
+    ): Promise<{
+      isFile(): boolean;
+      isDirectory(): boolean;
+      isSymbolicLink(): boolean;
+      size: number;
+      mtimeMs: number;
+      ctimeMs: number;
+      mode: number;
+    }> {
+      const stat = await Deno.lstat(path);
+      return {
+        isFile: () => stat.isFile,
+        isDirectory: () => stat.isDirectory,
+        isSymbolicLink: () => stat.isSymlink,
+        size: stat.size,
+        mtimeMs: stat.mtime?.getTime() ?? 0,
+        ctimeMs: stat.ctime?.getTime() ?? stat.mtime?.getTime() ?? 0,
+        mode: stat.mode ?? 0o644,
+      };
+    },
+
+    async readlink(path: string): Promise<string> {
+      return await Deno.readLink(path);
+    },
+
+    async symlink(target: string, path: string): Promise<void> {
+      await Deno.symlink(target, path);
+    },
+
+    async chmod(path: string, mode: number): Promise<void> {
+      // Deno.chmod is not available on all platforms
+      try {
+        await Deno.chmod(path, mode);
+      } catch {
+        // Ignore chmod errors (e.g., on Windows)
+      }
+    },
+  },
+};
 
 /**
  * Provider for git-based code sources.
@@ -35,6 +143,9 @@ interface TargetRef {
  * Capabilities:
  * - isSyncable: true (can sync from remote git repo)
  * - isEditable: false (files come from git, not editable via API)
+ *
+ * Uses isomorphic-git (pure JavaScript) for all git operations - no external
+ * git binary required.
  */
 export class GitCodeSourceProvider implements CodeSourceProvider {
   readonly type = "git" as const;
@@ -161,67 +272,16 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
   // ===========================================================================
 
   /**
-   * Execute a git command and return the result.
+   * Create auth callback for isomorphic-git.
+   * Returns username/password for HTTPS auth.
    */
-  private async runGitCommand(
-    args: string[],
-    cwd: string,
-    token: CancellationToken,
-  ): Promise<GitCommandResult> {
-    token.throwIfCancelled();
-
-    const command = new Deno.Command("git", {
-      args,
-      cwd,
-      stdout: "piped",
-      stderr: "piped",
+  private createAuthCallback(
+    authToken?: string,
+  ): () => { username: string; password: string } {
+    return () => ({
+      username: authToken ?? "",
+      password: authToken ? "x-oauth-basic" : "",
     });
-
-    const process = command.spawn();
-    const { code, stdout, stderr } = await process.output();
-
-    token.throwIfCancelled();
-
-    return {
-      success: code === 0,
-      stdout: new TextDecoder().decode(stdout),
-      stderr: new TextDecoder().decode(stderr),
-      exitCode: code,
-    };
-  }
-
-  /**
-   * Build URL with embedded auth token.
-   * Example: https://github.com/user/repo.git -> https://token@github.com/user/repo.git
-   */
-  private buildAuthenticatedUrl(url: string, authToken?: string): string {
-    if (!authToken) {
-      return url;
-    }
-
-    try {
-      const urlObj = new URL(url);
-      urlObj.username = authToken;
-      urlObj.password = "";
-      return urlObj.toString();
-    } catch {
-      // If URL parsing fails, return original
-      return url;
-    }
-  }
-
-  /**
-   * Strip authentication from URL for comparison.
-   */
-  private stripAuthFromUrl(url: string): string {
-    try {
-      const urlObj = new URL(url);
-      urlObj.username = "";
-      urlObj.password = "";
-      return urlObj.toString();
-    } catch {
-      return url;
-    }
   }
 
   /**
@@ -259,21 +319,28 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
    */
   private async getCurrentRemoteUrl(dirPath: string): Promise<string | null> {
     try {
-      const command = new Deno.Command("git", {
-        args: ["remote", "get-url", "origin"],
-        cwd: dirPath,
-        stdout: "piped",
-        stderr: "piped",
+      const remotes = await git.listRemotes({
+        fs: denoFs,
+        dir: dirPath,
       });
-
-      const { code, stdout } = await command.output();
-      if (code !== 0) {
-        return null;
-      }
-
-      return new TextDecoder().decode(stdout).trim();
+      const origin = remotes.find((r) => r.remote === "origin");
+      return origin?.url ?? null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Strip authentication from URL for comparison.
+   */
+  private stripAuthFromUrl(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      urlObj.username = "";
+      urlObj.password = "";
+      return urlObj.toString();
+    } catch {
+      return url;
     }
   }
 
@@ -320,7 +387,6 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
     token: CancellationToken,
     startTime: number,
   ): Promise<SyncResult> {
-    const authUrl = this.buildAuthenticatedUrl(settings.url, settings.authToken);
     const targetRef = this.getTargetRef(settings);
 
     // Ensure parent directory exists
@@ -333,49 +399,50 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
     try {
       token.throwIfCancelled();
 
-      // Build clone args
-      const cloneArgs = ["clone", "--single-branch"];
-
+      // Determine ref to clone
+      let ref: string | undefined;
       if (targetRef.type === "branch") {
-        cloneArgs.push("--branch", targetRef.value);
+        ref = targetRef.value;
       } else if (targetRef.type === "tag") {
-        cloneArgs.push("--branch", targetRef.value);
+        ref = targetRef.value;
       }
-      // For commit, we clone without branch filter and checkout later
+      // For commit, we clone default branch and checkout later
 
-      cloneArgs.push(authUrl, tempDir);
+      // Execute clone with isomorphic-git
+      await git.clone({
+        fs: denoFs,
+        http,
+        dir: tempDir,
+        url: settings.url,
+        ref,
+        singleBranch: true,
+        depth: targetRef.type === "commit" ? undefined : 1, // Shallow clone unless we need specific commit
+        onAuth: this.createAuthCallback(settings.authToken),
+      });
 
-      // Execute clone
-      const cloneResult = await this.runGitCommand(
-        cloneArgs,
-        this.codeDirectory,
-        token,
-      );
-
-      if (!cloneResult.success) {
-        throw new GitOperationError(
-          "clone",
-          cloneResult.exitCode,
-          cloneResult.stderr,
-        );
-      }
+      token.throwIfCancelled();
 
       // For commit-based checkout, we need to fetch and checkout the specific commit
       if (targetRef.type === "commit") {
-        const checkoutResult = await this.runGitCommand(
-          ["checkout", targetRef.value],
-          tempDir,
-          token,
-        );
+        await git.fetch({
+          fs: denoFs,
+          http,
+          dir: tempDir,
+          url: settings.url,
+          onAuth: this.createAuthCallback(settings.authToken),
+        });
 
-        if (!checkoutResult.success) {
-          throw new GitOperationError(
-            "checkout",
-            checkoutResult.exitCode,
-            checkoutResult.stderr,
-          );
-        }
+        token.throwIfCancelled();
+
+        await git.checkout({
+          fs: denoFs,
+          dir: tempDir,
+          ref: targetRef.value,
+          force: true,
+        });
       }
+
+      token.throwIfCancelled();
 
       // Remove the target directory if it exists (it should be empty or non-existent)
       try {
@@ -402,6 +469,11 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
       } catch {
         // Ignore cleanup errors
       }
+
+      // Convert isomorphic-git errors to GitOperationError
+      if (error instanceof Error) {
+        throw new GitOperationError("clone", 1, error.message);
+      }
       throw error;
     }
   }
@@ -418,71 +490,87 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
     const targetRef = this.getTargetRef(settings);
 
     // Get current HEAD before fetch
-    const oldHeadResult = await this.runGitCommand(
-      ["rev-parse", "HEAD"],
-      dirPath,
-      token,
-    );
-    const oldHead = oldHeadResult.success ? oldHeadResult.stdout.trim() : "";
-
-    // Update remote URL if auth token changed
-    const authUrl = this.buildAuthenticatedUrl(settings.url, settings.authToken);
-    await this.runGitCommand(
-      ["remote", "set-url", "origin", authUrl],
-      dirPath,
-      token,
-    );
-
-    // Fetch all refs
-    const fetchResult = await this.runGitCommand(
-      ["fetch", "--all", "--tags", "--prune"],
-      dirPath,
-      token,
-    );
-
-    if (!fetchResult.success) {
-      throw new GitOperationError(
-        "fetch",
-        fetchResult.exitCode,
-        fetchResult.stderr,
-      );
+    let oldHead = "";
+    try {
+      oldHead = await git.resolveRef({
+        fs: denoFs,
+        dir: dirPath,
+        ref: "HEAD",
+      });
+    } catch {
+      // Ignore if we can't get HEAD
     }
 
-    // Determine reset target
-    let resetTarget: string;
+    token.throwIfCancelled();
+
+    // Update remote URL if needed
+    try {
+      await git.deleteRemote({
+        fs: denoFs,
+        dir: dirPath,
+        remote: "origin",
+      });
+    } catch {
+      // Ignore if remote doesn't exist
+    }
+
+    await git.addRemote({
+      fs: denoFs,
+      dir: dirPath,
+      remote: "origin",
+      url: settings.url,
+    });
+
+    token.throwIfCancelled();
+
+    // Fetch all refs including tags
+    await git.fetch({
+      fs: denoFs,
+      http,
+      dir: dirPath,
+      url: settings.url,
+      tags: true,
+      prune: true,
+      onAuth: this.createAuthCallback(settings.authToken),
+    });
+
+    token.throwIfCancelled();
+
+    // Determine checkout target
+    let checkoutRef: string;
     if (targetRef.type === "commit") {
-      resetTarget = targetRef.value;
+      checkoutRef = targetRef.value;
     } else if (targetRef.type === "tag") {
-      resetTarget = `tags/${targetRef.value}`;
+      checkoutRef = targetRef.value;
     } else {
-      resetTarget = `origin/${targetRef.value}`;
+      // For branches, checkout origin/branch
+      checkoutRef = `origin/${targetRef.value}`;
     }
 
-    // Reset to target
-    const resetResult = await this.runGitCommand(
-      ["reset", "--hard", resetTarget],
-      dirPath,
-      token,
-    );
+    // Checkout with force (equivalent to reset --hard)
+    await git.checkout({
+      fs: denoFs,
+      dir: dirPath,
+      ref: checkoutRef,
+      force: true,
+    });
 
-    if (!resetResult.success) {
-      throw new GitOperationError(
-        "reset",
-        resetResult.exitCode,
-        resetResult.stderr,
-      );
-    }
+    token.throwIfCancelled();
 
     // Clean untracked files
-    await this.runGitCommand(["clean", "-fd"], dirPath, token);
+    await this.cleanUntrackedFiles(dirPath);
 
     // Get new HEAD
-    const newHeadResult = await this.runGitCommand(
-      ["rev-parse", "HEAD"],
-      dirPath,
-      token,
-    );
-    const newHead = newHeadResult.success ? newHeadResult.stdout.trim() : "";
+    let newHead = "";
+    try {
+      newHead = await git.resolveRef({
+        fs: denoFs,
+        dir: dirPath,
+        ref: "HEAD",
+      });
+    } catch {
+      // Ignore if we can't get HEAD
+    }
 
     // Count changed files if heads differ
     let filesChanged = 0;
@@ -496,6 +584,36 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
       filesChanged,
       durationMs,
     };
+  }
+
+  /**
+   * Clean untracked files from the working directory.
+   * isomorphic-git doesn't have a clean command, so we implement it manually.
+   */
+  private async cleanUntrackedFiles(dirPath: string): Promise<void> {
+    try {
+      // Get status of all files
+      const statusMatrix = await git.statusMatrix({
+        fs: denoFs,
+        dir: dirPath,
+      });
+
+      // Find untracked files (HEAD=0, WORKDIR=2, STAGE=0)
+      // Status matrix format: [filepath, HEAD, WORKDIR, STAGE]
+      for (const [filepath, head, workdir, _stage] of statusMatrix) {
+        if (head === 0 && workdir === 2) {
+          // Untracked file - delete it
+          const fullPath = join(dirPath, filepath);
+          try {
+            await Deno.remove(fullPath, { recursive: true });
+          } catch {
+            // Ignore deletion errors
+          }
+        }
+      }
+    } catch {
+      // Ignore errors during cleanup
+    }
   }
 
   /**
@@ -519,7 +637,7 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
   }
 
   /**
-   * Count changed files between two commits.
+   * Count changed files between two commits using tree walking.
    */
   private async countChangedFiles(
     dirPath: string,
@@ -527,18 +645,31 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
     newHead: string,
   ): Promise<number> {
     try {
-      const result = await this.runGitCommand(
-        ["diff", "--name-only", oldHead, newHead],
-        dirPath,
-        { isCancelled: false, throwIfCancelled: () => {}, whenCancelled: new Promise(() => {}) },
-      );
+      const changedFiles = new Set<string>();
 
-      if (!result.success) {
-        return 0;
-      }
+      // Walk both trees and find differences
+      await git.walk({
+        fs: denoFs,
+        dir: dirPath,
+        trees: [git.TREE({ ref: oldHead }), git.TREE({ ref: newHead })],
+        map: async (filepath, [oldEntry, newEntry]) => {
+          // Skip .git directory
+          if (filepath === ".git" || filepath.startsWith(".git/")) {
+            return null;
+          }
 
-      const lines = result.stdout.trim().split("\n").filter((l) => l.length > 0);
-      return lines.length;
+          const oldOid = oldEntry ? await oldEntry.oid() : null;
+          const newOid = newEntry ? await newEntry.oid() : null;
+
+          if (oldOid !== newOid) {
+            changedFiles.add(filepath);
+          }
+
+          return null;
+        },
+      });
+
+      return changedFiles.size;
     } catch {
       return 0;
     }
