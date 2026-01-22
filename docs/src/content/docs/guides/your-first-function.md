@@ -28,30 +28,28 @@ If you haven't installed Crude Functions yet, see the [Getting Started](/guides/
 
 Before we create our first function, let's understand how Crude Functions organizes your code.
 
-**Code sources** are directories that organize your handler files. Think of them as separate folders for different projects or deployment environments. There are two types:
+Code is organized into **code sources**. Each code source is represented by a directory. Think of them as separate folders for different projects or deployment environments. Currently there are two types of code sources:
 
-- **Manual sources** - Upload and edit files directly via the web UI or API
-- **Git sources** - Automatically sync files from a Git repository
+- **Manual code sources** - Upload and edit files directly via the web UI or programatically via API
+- **Git code sources** - Automatically sync files from a Git repository
 
 For this tutorial, we'll use a manual source where you can directly upload and edit files.
 
 ### Creating or Using a Code Source
 
-When you first access the code management page, you may see a default manual source already created during setup. If not, you'll need to create one:
+When you first access the code management page, you will need to create a new code source first:
 
-1. Go to `http://localhost:8000/web/code`
-2. If no sources exist, click "Create New Source"
-3. Enter a name (e.g., `my-functions`)
-4. Select type "Manual"
+1. Navigate to the Code Management Page 📂 or go to `http://localhost:8000/web/code`
+2. Click "Create New Source"
+3. Choose the "Manual code source" - this will allow us to write functions directly within the Web UI.
+3. Enter a name - this will be the name of the crated directory (e.g., `my-functions`)
 5. Click "Create"
 
 For the rest of this tutorial, we'll assume you have a source named `my-functions`. If your source has a different name, just substitute it wherever you see `my-functions` in the examples.
 
-**Want to learn more?** See the [Code Sources](/guides/code-sources) guide for detailed information about git integration, sync strategies, and best practices.
-
 ## Step 1: Create the Handler File
 
-Every function in Crude Functions is a TypeScript or JavaScript file organized in code sources. Let's create our first handler.
+Every function in Crude Functions is a TypeScript or JavaScript file with a default function export in the appropriate format. Let's create our first handler.
 
 1. Go to the 📁 code management page at `http://localhost:8000/web/code`
 2. Click on your code source (e.g., `my-functions`) to open it
@@ -173,8 +171,6 @@ The only thing you'll see are the `EXET_START` and `EXEC_END` events because our
 ## Step 5: Add Logging and Hot-Reload
 
 Since we're using a manual source, we can directly edit files via the web UI. Go to your code source, find `hello.ts`, and edit it to add some console output:
-
-**Note**: Files in git sources are read-only via the UI—you'd need to edit them in your repository and sync. See the [Code Sources](/guides/code-sources) guide for details.
 
 ```typescript
 export default async function (c, ctx) {
@@ -431,7 +427,7 @@ Result:
 
 ### Create Shared Utilities
 
-Organize your code with shared modules. Within your code source (e.g., `my-functions`), create a subdirectory called `lib` and add a file `lib/formatters.ts`:
+Organize your code with shared modules. Within your code source (e.g., `my-functions`), create a file `lib/formatters.ts` - this will create a subdirectory called `lib` with `formatters.ts` inside.
 
 ```typescript
 export function formatGreeting(name: string): string {
@@ -459,9 +455,12 @@ export default async function (c, ctx) {
 ```
 
 The files would be organized in your source like this:
+
 ```
 my-functions/
 ├── hello.ts
 └── lib/
     └── formatters.ts
 ```
+
+You can also reference code from other code sources. If you were to create a separate code source named `lib` and place the `formatters.ts` inside, from `hello.ts` you could reach it via `../lib/formatters.ts`.
