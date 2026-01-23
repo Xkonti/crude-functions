@@ -26,6 +26,7 @@ import {
   ProviderNotFoundError,
   SourceNotSyncableError,
   WebhookAuthError,
+  WebhookDisabledError,
 } from "./errors.ts";
 import { logger } from "../utils/logger.ts";
 
@@ -651,9 +652,14 @@ export class CodeSourceService {
       throw new SourceNotFoundError(id);
     }
 
-    // Validate webhook secret using constant-time comparison to prevent timing attacks
+    // Check if webhooks are enabled for this source
+    if (!source.syncSettings.webhookEnabled) {
+      throw new WebhookDisabledError(source.name);
+    }
+
+    // Validate webhook secret only if one is configured
     const expectedSecret = source.syncSettings.webhookSecret;
-    if (!expectedSecret || !constantTimeCompare(expectedSecret, providedSecret)) {
+    if (expectedSecret && !constantTimeCompare(expectedSecret, providedSecret)) {
       throw new WebhookAuthError(source.name);
     }
 
@@ -924,6 +930,15 @@ export class CodeSourceService {
     ) {
       throw new InvalidSourceConfigError(
         "syncSettings.intervalSeconds must be a non-negative number",
+      );
+    }
+
+    if (
+      syncSettings.webhookEnabled !== undefined &&
+      typeof syncSettings.webhookEnabled !== "boolean"
+    ) {
+      throw new InvalidSourceConfigError(
+        "syncSettings.webhookEnabled must be a boolean",
       );
     }
 

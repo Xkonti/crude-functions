@@ -14,6 +14,7 @@ import {
   ProviderNotFoundError,
   SourceNotSyncableError,
   WebhookAuthError,
+  WebhookDisabledError,
 } from "./errors.ts";
 
 // ============================================================================
@@ -819,6 +820,26 @@ Deno.test("CodeSourceService.triggerWebhookSync throws for non-existent source",
   }
 });
 
+Deno.test("CodeSourceService.triggerWebhookSync throws for disabled webhooks", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("git"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "repo",
+      type: "git",
+      typeSettings: { url: "https://github.com/user/repo.git" },
+      syncSettings: { webhookEnabled: false, webhookSecret: "secret" },
+    });
+
+    await expect(
+      ctx.codeSourceService.triggerWebhookSync(source.id, "secret"),
+    ).rejects.toThrow(WebhookDisabledError);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 Deno.test("CodeSourceService.triggerWebhookSync throws for invalid secret", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
@@ -828,7 +849,7 @@ Deno.test("CodeSourceService.triggerWebhookSync throws for invalid secret", asyn
       name: "repo",
       type: "git",
       typeSettings: { url: "https://github.com/user/repo.git" },
-      syncSettings: { webhookSecret: "correct-secret" },
+      syncSettings: { webhookEnabled: true, webhookSecret: "correct-secret" },
     });
 
     await expect(
@@ -848,7 +869,7 @@ Deno.test("CodeSourceService.triggerWebhookSync enqueues job with valid secret",
       name: "repo",
       type: "git",
       typeSettings: { url: "https://github.com/user/repo.git" },
-      syncSettings: { webhookSecret: "correct-secret" },
+      syncSettings: { webhookEnabled: true, webhookSecret: "correct-secret" },
     });
 
     const job = await ctx.codeSourceService.triggerWebhookSync(
@@ -864,6 +885,30 @@ Deno.test("CodeSourceService.triggerWebhookSync enqueues job with valid secret",
   }
 });
 
+Deno.test("CodeSourceService.triggerWebhookSync enqueues job without secret when none required", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("git"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "repo",
+      type: "git",
+      typeSettings: { url: "https://github.com/user/repo.git" },
+      syncSettings: { webhookEnabled: true }, // No secret required
+    });
+
+    const job = await ctx.codeSourceService.triggerWebhookSync(
+      source.id,
+      "", // No secret provided
+    );
+
+    expect(job).not.toBeNull();
+    expect(job?.type).toBe("source_sync");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
 Deno.test("CodeSourceService.triggerWebhookSync returns null for disabled source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
@@ -873,7 +918,7 @@ Deno.test("CodeSourceService.triggerWebhookSync returns null for disabled source
       name: "repo",
       type: "git",
       typeSettings: { url: "https://github.com/user/repo.git" },
-      syncSettings: { webhookSecret: "secret" },
+      syncSettings: { webhookEnabled: true, webhookSecret: "secret" },
       enabled: false,
     });
 

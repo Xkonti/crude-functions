@@ -24,13 +24,37 @@ Before starting, make sure you have:
 
 If you haven't installed Crude Functions yet, see the [Getting Started](/guides/getting-started) guide.
 
+## Understanding Code Sources
+
+Before we create our first function, let's understand how Crude Functions organizes your code.
+
+Code is organized into **code sources**. Each code source is represented by a directory. Think of them as separate folders for different projects or deployment environments. Currently there are two types of code sources:
+
+- **Manual code sources** - Upload and edit files directly via the web UI
+- **Git code sources** - Automatically sync files from a Git repository
+
+In this guide, we'll focus on the **manual code source** to keep things simple.
+
+### Creating a Code Source
+
+When you first access the Code Management Page 📁, you will need to create your first code source:
+
+1. Navigate to the Code Management Page 📁 or go to `http://localhost:8000/web/code`
+2. Click "New Code Source" button
+3. Choose the "Create Manual Source"
+3. Enter a name of the new source - this will be the name of the created directory (e.g., `my-functions`)
+5. Click "Create Source"
+
+For the rest of this tutorial, we'll assume you have a source named `my-functions`. If your source has a different name, just substitute it wherever you see `my-functions` in the examples.
+
 ## Step 1: Create the Handler File
 
-Every function in Crude Functions is a JavaScript or TypeScript file in the `code/` directory. Let's create our first handler.
+Every function in Crude Functions is a TypeScript or JavaScript file with a default function export in the appropriate format. Let's create our first handler.
 
-Go to the 📁 code management page at `http://localhost:8000/web/code` and click `Upload New File` button.
-
-Create a file called `hello.ts` with the following code:
+1. Go to the 📁 code management page at `http://localhost:8000/web/code`
+2. Click on your code source (e.g., `my-functions`) to open it
+3. Click the `Upload New File` button
+4. Create a file called `hello.ts` with the following code:
 
 ```typescript
 export default async function (c, ctx) {
@@ -71,9 +95,7 @@ See the [Handler Context Reference](/reference/handler-context) for the complete
 
 ## Step 2: Register the Route
 
-Now that we have our handler file, we need to register it as a function route. You can do this from the Web UI or via the API.
-
-### Option A: Using the Web UI
+Now that we have our handler file, we need to register it as a function route.
 
 1. Navigate to `http://localhost:8000/web/functions` (the ⚡ tab)
 2. Click the "Create New Function" button
@@ -83,7 +105,7 @@ Now that we have our handler file, we need to register it as a function route. Y
 |-------|-------|-------------|
 | **Name** | `hello-world` | Unique identifier for the function |
 | **Description** | `My first function` | Human-readable description (optional) |
-| **Handler** | `hello.ts` | Path to handler file - same as in the file management page |
+| **Handler** | `my-functions/hello.ts` | Path to handler file in format `sourceName/fileName.ts` |
 | **Route** | `/hello` | URL path where function will be accessible |
 | **Methods** | `GET` | HTTP methods allowed |
 | **API Keys** | *(leave empty)* | No authentication required for now |
@@ -96,22 +118,7 @@ You should see your new function in the functions list with a green "Enabled" st
 
 ![Created function listed in table](../../../assets/screenshots/hello-world-function.png)
 
-### Option B: Using the API
-
-If you prefer programmatic deployment, you can use the management API:
-
-```bash
-curl -X POST http://localhost:8000/api/functions \
-  -H "X-API-Key: your-management-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "hello-world",
-    "description": "My first function",
-    "handler": "hello.ts",
-    "route": "/hello",
-    "methods": ["GET"]
-  }'
-```
+**Note**: The handler path must include the source name. If your source has a different name, use `yourSourceName/hello.ts` instead.
 
 ## Step 3: Test Your Function
 
@@ -144,7 +151,7 @@ The only thing you'll see are the `EXET_START` and `EXEC_END` events because our
 
 ## Step 5: Add Logging and Hot-Reload
 
-Edit your `hello.ts` file to add some console output:
+Since we're using a manual source, we can directly edit files via the web UI. Go to your code source, find `hello.ts`, and edit it to add some console output:
 
 ```typescript
 export default async function (c, ctx) {
@@ -401,7 +408,7 @@ Result:
 
 ### Create Shared Utilities
 
-Organize your code with shared modules by adding a new `lib/formatters.ts` file:
+Organize your code with shared modules. Within your code source (e.g., `my-functions`), create a file `lib/formatters.ts` - this will create a subdirectory called `lib` with `formatters.ts` inside.
 
 ```typescript
 export function formatGreeting(name: string): string {
@@ -413,7 +420,7 @@ export function getTimestamp(): string {
 }
 ```
 
-Then update the `hello.ts` to use it:
+Then update `hello.ts` to use it with a relative import:
 
 ```ts
 import { formatGreeting, getTimestamp } from "./lib/formatters.ts";
@@ -427,3 +434,14 @@ export default async function (c, ctx) {
   });
 }
 ```
+
+The files would be organized in your source like this:
+
+```
+my-functions/
+├── hello.ts
+└── lib/
+    └── formatters.ts
+```
+
+You can also reference code from other code sources. If you were to create a separate code source named `lib` and place the `formatters.ts` inside, from `hello.ts` you could reach it via `../lib/formatters.ts`.

@@ -18,6 +18,7 @@ export default defineConfig({
 						{ label: 'Deployment', slug: 'guides/deployment' },
 						{ label: 'First-Time Setup', slug: 'guides/first-time-setup' },
 						{ label: 'Your First Function', slug: 'guides/your-first-function' },
+						{ label: 'Code Sources', slug: 'guides/code-sources' },
 
 						// Security
 						{ label: 'API Keys', slug: 'guides/api-keys' },

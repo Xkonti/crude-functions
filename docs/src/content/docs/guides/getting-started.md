@@ -41,6 +41,7 @@ Write a handler, register a route, and test it.
 
 Once you have a function running, explore these topics:
 
+- [Code Sources](./code-sources) - Organize your code and sync from Git repositories
 - [API Keys](./api-keys) - Protect your functions with key-based authentication
 - [Secrets](./secrets) - Manage sensitive configuration securely
 - [Logs](./logs) - Monitor function execution and debug issues

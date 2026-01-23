@@ -22,46 +22,94 @@ Crude Functions provides a comprehensive REST API for programmatic management.
 | PUT | `/api/functions/:id/enable` | Enable a function |
 | PUT | `/api/functions/:id/disable` | Disable a function |
 
+### Code Sources
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/sources` | List all code sources |
+| GET | `/api/sources/:id` | Get source by ID |
+| POST | `/api/sources` | Create a new code source |
+| PUT | `/api/sources/:id` | Update source configuration |
+| DELETE | `/api/sources/:id` | Delete source and directory |
+| POST | `/api/sources/:id/sync` | Trigger manual sync (git sources) |
+| GET | `/api/sources/:id/status` | Get sync status |
+| POST | `/api/sources/:id/webhook` | Webhook trigger endpoint |
+
+**Creating a manual source:**
+
+```bash
+curl -X POST http://localhost:8000/api/sources \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-api",
+    "type": "manual",
+    "enabled": true
+  }'
+```
+
+**Creating a git source:**
+
+```bash
+curl -X POST http://localhost:8000/api/sources \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "production-api",
+    "type": "git",
+    "typeSettings": {
+      "url": "https://github.com/yourorg/repo.git",
+      "branch": "main",
+      "authToken": "ghp_xxxx"
+    },
+    "syncSettings": {
+      "intervalSeconds": 300,
+      "webhookEnabled": true,
+      "webhookSecret": "secure-random-string"
+    }
+  }'
+```
+
+**Notes:**
+
+- Setting `syncSettings.intervalSeconds` to `0` disables the interval sync.
+
 ### Code Files
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/files` | List all files in code directory |
-| GET | `/api/files/:path` | Get file content |
-| POST | `/api/files/:path` | Create a new file |
-| PUT | `/api/files/:path` | Create or update a file |
-| DELETE | `/api/files/:path` | Delete a file |
+| GET | `/api/sources/:sourceName/files` | List files in a source |
+| GET | `/api/sources/:sourceName/files/:path` | Get file content |
+| PUT | `/api/sources/:sourceName/files/:path` | Create/update file (manual sources only) |
+| DELETE | `/api/sources/:sourceName/files/:path` | Delete file (manual sources only) |
 
 **Notes:**
 
 - File paths are URL-encoded (use `%2F` for nested paths)
+- File operations require source to exist
+- Write operations only work on manual sources (git sources are read-only)
 - GET supports content negotiation - use `Accept: application/json` for JSON envelope with metadata
-- POST returns 201 (created), fails with 409 if file exists
 - PUT returns 201 (created) or 200 (updated)
 - Returns 413 if file exceeds configured max size (default 50 MB)
+- Returns 403 if attempting to write to non-editable source
 
-**Upload content formats (POST/PUT):**
+**Upload formats (PUT):**
 
 ```bash
 # JSON body
 curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/json" \
   -d '{"content": "file contents", "encoding": "utf-8"}' \
-  http://localhost:8000/api/files/example.ts
-
-# Base64 for binary files
-curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/json" \
-  -d '{"content": "base64data...", "encoding": "base64"}' \
-  http://localhost:8000/api/files/image.png
+  http://localhost:8000/api/sources/my-api/files/example.ts
 
 # Multipart form-data
 curl -X PUT -H "X-API-Key: key" \
   -F "file=@local-file.ts" \
-  http://localhost:8000/api/files/example.ts
+  http://localhost:8000/api/sources/my-api/files/example.ts
 
 # Raw binary
 curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/octet-stream" \
   --data-binary @local-file.bin \
-  http://localhost:8000/api/files/binary.bin
+  http://localhost:8000/api/sources/my-api/files/binary.bin
 ```
 
 ### API Key Groups

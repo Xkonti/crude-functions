@@ -449,10 +449,10 @@ Deno.test("GET /api/sources/:id/status returns correct capabilities for git sour
 // Webhook Operations
 // =============================================================================
 
-Deno.test("POST /api/sources/:id/webhook returns 401 for missing secret", async () => {
+Deno.test("POST /api/sources/:id/webhook returns 403 for disabled webhooks", async () => {
   const { app, ctx } = await createTestApp();
   try {
-    // Create git source with webhook secret
+    // Create git source WITHOUT webhookEnabled
     const createRes = await app.request("/api/sources", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -465,20 +465,22 @@ Deno.test("POST /api/sources/:id/webhook returns 401 for missing secret", async 
         },
         syncSettings: {
           webhookSecret: "my-secret",
+          // webhookEnabled not set = disabled
         },
       }),
     });
     const created = await createRes.json();
 
-    // Try webhook without secret
+    // Try webhook - should be rejected as disabled
     const webhookRes = await app.request(`/api/sources/${created.id}/webhook`, {
       method: "POST",
+      headers: { "X-Webhook-Secret": "my-secret" },
     });
 
-    expect(webhookRes.status).toBe(401);
+    expect(webhookRes.status).toBe(403);
 
     const body = await webhookRes.json();
-    expect(body.error).toContain("Missing webhook secret");
+    expect(body.error).toContain("Webhooks disabled");
   } finally {
     await ctx.cleanup();
   }
@@ -487,7 +489,7 @@ Deno.test("POST /api/sources/:id/webhook returns 401 for missing secret", async 
 Deno.test("POST /api/sources/:id/webhook returns 401 for invalid secret", async () => {
   const { app, ctx } = await createTestApp();
   try {
-    // Create git source with webhook secret
+    // Create git source with webhook enabled and secret required
     const createRes = await app.request("/api/sources", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -499,6 +501,7 @@ Deno.test("POST /api/sources/:id/webhook returns 401 for invalid secret", async 
           branch: "master",
         },
         syncSettings: {
+          webhookEnabled: true,
           webhookSecret: "correct-secret",
         },
       }),

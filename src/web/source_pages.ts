@@ -379,19 +379,35 @@ export function createSourcePages(
           <legend>Sync Settings</legend>
 
           <label>
-            Auto-Sync Interval (seconds)
-            <input type="number" name="intervalSeconds" min="0" value="0">
-            <small>0 = disabled. Minimum recommended: 300 (5 minutes)</small>
+            <input type="checkbox" id="intervalEnabled" name="intervalEnabled">
+            Enable Scheduled Sync
           </label>
+          <small>Automatically sync at regular intervals</small>
 
-          <label>
-            Webhook Secret
-            <div style="display: flex; align-items: center;">
-              <input type="text" id="webhookSecret" name="webhookSecret" placeholder="Optional" style="flex: 1;">
-              ${generateValueButton("webhookSecret")}
-            </div>
-            <small>For webhook-triggered syncs. Generate a secure random value.</small>
+          <div id="intervalSettings" style="display: none; margin-left: 1.5rem;">
+            <label>
+              Sync Interval (seconds)
+              <input type="number" name="intervalSeconds" min="60" value="300">
+              <small>Minimum recommended: 300 (5 minutes)</small>
+            </label>
+          </div>
+
+          <label style="margin-top: 1rem;">
+            <input type="checkbox" id="webhookEnabled" name="webhookEnabled">
+            Enable Webhook Sync
           </label>
+          <small>Allow external services (GitHub, GitLab) to trigger syncs via webhook URL</small>
+
+          <div id="webhookSettings" style="display: none; margin-left: 1.5rem;">
+            <label>
+              Webhook Secret
+              <div style="display: flex; align-items: center;">
+                <input type="text" id="webhookSecret" name="webhookSecret" placeholder="Optional" style="flex: 1;">
+                ${generateValueButton("webhookSecret")}
+              </div>
+              <small>Optional authentication. Leave empty to allow unauthenticated triggers.</small>
+            </label>
+          </div>
         </fieldset>
 
         <div class="grid" style="margin-bottom: 0;">
@@ -426,6 +442,20 @@ export function createSourcePages(
               break;
           }
         });
+
+        // Toggle interval settings visibility
+        const intervalCheckbox = document.getElementById('intervalEnabled');
+        const intervalSettings = document.getElementById('intervalSettings');
+        intervalCheckbox.addEventListener('change', function() {
+          intervalSettings.style.display = this.checked ? 'block' : 'none';
+        });
+
+        // Toggle webhook settings visibility
+        const webhookCheckbox = document.getElementById('webhookEnabled');
+        const webhookSettings = document.getElementById('webhookSettings');
+        webhookCheckbox.addEventListener('change', function() {
+          webhookSettings.style.display = this.checked ? 'block' : 'none';
+        });
       </script>
     `;
 
@@ -439,7 +469,9 @@ export function createSourcePages(
       refType?: string;
       refValue?: string;
       authToken?: string;
+      intervalEnabled?: string;
       intervalSeconds?: string;
+      webhookEnabled?: string;
       webhookSecret?: string;
     };
     try {
@@ -453,7 +485,9 @@ export function createSourcePages(
     const refType = (body.refType as string | undefined)?.trim() ?? "branch";
     const refValue = (body.refValue as string | undefined)?.trim() ?? "";
     const authToken = (body.authToken as string | undefined)?.trim() || undefined;
-    const intervalSeconds = parseInt((body.intervalSeconds as string | undefined) ?? "0", 10) || 0;
+    const intervalEnabled = body.intervalEnabled === "on";
+    const intervalSeconds = intervalEnabled ? (parseInt((body.intervalSeconds as string | undefined) ?? "300", 10) || 300) : 0;
+    const webhookEnabled = body.webhookEnabled === "on";
     const webhookSecret = (body.webhookSecret as string | undefined)?.trim() || undefined;
 
     if (!name) {
@@ -486,6 +520,9 @@ export function createSourcePages(
     const syncSettings: SyncSettings = {};
     if (intervalSeconds > 0) {
       syncSettings.intervalSeconds = intervalSeconds;
+    }
+    if (webhookEnabled) {
+      syncSettings.webhookEnabled = true;
     }
     if (webhookSecret) {
       syncSettings.webhookSecret = webhookSecret;
@@ -602,7 +639,9 @@ export function createSourcePages(
             <dt>Auto-Sync</dt>
             <dd>${source.syncSettings.intervalSeconds && source.syncSettings.intervalSeconds > 0 ? `Every ${source.syncSettings.intervalSeconds} seconds` : "Disabled"}</dd>
             <dt>Webhook</dt>
-            <dd>${source.syncSettings.webhookSecret ? "Configured" : "Not configured"}</dd>
+            <dd>${source.syncSettings.webhookEnabled
+              ? (source.syncSettings.webhookSecret ? "Enabled (with secret)" : "Enabled (no secret)")
+              : "Disabled"}</dd>
           </dl>
           ${syncStatusSection(source)}
         </article>
@@ -747,27 +786,43 @@ export function createSourcePages(
             <legend>Sync Settings</legend>
 
             <label>
-              Auto-Sync Interval (seconds)
-              <input type="number" name="intervalSeconds" min="0" value="${source.syncSettings.intervalSeconds || 0}">
-              <small>0 = disabled. Minimum recommended: 300 (5 minutes)</small>
+              <input type="checkbox" id="intervalEnabled" name="intervalEnabled" ${source.syncSettings.intervalSeconds && source.syncSettings.intervalSeconds > 0 ? "checked" : ""}>
+              Enable Scheduled Sync
             </label>
+            <small>Automatically sync at regular intervals</small>
 
-            <label>
-              Webhook Secret
-              <div style="display: flex; align-items: center;">
-                <input type="text" id="webhookSecret" name="webhookSecret"
-                       placeholder="${source.syncSettings.webhookSecret ? "(unchanged)" : "Not configured"}" style="flex: 1;">
-                ${generateValueButton("webhookSecret")}
-              </div>
-              <small>Leave empty to keep existing. Enter new value to change.</small>
-            </label>
-
-            ${source.syncSettings.webhookSecret ? `
+            <div id="intervalSettings" style="display: ${source.syncSettings.intervalSeconds && source.syncSettings.intervalSeconds > 0 ? "block" : "none"}; margin-left: 1.5rem;">
               <label>
-                <input type="checkbox" name="clearWebhookSecret">
-                Remove webhook secret
+                Sync Interval (seconds)
+                <input type="number" name="intervalSeconds" min="60" value="${source.syncSettings.intervalSeconds || 300}">
+                <small>Minimum recommended: 300 (5 minutes)</small>
               </label>
-            ` : ""}
+            </div>
+
+            <label style="margin-top: 1rem;">
+              <input type="checkbox" id="webhookEnabled" name="webhookEnabled" ${source.syncSettings.webhookEnabled ? "checked" : ""}>
+              Enable Webhook Sync
+            </label>
+            <small>Allow external services (GitHub, GitLab) to trigger syncs via webhook URL</small>
+
+            <div id="webhookSettings" style="display: ${source.syncSettings.webhookEnabled ? "block" : "none"}; margin-left: 1.5rem;">
+              <label>
+                Webhook Secret
+                <div style="display: flex; align-items: center;">
+                  <input type="text" id="webhookSecret" name="webhookSecret"
+                         placeholder="${source.syncSettings.webhookSecret ? "(unchanged)" : "Not configured"}" style="flex: 1;">
+                  ${generateValueButton("webhookSecret")}
+                </div>
+                <small>Optional authentication. Leave empty to keep existing or allow unauthenticated triggers.</small>
+              </label>
+
+              ${source.syncSettings.webhookSecret ? `
+                <label>
+                  <input type="checkbox" name="clearWebhookSecret">
+                  Remove webhook secret
+                </label>
+              ` : ""}
+            </div>
           </fieldset>
 
           <label>
@@ -803,6 +858,20 @@ export function createSourcePages(
                 break;
             }
           });
+
+          // Toggle interval settings visibility
+          const intervalCheckbox = document.getElementById('intervalEnabled');
+          const intervalSettings = document.getElementById('intervalSettings');
+          intervalCheckbox.addEventListener('change', function() {
+            intervalSettings.style.display = this.checked ? 'block' : 'none';
+          });
+
+          // Toggle webhook settings visibility
+          const webhookCheckbox = document.getElementById('webhookEnabled');
+          const webhookSettings = document.getElementById('webhookSettings');
+          webhookCheckbox.addEventListener('change', function() {
+            webhookSettings.style.display = this.checked ? 'block' : 'none';
+          });
         </script>
       `;
     }
@@ -837,7 +906,9 @@ export function createSourcePages(
       refValue?: string;
       authToken?: string;
       clearAuthToken?: string;
+      intervalEnabled?: string;
       intervalSeconds?: string;
+      webhookEnabled?: string;
       webhookSecret?: string;
       clearWebhookSecret?: string;
     };
@@ -857,7 +928,9 @@ export function createSourcePages(
       const refValue = (body.refValue as string | undefined)?.trim() ?? "";
       const authToken = (body.authToken as string | undefined)?.trim();
       const clearAuthToken = body.clearAuthToken === "on";
-      const intervalSeconds = parseInt((body.intervalSeconds as string | undefined) ?? "0", 10) || 0;
+      const intervalEnabled = body.intervalEnabled === "on";
+      const intervalSeconds = intervalEnabled ? (parseInt((body.intervalSeconds as string | undefined) ?? "300", 10) || 300) : 0;
+      const webhookEnabled = body.webhookEnabled === "on";
       const webhookSecret = (body.webhookSecret as string | undefined)?.trim();
       const clearWebhookSecret = body.clearWebhookSecret === "on";
 
@@ -894,6 +967,11 @@ export function createSourcePages(
       const newSyncSettings: SyncSettings = {};
       if (intervalSeconds > 0) {
         newSyncSettings.intervalSeconds = intervalSeconds;
+      }
+
+      // Handle webhook enabled (checkbox unchecked = explicitly disabled)
+      if (webhookEnabled) {
+        newSyncSettings.webhookEnabled = true;
       }
 
       // Handle webhook secret
