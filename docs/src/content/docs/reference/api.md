@@ -70,7 +70,9 @@ curl -X POST http://localhost:8000/api/sources \
   }'
 ```
 
-See the [Code Sources Guide](/guides/code-sources) for detailed documentation.
+**Notes:**
+
+- Setting `syncSettings.intervalSeconds` to `0` disables the interval sync.
 
 ### Code Files
 
