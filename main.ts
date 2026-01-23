@@ -60,6 +60,7 @@ import { InstanceIdService } from "./src/instance/instance_id_service.ts";
 import { JobQueueService } from "./src/jobs/job_queue_service.ts";
 import { JobProcessorService } from "./src/jobs/job_processor_service.ts";
 import { SchedulingService } from "./src/scheduling/scheduling_service.ts";
+import { EventBus } from "./src/events/mod.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -160,10 +161,14 @@ initializeLogger(settingsService);
 // Initialize instance ID service (for job ownership tracking)
 const instanceIdService = new InstanceIdService();
 
+// Initialize event bus for decoupled service communication
+const eventBus = new EventBus();
+
 // Initialize job queue service
 const jobQueueService = new JobQueueService({
   db,
   instanceIdService,
+  eventBus,
 });
 
 /**
@@ -252,6 +257,7 @@ const keyRotationService = new KeyRotationService({
 const jobProcessorService = new JobProcessorService({
   jobQueueService,
   instanceIdService,
+  eventBus,
   config: {
     pollingIntervalSeconds: await getIntSetting(SettingNames.JOB_PROCESSOR_POLLING_INTERVAL_SECONDS, 5),
     shutdownTimeoutMs: 60000,
