@@ -3,18 +3,19 @@ title: Code Sources
 description: Managing code sources, Git integration, and sync strategies
 ---
 
-Code sources are the foundation of how Crude Functions organizes your handler files. Each source is a directory containing TypeScript/JavaScript files that can be deployed as function endpoints. This guide covers everything from creating sources to setting up automatic Git synchronization.
+Code sources are the foundation of how Crude Functions organizes code files. Each source represents a directory containing TypeScript/JavaScript files that can be used within deployed function endpoints.
 
 ## What are Code Sources?
 
-A code source represents a collection of related function handlers stored in a subdirectory under `code/`. Each source has:
+A code source represents a collection of related files stored in a subdirectory within `code` directory of the Docker container. Each source has:
 
 - **Name** - Unique identifier (also the directory name)
-- **Type** - Either "manual" or "git"
+- **Type** - Either "manual" or "git" (more types coming soon)
 - **Files** - Handler scripts and shared utilities
 - **Sync Settings** - Configuration for automatic updates (git sources only)
 
 **Directory structure:**
+
 ```
 code/
 ├── my-api/           ← Manual source
@@ -22,7 +23,9 @@ code/
 │   └── posts.ts
 ├── webhooks/         ← Git source (synced from GitHub)
 │   ├── github.ts
-│   └── stripe.ts
+│   ├── stripe.ts
+│   └── helpers/
+│       └── validators.ts
 └── internal/         ← Another manual source
     └── admin.ts
 ```
@@ -33,40 +36,20 @@ This structure lets you organize functions by project, environment, or team, and
 
 ### Manual Sources
 
-Manual sources are editable via the web UI or API. You directly upload, create, edit, and delete files.
-
-**Best for:**
-- Development and prototyping
-- Small internal tools
-- Quick one-off functions
-- Files that change frequently
-
-**Capabilities:**
-- ✅ Create/upload files
-- ✅ Edit files in browser
-- ✅ Delete files
-- ❌ No git integration
+Manual sources are editable via the web UI or API. You directly upload, create, edit, and delete files. While convenient for small handlers, it's not the most practical solution when it comes to larger projects.
 
 ### Git Sources
 
-Git sources automatically sync files from a Git repository. Files are read-only through the UI/API—to modify them, you commit changes to your repository and trigger a sync.
-
-**Best for:**
-- Production deployments
-- Version-controlled code
-- Team collaboration
-- CI/CD integration
+Git sources automatically sync files from a Git repository. Files inside git code sources are read-only - they can't be modified via Web UI nor API. You commit changes to your repository and trigger a sync.
 
 **Capabilities:**
+
 - ✅ Automatic sync from repository
 - ✅ Branch/tag/commit targeting
 - ✅ Private repository support (auth tokens)
 - ✅ Webhook triggers
-- ❌ Files cannot be edited via UI/API (edit in git, then sync)
 
 ## Creating a Manual Source
-
-### Via Web UI
 
 1. Navigate to `http://localhost:8000/web/code`
 2. Click "Create New Source"
@@ -77,36 +60,6 @@ Git sources automatically sync files from a Git repository. Files are read-only 
 
 The source is immediately ready for file uploads.
 
-### Via API
-
-```bash
-curl -X POST http://localhost:8000/api/sources \
-  -H "X-API-Key: your-management-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-api",
-    "type": "manual",
-    "enabled": true
-  }'
-```
-
-**Response:**
-```json
-{
-  "id": 1,
-  "name": "my-api",
-  "type": "manual",
-  "typeSettings": {},
-  "syncSettings": {},
-  "enabled": true,
-  "lastSyncAt": null,
-  "lastSyncStartedAt": null,
-  "lastSyncError": null,
-  "createdAt": "2026-01-21T10:00:00.000Z",
-  "updatedAt": "2026-01-21T10:00:00.000Z"
-}
-```
-
 ## Creating a Git Source
 
 ### Requirements
@@ -115,18 +68,17 @@ curl -X POST http://localhost:8000/api/sources \
 - For private repos: Personal access token or deploy key
 - One of: branch name, tag name, or commit SHA
 
-### Via Web UI
-
 1. Navigate to `http://localhost:8000/web/code`
 2. Click "Create New Source"
+3. Choose the git source
 3. Fill in the form:
    - **Name**: `production-api`
-   - **Type**: Select "Git"
    - **Git URL**: `https://github.com/yourorg/functions.git`
-   - **Reference Type**: Branch (or Tag/Commit)
-   - **Reference Value**: `main`
+   - **Reference Type**: Branch / Tag / Commit
+   - **Reference Value**: `main` (branch)
    - **Auth Token**: (optional, for private repos)
-4. Click "Create"
+   -
+4. Click "Create Source"
 
 The source is created and an initial sync is triggered automatically.
 
@@ -145,7 +97,9 @@ curl -X POST http://localhost:8000/api/sources \
       "authToken": "ghp_xxxxxxxxxxxx"
     },
     "syncSettings": {
-      "intervalSeconds": 300
+      "intervalSeconds": 300,
+      "webhookEnabled": true,
+      "webhookSecret": "your-secure-random-string"
     },
     "enabled": true
   }'
@@ -184,22 +138,26 @@ Git sources support three sync methods that can be used together:
 Trigger sync on-demand via web UI or API call.
 
 **When to use:**
+
 - Testing after code changes
 - Deploying specific updates
 - One-time sync needs
 
 **Via Web UI:**
+
 1. Go to code management page
 2. Find your git source
 3. Click "Sync Now" button
 
 **Via API:**
+
 ```bash
 curl -X POST http://localhost:8000/api/sources/1/sync \
   -H "X-API-Key: your-management-api-key"
 ```
 
 **Response:**
+
 ```json
 {
   "message": "Sync triggered",
@@ -212,11 +170,13 @@ curl -X POST http://localhost:8000/api/sources/1/sync \
 Automatically sync on a regular schedule.
 
 **When to use:**
+
 - Regular polling for updates
 - Development environments
 - Non-critical deployments
 
 **Configuration:**
+
 ```bash
 curl -X PUT http://localhost:8000/api/sources/1 \
   -H "X-API-Key: your-management-api-key" \
@@ -229,6 +189,7 @@ curl -X PUT http://localhost:8000/api/sources/1 \
 ```
 
 **Common intervals:**
+
 - `60` - Every minute (frequent updates)
 - `300` - Every 5 minutes (balanced)
 - `1800` - Every 30 minutes (low frequency)
@@ -241,27 +202,33 @@ curl -X PUT http://localhost:8000/api/sources/1 \
 Sync immediately when code is pushed to repository.
 
 **When to use:**
+
 - Production deployments
 - Immediate updates needed
 - CI/CD integration
 
 **Setup:**
 
-1. **Generate webhook secret** (via Web UI or API):
+1. **Enable webhooks** (via Web UI checkbox or API):
+
 ```bash
 curl -X PUT http://localhost:8000/api/sources/1 \
   -H "X-API-Key: your-management-api-key" \
   -H "Content-Type: application/json" \
   -d '{
     "syncSettings": {
+      "webhookEnabled": true,
       "webhookSecret": "your-secure-random-string"
     }
   }'
 ```
 
+**Note:** The `webhookSecret` is optional. If not set, the webhook endpoint accepts any request when enabled. For production use, always configure a secret.
+
 2. **Configure webhook in Git provider**:
 
 **GitHub Example:**
+
 - Go to repository Settings → Webhooks → Add webhook
 - **Payload URL**: `https://your-server.com/api/sources/1/webhook?secret=your-secure-random-string`
 - **Content type**: `application/json`
@@ -269,6 +236,7 @@ curl -X PUT http://localhost:8000/api/sources/1 \
 - **Active**: ✓
 
 **GitLab Example:**
+
 - Go to repository Settings → Webhooks
 - **URL**: `https://your-server.com/api/sources/1/webhook`
 - **Secret token**: `your-secure-random-string`
@@ -277,7 +245,7 @@ curl -X PUT http://localhost:8000/api/sources/1 \
 
 **Alternative**: Pass secret in header `X-Webhook-Secret` instead of query param.
 
-**Security**: Webhook secrets use constant-time comparison to prevent timing attacks.
+**Security**: Webhook secrets use constant-time comparison to prevent timing attacks. Webhooks are disabled by default and must be explicitly enabled.
 
 ## Managing Files
 
@@ -286,6 +254,7 @@ curl -X PUT http://localhost:8000/api/sources/1 \
 Files in manual sources can be created, edited, and deleted via web UI or API.
 
 **Upload a file (Web UI):**
+
 1. Navigate to code management page
 2. Click on source name to view files
 3. Click "Upload New File"
@@ -293,6 +262,7 @@ Files in manual sources can be created, edited, and deleted via web UI or API.
 5. Click "Save"
 
 **Upload a file (API):**
+
 ```bash
 # JSON format (text files)
 curl -X PUT http://localhost:8000/api/sources/my-api/files/hello.ts \
@@ -316,12 +286,14 @@ curl -X PUT http://localhost:8000/api/sources/my-api/files/data.bin \
 ```
 
 **List files:**
+
 ```bash
 curl http://localhost:8000/api/sources/my-api/files \
   -H "X-API-Key: your-key"
 ```
 
 **Delete a file:**
+
 ```bash
 curl -X DELETE http://localhost:8000/api/sources/my-api/files/old-handler.ts \
   -H "X-API-Key: your-key"
@@ -337,6 +309,7 @@ Files in git sources are **read-only** via the API/UI. To modify them:
 4. Files update automatically
 
 **You can read but not write:**
+
 ```bash
 # ✅ Read file content
 curl http://localhost:8000/api/sources/production-api/files/handler.ts \
@@ -359,12 +332,14 @@ Each git source tracks sync history:
 - **lastSyncError** - Error message from last failed sync
 
 **Check sync status (API):**
+
 ```bash
 curl http://localhost:8000/api/sources/1/status \
   -H "X-API-Key: your-key"
 ```
 
 **Response:**
+
 ```json
 {
   "isSyncable": true,
@@ -396,6 +371,7 @@ Source names must follow these constraints:
 - **Unique**: No duplicate names allowed
 
 **Valid examples:**
+
 ```
 my-api
 UserFunctions
@@ -404,6 +380,7 @@ prod-api-2026
 ```
 
 **Invalid examples:**
+
 ```
 _internal       # Cannot start with underscore
 my.api          # Period not allowed
@@ -428,6 +405,7 @@ format: sourceName/path/to/file.ts
 | `prod/lib/utils.ts` | File in subdirectory (not directly callable) |
 
 **Function configuration:**
+
 ```json
 {
   "name": "list-users",
@@ -449,6 +427,7 @@ format: sourceName/path/to/file.ts
 ### Organizing Code
 
 **Separate by environment:**
+
 ```
 code/
 ├── development/    # Manual source for dev/test
@@ -457,6 +436,7 @@ code/
 ```
 
 **Separate by purpose:**
+
 ```
 code/
 ├── public-api/     # External-facing endpoints
@@ -484,16 +464,19 @@ code/
 ### Sync Failures
 
 **Error: "Authentication failed"**
+
 - Check auth token is valid and has correct permissions
 - For GitHub: Token needs `repo` scope
 - Token may have expired - generate new one
 
 **Error: "Repository not found"**
+
 - Verify URL is correct (should be HTTPS format)
 - Check repository exists and is accessible
 - For private repos, ensure auth token is provided
 
 **Error: "Branch not found"**
+
 - Verify branch/tag/commit exists in repository
 - Check spelling (case-sensitive)
 - Try using full commit SHA instead
@@ -501,6 +484,7 @@ code/
 ### File Not Found in Functions
 
 If a function handler can't be found:
+
 1. Check handler path format: `sourceName/fileName.ts`
 2. Verify file exists in source (check web UI or API)
 3. For git sources: Check sync status (may not have synced yet)

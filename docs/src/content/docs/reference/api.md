@@ -64,6 +64,7 @@ curl -X POST http://localhost:8000/api/sources \
     },
     "syncSettings": {
       "intervalSeconds": 300,
+      "webhookEnabled": true,
       "webhookSecret": "secure-random-string"
     }
   }'

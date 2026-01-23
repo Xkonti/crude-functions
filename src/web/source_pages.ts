@@ -385,12 +385,18 @@ export function createSourcePages(
           </label>
 
           <label>
+            <input type="checkbox" name="webhookEnabled">
+            Enable Webhook Sync
+          </label>
+          <small>Allow external services (GitHub, GitLab) to trigger syncs via webhook URL</small>
+
+          <label>
             Webhook Secret
             <div style="display: flex; align-items: center;">
               <input type="text" id="webhookSecret" name="webhookSecret" placeholder="Optional" style="flex: 1;">
               ${generateValueButton("webhookSecret")}
             </div>
-            <small>For webhook-triggered syncs. Generate a secure random value.</small>
+            <small>Optional authentication for webhook requests. Leave empty to allow unauthenticated triggers.</small>
           </label>
         </fieldset>
 
@@ -440,6 +446,7 @@ export function createSourcePages(
       refValue?: string;
       authToken?: string;
       intervalSeconds?: string;
+      webhookEnabled?: string;
       webhookSecret?: string;
     };
     try {
@@ -454,6 +461,7 @@ export function createSourcePages(
     const refValue = (body.refValue as string | undefined)?.trim() ?? "";
     const authToken = (body.authToken as string | undefined)?.trim() || undefined;
     const intervalSeconds = parseInt((body.intervalSeconds as string | undefined) ?? "0", 10) || 0;
+    const webhookEnabled = body.webhookEnabled === "on";
     const webhookSecret = (body.webhookSecret as string | undefined)?.trim() || undefined;
 
     if (!name) {
@@ -486,6 +494,9 @@ export function createSourcePages(
     const syncSettings: SyncSettings = {};
     if (intervalSeconds > 0) {
       syncSettings.intervalSeconds = intervalSeconds;
+    }
+    if (webhookEnabled) {
+      syncSettings.webhookEnabled = true;
     }
     if (webhookSecret) {
       syncSettings.webhookSecret = webhookSecret;
@@ -602,7 +613,9 @@ export function createSourcePages(
             <dt>Auto-Sync</dt>
             <dd>${source.syncSettings.intervalSeconds && source.syncSettings.intervalSeconds > 0 ? `Every ${source.syncSettings.intervalSeconds} seconds` : "Disabled"}</dd>
             <dt>Webhook</dt>
-            <dd>${source.syncSettings.webhookSecret ? "Configured" : "Not configured"}</dd>
+            <dd>${source.syncSettings.webhookEnabled
+              ? (source.syncSettings.webhookSecret ? "Enabled (with secret)" : "Enabled (no secret)")
+              : "Disabled"}</dd>
           </dl>
           ${syncStatusSection(source)}
         </article>
@@ -753,13 +766,19 @@ export function createSourcePages(
             </label>
 
             <label>
+              <input type="checkbox" name="webhookEnabled" ${source.syncSettings.webhookEnabled ? "checked" : ""}>
+              Enable Webhook Sync
+            </label>
+            <small>Allow external services (GitHub, GitLab) to trigger syncs via webhook URL</small>
+
+            <label>
               Webhook Secret
               <div style="display: flex; align-items: center;">
                 <input type="text" id="webhookSecret" name="webhookSecret"
                        placeholder="${source.syncSettings.webhookSecret ? "(unchanged)" : "Not configured"}" style="flex: 1;">
                 ${generateValueButton("webhookSecret")}
               </div>
-              <small>Leave empty to keep existing. Enter new value to change.</small>
+              <small>Optional authentication. Leave empty to keep existing or allow unauthenticated triggers.</small>
             </label>
 
             ${source.syncSettings.webhookSecret ? `
@@ -838,6 +857,7 @@ export function createSourcePages(
       authToken?: string;
       clearAuthToken?: string;
       intervalSeconds?: string;
+      webhookEnabled?: string;
       webhookSecret?: string;
       clearWebhookSecret?: string;
     };
@@ -858,6 +878,7 @@ export function createSourcePages(
       const authToken = (body.authToken as string | undefined)?.trim();
       const clearAuthToken = body.clearAuthToken === "on";
       const intervalSeconds = parseInt((body.intervalSeconds as string | undefined) ?? "0", 10) || 0;
+      const webhookEnabled = body.webhookEnabled === "on";
       const webhookSecret = (body.webhookSecret as string | undefined)?.trim();
       const clearWebhookSecret = body.clearWebhookSecret === "on";
 
@@ -894,6 +915,11 @@ export function createSourcePages(
       const newSyncSettings: SyncSettings = {};
       if (intervalSeconds > 0) {
         newSyncSettings.intervalSeconds = intervalSeconds;
+      }
+
+      // Handle webhook enabled (checkbox unchecked = explicitly disabled)
+      if (webhookEnabled) {
+        newSyncSettings.webhookEnabled = true;
       }
 
       // Handle webhook secret
