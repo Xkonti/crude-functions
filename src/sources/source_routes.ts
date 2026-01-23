@@ -7,6 +7,7 @@ import {
   SourceNotFoundError,
   SourceNotSyncableError,
   WebhookAuthError,
+  WebhookDisabledError,
 } from "./errors.ts";
 import type {
   CodeSource,
@@ -338,24 +339,24 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 
-    // Get secret from header or query param
+    // Get secret from header or query param (optional - only validated if source requires it)
     const secret =
       c.req.header("X-Webhook-Secret") ?? c.req.query("secret") ?? "";
-    if (!secret) {
-      return c.json({ error: "Missing webhook secret" }, 401);
-    }
 
     try {
       const job = await codeSourceService.triggerWebhookSync(id, secret);
       if (job === null) {
         return c.json({
-          message: "Sync skipped (disabled or already in progress)",
+          message: "Sync skipped (source disabled or already in progress)",
         });
       }
       return c.json({ message: "Sync triggered", jobId: job.id });
     } catch (error) {
       if (error instanceof SourceNotFoundError) {
         return c.json({ error: error.message }, 404);
+      }
+      if (error instanceof WebhookDisabledError) {
+        return c.json({ error: "Webhooks disabled for this source" }, 403);
       }
       if (error instanceof WebhookAuthError) {
         return c.json({ error: "Invalid webhook secret" }, 401);

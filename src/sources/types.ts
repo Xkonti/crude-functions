@@ -68,7 +68,9 @@ export type TypeSettings = ManualTypeSettings | GitTypeSettings;
 export interface SyncSettings {
   /** Interval in seconds for auto-sync. 0 or undefined = disabled. */
   intervalSeconds?: number;
-  /** Per-source secret for webhook authentication. */
+  /** Whether webhook endpoint is enabled. Default: false (disabled). */
+  webhookEnabled?: boolean;
+  /** Per-source secret for webhook authentication. Optional - if not set, accepts any request when enabled. */
   webhookSecret?: string;
 }
 

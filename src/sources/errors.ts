@@ -105,6 +105,16 @@ export class WebhookAuthError extends CodeSourceError {
 }
 
 /**
+ * Thrown when webhook endpoint is called but webhooks are disabled for the source.
+ */
+export class WebhookDisabledError extends CodeSourceError {
+  constructor(public readonly sourceName: string) {
+    super(`Webhooks are disabled for source '${sourceName}'`);
+    this.name = "WebhookDisabledError";
+  }
+}
+
+/**
  * Thrown when no provider is registered for a source type.
  */
 export class ProviderNotFoundError extends CodeSourceError {
