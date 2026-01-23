@@ -61,11 +61,23 @@ export default async function (c, ctx) {
 
 ### Relative Imports
 
-Import other files from your `code/` directory using relative paths:
+Import other files from your code source directory using relative paths:
 
 ```typescript
 import { formatGreeting } from "./utils/formatting.ts";
 import { validateInput } from "./validators.ts";
+
+export default async function (c, ctx) {
+  const greeting = formatGreeting("World");
+  return c.json({ message: greeting });
+}
+```
+
+Or import from other code sources. A `hello.ts` file inside `my-functions` code source could easily access code within `shared` code source as all code sources are simply directories within the `code` directory:
+
+```typescript
+import { formatGreeting } from "../shared/utils/formatting.ts";
+import { validateInput } from "../shared/validators.ts";
 
 export default async function (c, ctx) {
   const greeting = formatGreeting("World");
@@ -94,7 +106,7 @@ Here's a handler that uses multiple import types:
 ```typescript
 import { z } from "jsr:@zod/zod";
 import dayjs from "npm:dayjs";
-import { getUser } from "./utils/db.ts";
+import { getUser } from "../utils/db.ts";
 
 const QuerySchema = z.object({
   id: z.string().uuid(),
