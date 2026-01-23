@@ -21,6 +21,7 @@ import {
   MaxRetriesExceededError,
   JobNotCancellableError,
 } from "./errors.ts";
+import { type EventBus, EventType } from "../events/mod.ts";
 
 /**
  * Service for managing job queue entries in SQLite database.
@@ -55,6 +56,7 @@ export class JobQueueService {
   private readonly db: DatabaseService;
   private readonly instanceIdService: InstanceIdService;
   private readonly encryptionService?: IEncryptionService;
+  private readonly eventBus?: EventBus;
   private readonly writeMutex = new Mutex();
 
   /** Per-job subscribers for completion events (completed/failed/cancelled) */
@@ -66,6 +68,7 @@ export class JobQueueService {
     this.db = options.db;
     this.instanceIdService = options.instanceIdService;
     this.encryptionService = options.encryptionService;
+    this.eventBus = options.eventBus;
   }
 
   // ============== Enqueue Operations ==============
@@ -123,6 +126,13 @@ export class JobQueueService {
     if (!created) {
       throw new Error("Failed to retrieve created job");
     }
+
+    // Publish event for immediate processing (fire-and-forget)
+    this.eventBus?.publish(EventType.JOB_ENQUEUED, {
+      jobId: created.id,
+      type: created.type,
+    });
+
     return created;
   }
 
@@ -808,6 +818,13 @@ export class JobQueueService {
     // Clean up subscribers
     this.completionSubscribers.delete(job.id);
     this.cancellationSubscribers.delete(job.id);
+
+    // Publish global completion event for processor wake-up (fire-and-forget)
+    this.eventBus?.publish(EventType.JOB_COMPLETED, {
+      jobId: job.id,
+      type: job.type,
+      status: type,
+    });
 
     // Delete the job from the database
     await this.db.execute(`DELETE FROM jobQueue WHERE id = ?`, [job.id]);

@@ -1,6 +1,7 @@
 import type { DatabaseService } from "../database/database_service.ts";
 import type { InstanceIdService } from "../instance/instance_id_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
+import type { EventBus } from "../events/mod.ts";
 
 /**
  * Job status enum.
@@ -149,6 +150,8 @@ export interface JobQueueServiceOptions {
   instanceIdService: InstanceIdService;
   /** Optional encryption service for sensitive payloads */
   encryptionService?: IEncryptionService;
+  /** Optional event bus for publishing job events */
+  eventBus?: EventBus;
 }
 
 /**
@@ -161,6 +164,8 @@ export interface JobProcessorServiceOptions {
   instanceIdService: InstanceIdService;
   /** Processing configuration */
   config: JobProcessorConfig;
+  /** Optional event bus for subscribing to job events */
+  eventBus?: EventBus;
 }
 
 /**

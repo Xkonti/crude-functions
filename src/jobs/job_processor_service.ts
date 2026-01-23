@@ -14,6 +14,7 @@ import {
 } from "./errors.ts";
 import { CancellationTokenImpl } from "./cancellation_token.ts";
 import { logger } from "../utils/logger.ts";
+import { type EventBus, EventType } from "../events/mod.ts";
 
 /**
  * Background service for processing jobs from the queue.
@@ -54,17 +55,23 @@ export class JobProcessorService {
   private readonly jobQueueService: JobQueueService;
   private readonly instanceIdService: InstanceIdService;
   private readonly config: JobProcessorConfig;
+  private readonly eventBus?: EventBus;
   private readonly handlers = new Map<string, JobHandler>();
 
   private timerId: number | null = null;
   private isProcessing = false;
   private stopRequested = false;
   private consecutiveFailures = 0;
+  private wakeupRequested = false;
 
   /** Active cancellation tokens for running jobs (job ID -> token) */
   private readonly activeCancellationTokens = new Map<number, CancellationTokenImpl>();
   /** Unsubscribe functions for active cancellation subscriptions */
   private readonly cancellationUnsubscribers = new Map<number, () => void>();
+  /** Unsubscribe function for job enqueued events */
+  private enqueuedUnsubscribe: (() => void) | null = null;
+  /** Unsubscribe function for job completed events */
+  private completedUnsubscribe: (() => void) | null = null;
 
   private static readonly MAX_CONSECUTIVE_FAILURES = 5;
   private static readonly DEFAULT_SHUTDOWN_TIMEOUT_MS = 60000;
@@ -73,6 +80,7 @@ export class JobProcessorService {
     this.jobQueueService = options.jobQueueService;
     this.instanceIdService = options.instanceIdService;
     this.config = options.config;
+    this.eventBus = options.eventBus;
   }
 
   // ============== Handler Registration ==============
@@ -131,6 +139,16 @@ export class JobProcessorService {
       `[JobQueue] Starting with polling interval ${this.config.pollingIntervalSeconds}s, ` +
         `instance ID: ${this.instanceIdService.getId().slice(0, 8)}...`,
     );
+
+    // Subscribe to job events for immediate wake-up
+    if (this.eventBus) {
+      this.enqueuedUnsubscribe = this.eventBus.subscribe(EventType.JOB_ENQUEUED, () => {
+        this.requestWakeup();
+      });
+      this.completedUnsubscribe = this.eventBus.subscribe(EventType.JOB_COMPLETED, () => {
+        this.requestWakeup();
+      });
+    }
 
     // Handle orphaned jobs first, then start processing
     this.handleOrphanedJobs()
@@ -207,6 +225,12 @@ export class JobProcessorService {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
 
+    // Unsubscribe from job events
+    this.enqueuedUnsubscribe?.();
+    this.enqueuedUnsubscribe = null;
+    this.completedUnsubscribe?.();
+    this.completedUnsubscribe = null;
+
     // Clean up any remaining cancellation tokens and subscriptions
     this.activeCancellationTokens.clear();
     for (const unsubscribe of this.cancellationUnsubscribers.values()) {
@@ -274,7 +298,35 @@ export class JobProcessorService {
   // ============== Private Implementation ==============
 
   /**
-   * Main processing loop - called by timer.
+   * Request immediate job queue check.
+   *
+   * Multiple requests are coalesced - if processing is already running,
+   * it will re-check after completing current job batch.
+   */
+  private requestWakeup(): void {
+    if (this.isProcessing) {
+      // Processing is running - set flag so it re-checks after current batch
+      this.wakeupRequested = true;
+      logger.debug("[JobQueue] Wakeup requested (will check after current job)");
+    } else {
+      // Not processing - trigger immediate check
+      logger.debug("[JobQueue] Wakeup requested (triggering immediate check)");
+      this.processLoop()
+        .then(() => {
+          this.consecutiveFailures = 0;
+        })
+        .catch((error) => {
+          this.consecutiveFailures++;
+          logger.error(
+            `[JobQueue] Event-triggered processing failed (${this.consecutiveFailures}/${JobProcessorService.MAX_CONSECUTIVE_FAILURES}):`,
+            error,
+          );
+        });
+    }
+  }
+
+  /**
+   * Main processing loop - called by timer or event trigger.
    */
   private async processLoop(): Promise<void> {
     if (this.isProcessing) {
@@ -285,14 +337,19 @@ export class JobProcessorService {
     this.isProcessing = true;
     try {
       // Process jobs until queue is empty or stop requested
-      while (!this.stopRequested) {
-        const job = await this.jobQueueService.getNextPendingJob();
-        if (!job) {
-          break; // Queue empty
-        }
+      // Use do-while to re-check if wakeup was requested during processing
+      do {
+        this.wakeupRequested = false;
 
-        await this.processJob(job);
-      }
+        while (!this.stopRequested) {
+          const job = await this.jobQueueService.getNextPendingJob();
+          if (!job) {
+            break; // Queue empty
+          }
+
+          await this.processJob(job);
+        }
+      } while (this.wakeupRequested && !this.stopRequested);
     } finally {
       this.isProcessing = false;
     }
