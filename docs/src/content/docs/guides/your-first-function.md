@@ -30,20 +30,20 @@ Before we create our first function, let's understand how Crude Functions organi
 
 Code is organized into **code sources**. Each code source is represented by a directory. Think of them as separate folders for different projects or deployment environments. Currently there are two types of code sources:
 
-- **Manual code sources** - Upload and edit files directly via the web UI or programatically via API
+- **Manual code sources** - Upload and edit files directly via the web UI
 - **Git code sources** - Automatically sync files from a Git repository
 
-For this tutorial, we'll use a manual source where you can directly upload and edit files.
+In this guide, we'll focus on the **manual code source** to keep things simple.
 
-### Creating or Using a Code Source
+### Creating a Code Source
 
-When you first access the code management page, you will need to create a new code source first:
+When you first access the Code Management Page 📁, you will need to create your first code source:
 
-1. Navigate to the Code Management Page 📂 or go to `http://localhost:8000/web/code`
-2. Click "Create New Source"
-3. Choose the "Manual code source" - this will allow us to write functions directly within the Web UI.
-3. Enter a name - this will be the name of the crated directory (e.g., `my-functions`)
-5. Click "Create"
+1. Navigate to the Code Management Page 📁 or go to `http://localhost:8000/web/code`
+2. Click "New Code Source" button
+3. Choose the "Create Manual Source"
+3. Enter a name of the new source - this will be the name of the created directory (e.g., `my-functions`)
+5. Click "Create Source"
 
 For the rest of this tutorial, we'll assume you have a source named `my-functions`. If your source has a different name, just substitute it wherever you see `my-functions` in the examples.
 
@@ -95,9 +95,7 @@ See the [Handler Context Reference](/reference/handler-context) for the complete
 
 ## Step 2: Register the Route
 
-Now that we have our handler file, we need to register it as a function route. You can do this from the Web UI or via the API.
-
-### Option A: Using the Web UI
+Now that we have our handler file, we need to register it as a function route.
 
 1. Navigate to `http://localhost:8000/web/functions` (the ⚡ tab)
 2. Click the "Create New Function" button
@@ -119,23 +117,6 @@ Now that we have our handler file, we need to register it as a function route. Y
 You should see your new function in the functions list with a green "Enabled" status.
 
 ![Created function listed in table](../../../assets/screenshots/hello-world-function.png)
-
-### Option B: Using the API
-
-If you prefer programmatic deployment, you can use the management API:
-
-```bash
-curl -X POST http://localhost:8000/api/functions \
-  -H "X-API-Key: your-management-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "hello-world",
-    "description": "My first function",
-    "handler": "my-functions/hello.ts",
-    "route": "/hello",
-    "methods": ["GET"]
-  }'
-```
 
 **Note**: The handler path must include the source name. If your source has a different name, use `yourSourceName/hello.ts` instead.
 
