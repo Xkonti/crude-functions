@@ -32,11 +32,11 @@ WORKDIR /app
 COPY --from=builder --chown=deno:deno /deno-dir /deno-dir
 COPY --from=builder --chown=deno:deno /app /app
 
-# Set environment variables
+# Default ports - override with FUNCTION_PORT and MANAGEMENT_PORT env vars
 ENV FUNCTION_PORT=8000
 ENV MANAGEMENT_PORT=9000
 
-# Expose both ports
+# Expose default ports (override with -p when running container)
 EXPOSE 8000 9000
 
 # Run the application with necessary permissions
