@@ -15,8 +15,11 @@ import type { UserService } from "../users/user_service.ts";
 import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
+import type { CsrfService } from "../csrf/csrf_service.ts";
 
 import { createHybridAuthMiddleware } from "../auth/auth_middleware.ts";
+import { createSecurityHeadersMiddleware, createWebCacheHeadersMiddleware } from "../middleware/security_headers.ts";
+import { createCsrfMiddleware } from "../csrf/csrf_middleware.ts";
 import { createApiKeyRoutes, createApiKeyGroupRoutes } from "../keys/api_key_routes.ts";
 import { createFunctionsRoutes } from "../routes/functions_routes.ts";
 import { createSourceRoutes, createSourceWebhookRoute } from "../sources/source_routes.ts";
@@ -48,6 +51,7 @@ export interface ManagementAppDeps {
   codeSourceService: CodeSourceService;
   sourceFileService: SourceFileService;
   schedulingService: SchedulingService;
+  csrfService: CsrfService;
 }
 
 /**
@@ -64,6 +68,11 @@ export interface ManagementAppDeps {
 export function createManagementApp(deps: ManagementAppDeps): Hono {
   const app = new Hono();
 
+  // ============================================================================
+  // Security Headers (applied to ALL responses)
+  // ============================================================================
+  app.use("/*", createSecurityHeadersMiddleware());
+
   // Create hybrid auth middleware (accepts session OR API key)
   const hybridAuth = createHybridAuthMiddleware({
     auth: deps.auth,
@@ -71,8 +80,11 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
     settingsService: deps.settingsService,
   });
 
+  // Create CSRF middleware (validates tokens on state-changing requests)
+  const csrfMiddleware = createCsrfMiddleware(deps.csrfService);
+
   // ============================================================================
-  // Auth Endpoints (public - no middleware)
+  // Auth Endpoints (public - no CSRF, these are JSON API calls)
   // ============================================================================
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
 
@@ -90,8 +102,11 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
   // Create a sub-router for all protected API endpoints
   const api = new Hono();
 
-  // Apply hybrid auth to all API routes
+  // Apply hybrid auth to all API routes (sets authMethod in context)
   api.use("/*", hybridAuth);
+
+  // Apply CSRF protection after auth (skips for API key authenticated requests)
+  api.use("/*", csrfMiddleware);
 
   // API Key management
   api.route("/key-groups", createApiKeyGroupRoutes(deps.apiKeyService));
@@ -173,6 +188,12 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
   // ============================================================================
   // Web UI (session auth applied internally by createWebRoutes)
   // ============================================================================
+  // Apply CSRF middleware to web routes (validates tokens, sets csrfToken in context)
+  app.use("/web/*", csrfMiddleware);
+
+  // Apply cache headers to prevent caching of sensitive admin pages
+  app.use("/web/*", createWebCacheHeadersMiddleware());
+
   app.route("/web", createWebRoutes({
     auth: deps.auth,
     db: deps.db,

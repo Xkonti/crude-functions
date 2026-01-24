@@ -1,6 +1,7 @@
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames, GlobalSettingDefaults } from "../settings/types.ts";
 import { APP_VERSION } from "../version.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 
 /**
  * Escapes HTML special characters to prevent XSS attacks.
@@ -73,6 +74,15 @@ interface SessionUser {
 export function getLayoutUser(c: any): LayoutUser | undefined {
   const sessionUser = c.get("user") as SessionUser | undefined;
   return sessionUser ? { email: sessionUser.email } : undefined;
+}
+
+/**
+ * Extracts CSRF token from Hono context.
+ * Use this in route handlers to get the token for forms.
+ */
+// deno-lint-ignore no-explicit-any
+export function getCsrfToken(c: any): string {
+  return c.get("csrfToken") as string || "";
 }
 
 /**
@@ -253,7 +263,8 @@ export async function confirmPage(
   actionUrl: string,
   cancelUrl: string,
   user: LayoutUser | undefined,
-  settingsService: SettingsService
+  settingsService: SettingsService,
+  csrfToken: string = ""
 ): Promise<string> {
   return await layout(
     title,
@@ -263,6 +274,7 @@ export async function confirmPage(
       <p>${escapeHtml(message)}</p>
       <footer>
         <form method="POST" action="${escapeHtml(actionUrl)}" style="display: inline;">
+          ${csrfToken ? csrfInput(csrfToken) : ""}
           <button type="submit" class="contrast">Delete</button>
         </form>
         <a href="${escapeHtml(cancelUrl)}" role="button" class="secondary">Cancel</a>
@@ -291,9 +303,11 @@ export function buttonLink(
 export function postButton(
   action: string,
   text: string,
-  className = "secondary outline"
+  className = "secondary outline",
+  csrfToken: string = ""
 ): string {
   return `<form method="POST" action="${escapeHtml(action)}" style="display: inline; margin: 0;">
+    ${csrfToken ? csrfInput(csrfToken) : ""}
     <button type="submit" class="${className}" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">${escapeHtml(text)}</button>
   </form>`;
 }

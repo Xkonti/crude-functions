@@ -11,12 +11,14 @@ import {
   buttonLink,
   formatDate,
   getLayoutUser,
+  getCsrfToken,
   secretScripts,
   parseSecretFormData,
   parseSecretEditFormData,
   generateValueButton,
   valueGeneratorScripts,
 } from "./templates.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 
 /**
  * Options for creating the secrets pages router.
@@ -118,10 +120,11 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
   // GET /create - Create secret form
   routes.get("/create", (c) => {
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
     return c.html(
       layout(
         "Create Secret",
-        renderCreateForm("/web/secrets/create", {}, error),
+        renderCreateForm("/web/secrets/create", {}, error, csrfToken),
         getLayoutUser(c), settingsService
       )
     );
@@ -141,10 +144,11 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     const { secretData, errors } = parseSecretFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           "Create Secret",
-          renderCreateForm("/web/secrets/create", secretData, errors.join(". ")),
+          renderCreateForm("/web/secrets/create", secretData, errors.join(". "), csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -165,10 +169,11 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create secret";
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           "Create Secret",
-          renderCreateForm("/web/secrets/create", secretData, message),
+          renderCreateForm("/web/secrets/create", secretData, message, csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -188,6 +193,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const secret = await secretsService.getGlobalSecretById(id);
 
@@ -200,7 +206,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     return c.html(
       layout(
         `Edit: ${secret.name}`,
-        renderEditForm(`/web/secrets/edit/${id}`, secret, error),
+        renderEditForm(`/web/secrets/edit/${id}`, secret, error, csrfToken),
         getLayoutUser(c), settingsService
       )
     );
@@ -238,13 +244,15 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     const { editData, errors } = parseSecretEditFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${secret.name}`,
           renderEditForm(
             `/web/secrets/edit/${id}`,
             { ...secret, ...editData },
-            errors.join(". ")
+            errors.join(". "),
+            csrfToken
           ),
           getLayoutUser(c), settingsService
         ),
@@ -266,13 +274,15 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update secret";
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${secret.name}`,
           renderEditForm(
             `/web/secrets/edit/${id}`,
             { ...secret, ...editData },
-            message
+            message,
+            csrfToken
           ),
           getLayoutUser(c), settingsService
         ),
@@ -306,7 +316,9 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
         `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
         `/web/secrets/delete/${id}`,
         "/web/secrets",
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -353,12 +365,14 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
 function renderCreateForm(
   action: string,
   data: { name?: string; value?: string; comment?: string } = {},
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     <h1>Create Secret</h1>
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="${escapeHtml(action)}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
@@ -396,12 +410,14 @@ function renderCreateForm(
 function renderEditForm(
   action: string,
   secret: { name: string; value: string; comment: string | null; decryptionError?: string },
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     <h1>Edit Secret</h1>
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="${escapeHtml(action)}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
         <input type="text" value="${escapeHtml(secret.name)}" disabled />

@@ -22,11 +22,13 @@ import {
   confirmPage,
   buttonLink,
   getLayoutUser,
+  getCsrfToken,
   formatDate,
   formatSize,
   generateValueButton,
   valueGeneratorScripts,
 } from "./templates.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 
 const MAX_EDITABLE_SIZE = 1024 * 1024; // 1 MB
 
@@ -152,8 +154,10 @@ export function createSourcePages(
       }
 
       // Action buttons (icons)
+      const csrfToken = getCsrfToken(c);
       const syncButton = source.type === "git"
         ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline; margin: 0;">
+            ${csrfInput(csrfToken)}
             <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="Sync" ${source.lastSyncStartedAt ? "disabled" : ""}>
               🔄
             </button>
@@ -263,6 +267,7 @@ export function createSourcePages(
   routes.get("/sources/new/manual", async (c) => {
     const error = c.req.query("error");
     const prefilled = c.req.query("name") || "";
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create Manual Source</h1>
@@ -271,6 +276,7 @@ export function createSourcePages(
         <a href="/web/code/sources/new" role="button" class="secondary outline">Back</a>
       </p>
       <form method="POST" action="/web/code/sources/new/manual">
+        ${csrfInput(csrfToken)}
         <label>
           Source Name *
           <input type="text" name="name" required pattern="^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$"
@@ -329,6 +335,7 @@ export function createSourcePages(
 
   routes.get("/sources/new/git", async (c) => {
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create Git Source</h1>
@@ -337,6 +344,7 @@ export function createSourcePages(
         <a href="/web/code/sources/new" role="button" class="secondary outline">Back</a>
       </p>
       <form method="POST" action="/web/code/sources/new/git">
+        ${csrfInput(csrfToken)}
         <label>
           Source Name *
           <input type="text" name="name" required pattern="^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$"
@@ -583,6 +591,7 @@ export function createSourcePages(
     }
 
     const isEditable = await codeSourceService.isEditable(id);
+    const csrfToken = getCsrfToken(c);
 
     let sourceInfoSection = "";
     let fileActionsSection = "";
@@ -622,6 +631,7 @@ export function createSourcePages(
               </div>
               <div style="display: flex; gap: 0.25rem;">
                 <form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline;">
+                  ${csrfInput(csrfToken)}
                   <button type="submit" class="outline" style="padding: 0.25rem 0.5rem;" ${source.lastSyncStartedAt ? "disabled" : ""}>
                     ${source.lastSyncStartedAt ? "Syncing..." : "Sync Now"}
                   </button>
@@ -709,12 +719,14 @@ export function createSourcePages(
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     let formContent = "";
 
     if (source.type === "manual") {
       formContent = `
         <form method="POST" action="/web/code/sources/${source.id}/edit">
+          ${csrfInput(csrfToken)}
           <label>
             Source Name
             <input type="text" value="${escapeHtml(source.name)}" disabled>
@@ -740,6 +752,7 @@ export function createSourcePages(
 
       formContent = `
         <form method="POST" action="/web/code/sources/${source.id}/edit">
+          ${csrfInput(csrfToken)}
           <label>
             Source Name
             <input type="text" value="${escapeHtml(source.name)}" disabled>
@@ -1019,7 +1032,8 @@ export function createSourcePages(
         `/web/code/sources/${source.id}/delete`,
         `/web/code/sources/${source.id}`,
         getLayoutUser(c),
-        settingsService
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -1095,6 +1109,7 @@ export function createSourcePages(
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Upload File to ${escapeHtml(source.name)}</h1>
@@ -1130,6 +1145,7 @@ export function createSourcePages(
       <script>
         const sourceName = ${JSON.stringify(source.name)};
         const sourceId = ${JSON.stringify(source.id)};
+        const csrfToken = ${JSON.stringify(csrfToken)};
         let selectedFile = null;
 
         function formatFileSize(bytes) {
@@ -1195,12 +1211,13 @@ export function createSourcePages(
               formData.append('file', selectedFile);
               response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(path), {
                 method: 'PUT',
+                headers: { 'X-CSRF-Token': csrfToken },
                 body: formData
               });
             } else {
               response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(path), {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body: JSON.stringify({ content: content })
               });
             }
@@ -1341,6 +1358,7 @@ export function createSourcePages(
     const contentType = getContentType(path);
     const isText = isTextContentType(contentType);
     const canEditInTextarea = isText && bytes.length <= MAX_EDITABLE_SIZE;
+    const csrfToken = getCsrfToken(c);
 
     let pageContent: string;
 
@@ -1367,6 +1385,7 @@ export function createSourcePages(
           const sourceName = ${JSON.stringify(source.name)};
           const sourceId = ${JSON.stringify(source.id)};
           const filePath = ${JSON.stringify(path)};
+          const csrfToken = ${JSON.stringify(csrfToken)};
 
           document.getElementById('edit-form').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1379,7 +1398,7 @@ export function createSourcePages(
             try {
               const response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(filePath), {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body: JSON.stringify({ content: content })
               });
               const json = await response.json();
@@ -1435,6 +1454,7 @@ export function createSourcePages(
           const sourceName = ${JSON.stringify(source.name)};
           const sourceId = ${JSON.stringify(source.id)};
           const filePath = ${JSON.stringify(path)};
+          const csrfToken = ${JSON.stringify(csrfToken)};
 
           document.getElementById('replace-form').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -1456,6 +1476,7 @@ export function createSourcePages(
               formData.append('file', file);
               const response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(filePath), {
                 method: 'PUT',
+                headers: { 'X-CSRF-Token': csrfToken },
                 body: formData
               });
               const json = await response.json();
@@ -1509,6 +1530,8 @@ export function createSourcePages(
       return c.redirect(`/web/code/sources/${id}?error=` + encodeURIComponent(`File not found: ${path}`));
     }
 
+    const csrfToken = getCsrfToken(c);
+
     const pageContent = `
       <h1>Delete File</h1>
       <p>
@@ -1528,6 +1551,7 @@ export function createSourcePages(
         const sourceName = ${JSON.stringify(source.name)};
         const sourceId = ${JSON.stringify(source.id)};
         const filePath = ${JSON.stringify(path)};
+        const csrfToken = ${JSON.stringify(csrfToken)};
 
         document.getElementById('delete-form').addEventListener('submit', async function(e) {
           e.preventDefault();
@@ -1538,7 +1562,8 @@ export function createSourcePages(
 
           try {
             const response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(filePath), {
-              method: 'DELETE'
+              method: 'DELETE',
+              headers: { 'X-CSRF-Token': csrfToken }
             });
             const json = await response.json();
 

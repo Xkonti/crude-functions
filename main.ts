@@ -49,6 +49,7 @@ import { JobProcessorService } from "./src/jobs/job_processor_service.ts";
 import { SchedulingService } from "./src/scheduling/scheduling_service.ts";
 import { EventBus } from "./src/events/mod.ts";
 import { createFunctionApp, createManagementApp } from "./src/apps/mod.ts";
+import { CsrfService } from "./src/csrf/mod.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -110,6 +111,12 @@ const hashService = new HashService({
   hashKey: encryptionKeys.hash_key,
 });
 console.log("✓ Hash service initialized");
+
+// Initialize CSRF service for web form protection
+const csrfService = new CsrfService({
+  secret: encryptionKeys.hash_key,
+});
+console.log("✓ CSRF service initialized");
 
 // Initialize database
 // The database connection remains open for the application's lifetime and is
@@ -434,6 +441,7 @@ const managementApp = createManagementApp({
   codeSourceService,
   sourceFileService,
   schedulingService,
+  csrfService,
 });
 
 console.log("✓ Hono apps created");

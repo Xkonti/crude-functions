@@ -11,6 +11,7 @@ import {
   confirmPage,
   buttonLink,
   getLayoutUser,
+  getCsrfToken,
   formatDate,
   secretScripts,
   parseSecretFormData,
@@ -18,6 +19,7 @@ import {
   generateValueButton,
   valueGeneratorScripts,
 } from "./templates.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 
 export function createKeysPages(
   apiKeyService: ApiKeyService,
@@ -138,11 +140,13 @@ export function createKeysPages(
   // Create group form
   routes.get("/create-group", async (c) => {
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create API Key Group</h1>
       ${error ? flashMessages(undefined, error) : ""}
       <form method="POST" action="/web/keys/create-group">
+        ${csrfInput(csrfToken)}
         <label>
           Group Name
           <input type="text" name="name" required placeholder="my-api-group">
@@ -206,6 +210,7 @@ export function createKeysPages(
     const idStr = c.req.param("id");
     const id = parseInt(idStr, 10);
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     if (isNaN(id)) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
@@ -220,6 +225,7 @@ export function createKeysPages(
       <h1>Edit Group: ${escapeHtml(group.name)}</h1>
       ${error ? flashMessages(undefined, error) : ""}
       <form method="POST" action="/web/keys/edit-group/${id}">
+        ${csrfInput(csrfToken)}
         <label>
           Group Name
           <input type="text" value="${escapeHtml(group.name)}" readonly disabled>
@@ -284,11 +290,13 @@ export function createKeysPages(
 
     const error = c.req.query("error");
     const groups = await apiKeyService.getGroups();
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create API Key</h1>
       ${error ? flashMessages(undefined, error) : ""}
       <form method="POST" action="/web/keys/create">
+        ${csrfInput(csrfToken)}
         <label>
           Key Group
           ${
@@ -468,7 +476,9 @@ export function createKeysPages(
         `Are you sure you want to delete the key with ID ${id}? This action cannot be undone.`,
         `/web/keys/delete?id=${id}`,
         "/web/keys",
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -533,7 +543,9 @@ export function createKeysPages(
         `Are you sure you want to delete the group "${group.name}"? This action cannot be undone.`,
         `/web/keys/delete-group?id=${groupId}`,
         "/web/keys",
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -653,6 +665,7 @@ export function createKeysPages(
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create Secret for ${escapeHtml(group.name)}</h1>
@@ -661,7 +674,7 @@ export function createKeysPages(
           ← Back to Secrets
         </a>
       </p>
-      ${renderGroupSecretCreateForm(groupId, {}, error)}
+      ${renderGroupSecretCreateForm(groupId, {}, error, csrfToken)}
     `;
 
     return c.html(
@@ -700,6 +713,7 @@ export function createKeysPages(
     const { secretData, errors } = parseSecretFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Create Secret for ${escapeHtml(group.name)}</h1>
         <p>
@@ -707,7 +721,7 @@ export function createKeysPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderGroupSecretCreateForm(groupId, secretData, errors.join(". "))}
+        ${renderGroupSecretCreateForm(groupId, secretData, errors.join(". "), csrfToken)}
       `;
       return c.html(
         layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService),
@@ -730,6 +744,7 @@ export function createKeysPages(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create secret";
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Create Secret for ${escapeHtml(group.name)}</h1>
         <p>
@@ -737,7 +752,7 @@ export function createKeysPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderGroupSecretCreateForm(groupId, secretData, message)}
+        ${renderGroupSecretCreateForm(groupId, secretData, message, csrfToken)}
       `;
       return c.html(
         layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService),
@@ -778,6 +793,7 @@ export function createKeysPages(
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
@@ -786,7 +802,7 @@ export function createKeysPages(
           ← Back to Secrets
         </a>
       </p>
-      ${renderGroupSecretEditForm(groupId, secret, error)}
+      ${renderGroupSecretEditForm(groupId, secret, error, csrfToken)}
     `;
 
     return c.html(
@@ -838,6 +854,7 @@ export function createKeysPages(
     const { editData, errors } = parseSecretEditFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
         <p>
@@ -848,7 +865,8 @@ export function createKeysPages(
         ${renderGroupSecretEditForm(
           groupId,
           { ...secret, ...editData },
-          errors.join(". ")
+          errors.join(". "),
+          csrfToken
         )}
       `;
       return c.html(
@@ -872,6 +890,7 @@ export function createKeysPages(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update secret";
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
         <p>
@@ -882,7 +901,8 @@ export function createKeysPages(
         ${renderGroupSecretEditForm(
           groupId,
           { ...secret, ...editData },
-          message
+          message,
+          csrfToken
         )}
       `;
       return c.html(
@@ -929,7 +949,9 @@ export function createKeysPages(
         `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
         `/web/keys/secrets/${groupId}/delete/${secretId}`,
         `/web/keys/secrets/${groupId}`,
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -1058,6 +1080,7 @@ export function createKeysPages(
 
     const { key } = result;
     const keyDisplay = key.name;
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
@@ -1066,7 +1089,7 @@ export function createKeysPages(
           ← Back to Secrets
         </a>
       </p>
-      ${renderKeySecretCreateForm(keyId)}
+      ${renderKeySecretCreateForm(keyId, {}, undefined, csrfToken)}
     `;
 
     return c.html(
@@ -1100,6 +1123,7 @@ export function createKeysPages(
     const { secretData, errors } = parseSecretFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
         <p>
@@ -1107,7 +1131,7 @@ export function createKeysPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderKeySecretCreateForm(keyId, secretData, errors.join(", "))}
+        ${renderKeySecretCreateForm(keyId, secretData, errors.join(", "), csrfToken)}
       `;
       return c.html(
         layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
@@ -1129,6 +1153,7 @@ export function createKeysPages(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create secret";
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Create Secret for ${escapeHtml(keyDisplay)}</h1>
         <p>
@@ -1136,7 +1161,7 @@ export function createKeysPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderKeySecretCreateForm(keyId, secretData, message)}
+        ${renderKeySecretCreateForm(keyId, secretData, message, csrfToken)}
       `;
       return c.html(
         layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
@@ -1174,6 +1199,7 @@ export function createKeysPages(
       );
     }
 
+    const csrfToken = getCsrfToken(c);
     const content = `
       <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
       <p>
@@ -1181,7 +1207,7 @@ export function createKeysPages(
           ← Back to Secrets
         </a>
       </p>
-      ${renderKeySecretEditForm(keyId, secret)}
+      ${renderKeySecretEditForm(keyId, secret, undefined, csrfToken)}
     `;
 
     return c.html(
@@ -1223,6 +1249,7 @@ export function createKeysPages(
     const { editData, errors } = parseSecretEditFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
         <p>
@@ -1230,7 +1257,7 @@ export function createKeysPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, errors.join(", "))}
+        ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, errors.join(", "), csrfToken)}
       `;
       return c.html(
         layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
@@ -1252,6 +1279,7 @@ export function createKeysPages(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to update secret";
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Edit Secret: ${escapeHtml(secret.name)}</h1>
         <p>
@@ -1259,7 +1287,7 @@ export function createKeysPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, message)}
+        ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, message, csrfToken)}
       `;
       return c.html(
         layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
@@ -1303,7 +1331,9 @@ export function createKeysPages(
         `Are you sure you want to delete the secret <strong>${escapeHtml(secret.name)}</strong>? This action cannot be undone.`,
         `/web/keys/${keyId}/secrets/delete/${secretId}`,
         `/web/keys/${keyId}/secrets`,
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -1425,11 +1455,13 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
 function renderGroupSecretCreateForm(
   groupId: number,
   data: { name?: string; value?: string; comment?: string } = {},
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="/web/keys/secrets/${groupId}/create">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
@@ -1467,11 +1499,13 @@ function renderGroupSecretCreateForm(
 function renderGroupSecretEditForm(
   groupId: number,
   secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="/web/keys/secrets/${groupId}/edit/${secret.id}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
         <input type="text" value="${escapeHtml(secret.name)}" disabled />
@@ -1569,11 +1603,13 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
 function renderKeySecretCreateForm(
   keyId: number,
   data: { name?: string; value?: string; comment?: string } = {},
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="/web/keys/${keyId}/secrets/create">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
@@ -1611,11 +1647,13 @@ function renderKeySecretCreateForm(
 function renderKeySecretEditForm(
   keyId: number,
   secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="/web/keys/${keyId}/secrets/edit/${secret.id}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
         <input type="text" value="${escapeHtml(secret.name)}" disabled />
