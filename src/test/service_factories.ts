@@ -8,6 +8,11 @@
 
 import { DatabaseService } from "../database/database_service.ts";
 import { MigrationService } from "../database/migration_service.ts";
+import { SurrealProcessManager } from "../database/surreal_process_manager.ts";
+import { SurrealDatabaseService } from "../database/surreal_database_service.ts";
+import { SurrealHealthMonitor } from "../database/surreal_health_monitor.ts";
+import { SurrealSupervisor } from "../database/surreal_supervisor.ts";
+import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
 import { KeyStorageService } from "../encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import { HashService } from "../encryption/hash_service.ts";
@@ -385,6 +390,110 @@ export function createCodeSourceService(
 }
 
 // =============================================================================
+// SurrealDB Factories
+// =============================================================================
+
+/**
+ * Checks if the SurrealDB binary is available in PATH.
+ * Caches the result after first check.
+ */
+let _surrealAvailable: boolean | null = null;
+
+export async function isSurrealAvailable(): Promise<boolean> {
+  if (_surrealAvailable !== null) {
+    return _surrealAvailable;
+  }
+
+  try {
+    const command = new Deno.Command("which", { args: ["surreal"] });
+    const { success } = await command.output();
+    _surrealAvailable = success;
+    return success;
+  } catch {
+    _surrealAvailable = false;
+    return false;
+  }
+}
+
+/**
+ * Creates the SurrealDB infrastructure: process manager, database service, and supervisor.
+ * Starts the process, opens the connection, and runs migrations.
+ *
+ * @param tempDir - Temp directory for SurrealDB storage
+ * @param migrationsDir - Path to migrations directory
+ * @returns Object with surrealProcessManager, surrealDb, and surrealSupervisor
+ * @throws Error if SurrealDB binary is not available
+ */
+export async function createSurrealInfrastructure(
+  tempDir: string,
+  migrationsDir: string
+): Promise<{
+  surrealProcessManager: SurrealProcessManager;
+  surrealDb: SurrealDatabaseService;
+  surrealSupervisor: SurrealSupervisor;
+}> {
+  // Check if surreal binary is available
+  if (!(await isSurrealAvailable())) {
+    throw new Error(
+      "SurrealDB binary not found in PATH. Install SurrealDB to run these tests."
+    );
+  }
+
+  const storageDir = `${tempDir}/surreal`;
+  await Deno.mkdir(storageDir, { recursive: true });
+
+  // Use a random port in the ephemeral range to avoid conflicts
+  const port = 49152 + Math.floor(Math.random() * 16383);
+
+  // Create process manager
+  const surrealProcessManager = new SurrealProcessManager({
+    binaryPath: "surreal",
+    port,
+    storagePath: storageDir,
+    username: "root",
+    password: "root",
+    readinessTimeoutMs: 30000,
+  });
+
+  // Create database service
+  const surrealDb = new SurrealDatabaseService({
+    connectionUrl: surrealProcessManager.connectionUrl,
+    username: "root",
+    password: "root",
+    namespace: "test",
+    database: "test",
+  });
+
+  // Create health monitor
+  const surrealHealthMonitor = new SurrealHealthMonitor({
+    processManager: surrealProcessManager,
+    checkIntervalMs: 5000,
+    failureThreshold: 3,
+  });
+
+  // Create supervisor
+  const surrealSupervisor = new SurrealSupervisor({
+    processManager: surrealProcessManager,
+    databaseService: surrealDb,
+    healthMonitor: surrealHealthMonitor,
+    maxRestartAttempts: 3,
+    restartCooldownMs: 5000,
+  });
+
+  // Start supervisor (starts process, connects DB, starts monitoring)
+  await surrealSupervisor.start();
+
+  // Run SurrealDB migrations
+  const surrealMigrationService = new SurrealMigrationService({
+    db: surrealDb,
+    migrationsDir,
+  });
+  await surrealMigrationService.migrate();
+
+  return { surrealProcessManager, surrealDb, surrealSupervisor };
+}
+
+// =============================================================================
 // Cleanup Factory
 // =============================================================================
 
@@ -395,7 +504,8 @@ export function createCodeSourceService(
 export function createCleanupFunction(
   db: DatabaseService,
   tempDir: string,
-  consoleLogService?: ConsoleLogService
+  consoleLogService?: ConsoleLogService,
+  surrealSupervisor?: SurrealSupervisor
 ): () => Promise<void> {
   return async () => {
     // 1. Shutdown console log service if present (flush pending logs)
@@ -403,10 +513,15 @@ export function createCleanupFunction(
       await consoleLogService.shutdown();
     }
 
-    // 2. Close database
+    // 2. Stop SurrealDB supervisor if present
+    if (surrealSupervisor) {
+      await surrealSupervisor.stop();
+    }
+
+    // 3. Close SQLite database
     await db.close();
 
-    // 3. Remove temp directory
+    // 4. Remove temp directory
     try {
       await Deno.remove(tempDir, { recursive: true });
     } catch {

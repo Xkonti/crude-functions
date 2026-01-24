@@ -25,7 +25,8 @@ export type ServiceKey =
   | "instanceIdService"
   | "jobQueueService"
   | "schedulingService"
-  | "codeSourceService";
+  | "codeSourceService"
+  | "surrealDb";
 
 /**
  * Service flags interface - tracks which services to include.
@@ -49,6 +50,7 @@ export interface ServiceFlags {
   jobQueueService: boolean;
   schedulingService: boolean;
   codeSourceService: boolean;
+  surrealDb: boolean;
 }
 
 /**
@@ -72,6 +74,7 @@ export function createDefaultFlags(): ServiceFlags {
     jobQueueService: false,
     schedulingService: false,
     codeSourceService: false,
+    surrealDb: false,
   };
 }
 
@@ -124,6 +127,9 @@ export const DEPENDENCIES: Record<ServiceKey, ServiceKey[]> = {
 
   // Code source service depends on scheduling, job queue, and encryption
   codeSourceService: ["schedulingService", "encryptionService"],
+
+  // SurrealDB is standalone (separate from SQLite infrastructure)
+  surrealDb: [],
 };
 
 /**
@@ -191,10 +197,15 @@ export function hasAnyServiceEnabled(flags: ServiceFlags): boolean {
  * Enables all services in the flags object.
  * Mutates the flags object in place.
  *
+ * Note: SurrealDB is excluded because it requires the surreal binary
+ * and special process management. Use withSurrealDB() explicitly.
+ *
  * @param flags - The flags object to mutate
  */
 export function enableAllServices(flags: ServiceFlags): void {
   for (const key of Object.keys(flags) as ServiceKey[]) {
+    // Skip SurrealDB - requires explicit opt-in
+    if (key === "surrealDb") continue;
     flags[key] = true;
   }
 }

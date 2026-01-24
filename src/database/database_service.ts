@@ -118,6 +118,35 @@ export class DatabaseService {
     return this.db;
   }
 
+  /**
+   * Returns the database backend type identifier.
+   */
+  get backendType(): "sqlite" {
+    return "sqlite";
+  }
+
+  /**
+   * Performs a health check on the database connection.
+   * Returns true if the connection is open and responsive.
+   *
+   * Uses a lightweight query to verify the connection is actually working,
+   * not just that we think it's open.
+   */
+  healthCheck(): Promise<boolean> {
+    if (!this.db) {
+      return Promise.resolve(false);
+    }
+
+    try {
+      // Use a simple pragma query as a lightweight health check
+      // This verifies the connection is actually working
+      this.db.exec("SELECT 1");
+      return Promise.resolve(true);
+    } catch {
+      return Promise.resolve(false);
+    }
+  }
+
   // ============== Query Execution ==============
 
   /**

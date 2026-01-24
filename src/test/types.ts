@@ -28,6 +28,9 @@
  */
 
 import type { DatabaseService } from "../database/database_service.ts";
+import type { SurrealDatabaseService } from "../database/surreal_database_service.ts";
+import type { SurrealProcessManager } from "../database/surreal_process_manager.ts";
+import type { SurrealSupervisor } from "../database/surreal_supervisor.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import type { HashService } from "../encryption/hash_service.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
@@ -208,6 +211,20 @@ export interface CodeSourcesContext extends SchedulingContext, EncryptionContext
   codeSourceService: CodeSourceService;
 }
 
+/**
+ * Context with SurrealDB services.
+ * Includes process manager, database service, and supervisor.
+ * No dependencies on SQLite services.
+ */
+export interface SurrealContext {
+  /** SurrealDB process manager */
+  surrealProcessManager: SurrealProcessManager;
+  /** SurrealDB database service */
+  surrealDb: SurrealDatabaseService;
+  /** SurrealDB supervisor for lifecycle management */
+  surrealSupervisor: SurrealSupervisor;
+}
+
 // =============================================================================
 // Full Context (All Services)
 // =============================================================================
@@ -215,6 +232,9 @@ export interface CodeSourcesContext extends SchedulingContext, EncryptionContext
 /**
  * Complete test context with all services.
  * This is the intersection of all individual contexts.
+ * Note: SurrealDB is NOT included in FullTestContext by default
+ * because it requires the surreal binary which may not be available.
+ * Use withSurrealDB() explicitly to include it.
  */
 export type FullTestContext = BaseTestContext &
   EncryptionContext &
@@ -229,6 +249,12 @@ export type FullTestContext = BaseTestContext &
   JobQueueContext &
   SchedulingContext &
   CodeSourcesContext;
+
+/**
+ * Full test context including SurrealDB.
+ * Only available when SurrealDB binary is installed.
+ */
+export type FullTestContextWithSurreal = FullTestContext & SurrealContext;
 
 /**
  * Alias for FullTestContext (backward compatibility).

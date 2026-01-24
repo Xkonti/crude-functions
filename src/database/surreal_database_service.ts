@@ -117,6 +117,35 @@ export class SurrealDatabaseService {
   }
 
   /**
+   * Returns the database backend type identifier.
+   */
+  get backendType(): "surreal" {
+    return "surreal";
+  }
+
+  /**
+   * Performs a health check on the database connection.
+   * Returns true if the connection is open and responsive.
+   *
+   * Uses a lightweight query to verify the connection is actually working,
+   * not just that we think it's open.
+   */
+  async healthCheck(): Promise<boolean> {
+    if (!this.db) {
+      return false;
+    }
+
+    try {
+      // Use version() as a lightweight health check - it's a simple query
+      // that verifies the connection is actually working
+      await this.db.version();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Returns the version of the connected SurrealDB engine.
    *
    * @returns Version info, e.g., { version: "surrealdb-3.0.0-beta.2" }

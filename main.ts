@@ -52,6 +52,9 @@ import { createFunctionApp, createManagementApp } from "./src/apps/mod.ts";
 import { CsrfService } from "./src/csrf/mod.ts";
 import { SurrealDatabaseService } from "./src/database/surreal_database_service.ts";
 import { SurrealProcessManager } from "./src/database/surreal_process_manager.ts";
+import { SurrealHealthMonitor } from "./src/database/surreal_health_monitor.ts";
+import { SurrealSupervisor } from "./src/database/surreal_supervisor.ts";
+import { SurrealMigrationService } from "./src/database/surreal_migration_service.ts";
 import { runSurrealExperiment } from "./src/experiments/surreal_experiment.ts";
 
 /**
@@ -146,40 +149,77 @@ if (migrationResult.appliedCount > 0) {
 // SurrealDB Initialization (Experimental)
 // ============================================================================
 
-// Initialize SurrealDB process manager and database service
+// Initialize SurrealDB with supervisor for process lifecycle management
 // Runs alongside SQLite - does not replace it
 // Controlled by SURREAL_ENABLED environment variable (default: true)
 
 const surrealEnabled = Deno.env.get("SURREAL_ENABLED") !== "false";
 const surrealPort = parseEnvInt("SURREAL_PORT", 5173, { min: 1, max: 65535 });
+const surrealUser = Deno.env.get("SURREAL_USER") || "root";
+const surrealPass = Deno.env.get("SURREAL_PASS") || "root";
 
+// Create process manager
 const surrealProcessManager = new SurrealProcessManager({
   binaryPath: Deno.env.get("SURREAL_BINARY") || "/surreal",
   port: surrealPort,
   storagePath: Deno.env.get("SURREAL_STORAGE") || "./data/surreal",
-  username: Deno.env.get("SURREAL_USER") || "root",
-  password: Deno.env.get("SURREAL_PASS") || "root",
+  username: surrealUser,
+  password: surrealPass,
 });
 
-let surrealDb: SurrealDatabaseService | null = null;
+// Create database service (will be opened by supervisor)
+const surrealDb = new SurrealDatabaseService({
+  connectionUrl: surrealProcessManager.connectionUrl,
+  username: surrealUser,
+  password: surrealPass,
+  namespace: "crude",
+  database: "main",
+});
+
+// Create health monitor
+const surrealHealthMonitor = new SurrealHealthMonitor({
+  processManager: surrealProcessManager,
+  checkIntervalMs: 5000,
+  failureThreshold: 3,
+});
+
+// Create supervisor to coordinate process, database, and monitoring
+const surrealSupervisor = new SurrealSupervisor({
+  processManager: surrealProcessManager,
+  databaseService: surrealDb,
+  healthMonitor: surrealHealthMonitor,
+  maxRestartAttempts: 3,
+  restartCooldownMs: 5000,
+});
 
 if (surrealEnabled) {
   try {
-    // Start SurrealDB server process
-    await surrealProcessManager.start();
-    console.log("✓ SurrealDB process started");
+    // Start supervisor (starts process, connects DB, starts monitoring)
+    await surrealSupervisor.start();
+    console.log("✓ SurrealDB supervisor started");
 
-    // Connect to the running server
-    surrealDb = new SurrealDatabaseService({
-      connectionUrl: surrealProcessManager.connectionUrl,
-      username: Deno.env.get("SURREAL_USER") || "root",
-      password: Deno.env.get("SURREAL_PASS") || "root",
-      namespace: "crude",
-      database: "main",
+    // Register status change listener for logging
+    surrealSupervisor.onStatusChange((event) => {
+      if (event.status !== event.previousStatus) {
+        console.log(`[SurrealDB] Health: ${event.previousStatus} -> ${event.status}`);
+        if (event.lastError) {
+          console.error(`[SurrealDB] Error: ${event.lastError.message}`);
+        }
+      }
     });
 
-    await surrealDb.open();
-    console.log("✓ SurrealDB client connected (experimental)");
+    // Run SurrealDB migrations
+    const surrealMigrationService = new SurrealMigrationService({
+      db: surrealDb,
+      migrationsDir: "./migrations",
+    });
+    const surrealMigrationResult = await surrealMigrationService.migrate();
+    if (surrealMigrationResult.appliedCount > 0) {
+      console.log(
+        `Applied ${surrealMigrationResult.appliedCount} SurrealDB migration(s): ` +
+        `version ${surrealMigrationResult.fromVersion ?? "none"} → ${surrealMigrationResult.toVersion}`
+      );
+    }
 
     // Run experiment to verify it works (set RUN_SURREAL_EXPERIMENT=true)
     if (Deno.env.get("RUN_SURREAL_EXPERIMENT") === "true") {
@@ -188,11 +228,7 @@ if (surrealEnabled) {
     }
   } catch (error) {
     console.warn("⚠ SurrealDB initialization failed (non-fatal):", error);
-    // Try to stop the process if it started
-    if (surrealProcessManager.isRunning) {
-      await surrealProcessManager.stop();
-    }
-    surrealDb = null;
+    // Supervisor handles its own cleanup
     // Don't throw - SurrealDB is experimental and optional
   }
 }
@@ -504,7 +540,7 @@ const managementApp = createManagementApp({
 console.log("✓ Hono apps created");
 
 // Export apps and services for testing
-export { functionApp, managementApp, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService, surrealDb, surrealProcessManager };
+export { functionApp, managementApp, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService, surrealDb, surrealProcessManager, surrealSupervisor };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
@@ -537,19 +573,13 @@ async function gracefulShutdown(signal: string) {
     await jobProcessorService.stop();
     console.log("Job processor stopped");
 
-    // 7. Close SurrealDB connection (experimental)
-    if (surrealDb?.isOpen) {
-      await surrealDb.close();
-      console.log("SurrealDB client disconnected");
+    // 7. Stop SurrealDB supervisor (handles monitor, DB connection, and process)
+    if (surrealSupervisor.isHealthy() || surrealProcessManager.isRunning) {
+      await surrealSupervisor.stop();
+      console.log("SurrealDB supervisor stopped");
     }
 
-    // 8. Stop SurrealDB process (experimental)
-    if (surrealProcessManager.isRunning) {
-      await surrealProcessManager.stop();
-      console.log("SurrealDB process stopped");
-    }
-
-    // 9. Close SQLite database last
+    // 8. Close SQLite database last
     await db.close();
     console.log("Database connection closed successfully");
   } catch (error) {

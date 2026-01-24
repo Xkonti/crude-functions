@@ -7,6 +7,11 @@ import {
 /**
  * Configuration options for the SurrealProcessManager
  */
+/**
+ * Callback invoked when the SurrealDB process exits unexpectedly.
+ */
+export type UnexpectedExitCallback = (exitCode: number | null) => void;
+
 export interface SurrealProcessManagerOptions {
   /** Path to the SurrealDB binary (default: "/surreal" for Docker, "surreal" for local) */
   binaryPath?: string;
@@ -22,6 +27,8 @@ export interface SurrealProcessManagerOptions {
   readinessTimeoutMs?: number;
   /** Interval between readiness checks in ms (default: 100) */
   readinessIntervalMs?: number;
+  /** Callback for unexpected process exits */
+  onUnexpectedExit?: UnexpectedExitCallback;
 }
 
 /**
@@ -54,9 +61,11 @@ export class SurrealProcessManager {
   private readonly password: string;
   private readonly readinessTimeoutMs: number;
   private readonly readinessIntervalMs: number;
+  private readonly onUnexpectedExit?: UnexpectedExitCallback;
 
   private process: Deno.ChildProcess | null = null;
   private processExitPromise: Promise<Deno.CommandStatus> | null = null;
+  private isStopping = false;
 
   constructor(options: SurrealProcessManagerOptions = {}) {
     this.binaryPath = options.binaryPath ?? "/surreal";
@@ -66,6 +75,7 @@ export class SurrealProcessManager {
     this.password = options.password ?? "root";
     this.readinessTimeoutMs = options.readinessTimeoutMs ?? 30000;
     this.readinessIntervalMs = options.readinessIntervalMs ?? 100;
+    this.onUnexpectedExit = options.onUnexpectedExit;
   }
 
   /**
@@ -128,6 +138,8 @@ export class SurrealProcessManager {
       return; // Not running
     }
 
+    this.isStopping = true;
+
     try {
       // Send SIGTERM for graceful shutdown
       this.process.kill("SIGTERM");
@@ -154,7 +166,17 @@ export class SurrealProcessManager {
     } finally {
       this.process = null;
       this.processExitPromise = null;
+      this.isStopping = false;
     }
+  }
+
+  /**
+   * Restarts the SurrealDB process.
+   * Stops the current process (if running) and starts a new one.
+   */
+  async restart(): Promise<void> {
+    await this.stop();
+    await this.start();
   }
 
   /**
@@ -176,6 +198,20 @@ export class SurrealProcessManager {
    */
   get healthUrl(): string {
     return `http://127.0.0.1:${this.port}/health`;
+  }
+
+  /**
+   * Returns the configured port number.
+   */
+  get portNumber(): number {
+    return this.port;
+  }
+
+  /**
+   * Returns the configured storage path.
+   */
+  get storagePathValue(): string {
+    return this.storagePath;
   }
 
   /**
@@ -213,16 +249,38 @@ export class SurrealProcessManager {
   private monitorProcess(): void {
     if (!this.processExitPromise) return;
 
-    this.processExitPromise.then((status) => {
-      if (this.process) {
-        // Unexpected exit while we think it's running
-        console.error(
-          `[SurrealDB] Process exited unexpectedly with code: ${status.code}`
-        );
-        this.process = null;
-        this.processExitPromise = null;
-      }
-    });
+    this.processExitPromise
+      .then((status) => {
+        // Only handle if process reference still exists and we're not intentionally stopping
+        if (this.process && !this.isStopping) {
+          const exitCode = status.code;
+          console.error(
+            `[SurrealDB] Process exited unexpectedly with code: ${exitCode}`
+          );
+          this.process = null;
+          this.processExitPromise = null;
+
+          // Notify callback if registered
+          if (this.onUnexpectedExit) {
+            try {
+              this.onUnexpectedExit(exitCode);
+            } catch (error) {
+              console.error(
+                "[SurrealDB] Error in unexpected exit callback:",
+                error
+              );
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        // Handle any errors from the status promise
+        if (this.process && !this.isStopping) {
+          console.error("[SurrealDB] Error monitoring process:", error);
+          this.process = null;
+          this.processExitPromise = null;
+        }
+      });
   }
 
   /**

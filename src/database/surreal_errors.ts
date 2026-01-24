@@ -93,3 +93,47 @@ export class SurrealProcessExitError extends SurrealDatabaseError {
     this.exitCode = exitCode;
   }
 }
+
+// ============== Migration Errors ==============
+
+/**
+ * Base error for SurrealDB migration failures
+ */
+export class SurrealMigrationError extends SurrealDatabaseError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SurrealMigrationError";
+  }
+}
+
+/**
+ * Thrown when a migration file cannot be read
+ */
+export class SurrealMigrationFileError extends SurrealMigrationError {
+  public readonly filePath: string;
+  public readonly originalError: unknown;
+
+  constructor(filePath: string, originalError: unknown) {
+    super(`Failed to read SurrealDB migration file: ${filePath}`);
+    this.name = "SurrealMigrationFileError";
+    this.filePath = filePath;
+    this.originalError = originalError;
+  }
+}
+
+/**
+ * Thrown when a migration fails to execute
+ */
+export class SurrealMigrationExecutionError extends SurrealMigrationError {
+  public readonly version: number;
+  public readonly filename: string;
+  public readonly originalError: unknown;
+
+  constructor(version: number, filename: string, originalError: unknown) {
+    super(`SurrealDB migration ${version} (${filename}) failed to execute`);
+    this.name = "SurrealMigrationExecutionError";
+    this.version = version;
+    this.filename = filename;
+    this.originalError = originalError;
+  }
+}

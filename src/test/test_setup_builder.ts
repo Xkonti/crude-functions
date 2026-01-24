@@ -107,6 +107,7 @@ import type {
   JobQueueContext,
   SchedulingContext,
   CodeSourcesContext,
+  SurrealContext,
   RouteOptions,
   DeferredUser,
   DeferredKeyGroup,
@@ -145,6 +146,7 @@ import {
   createJobQueueService,
   createSchedulingService,
   createCodeSourceService,
+  createSurrealInfrastructure,
   createCleanupFunction,
 } from "./service_factories.ts";
 
@@ -353,6 +355,18 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     return this as unknown as TestSetupBuilder<TContext & CodeSourcesContext>;
   }
 
+  /**
+   * Include SurrealDB services in the test context.
+   * Starts a SurrealDB process, connects, and runs migrations.
+   *
+   * Note: This requires the `surreal` binary to be available in PATH.
+   * Tests using this will be skipped if SurrealDB is not installed.
+   */
+  withSurrealDB(): TestSetupBuilder<TContext & SurrealContext> {
+    enableServiceWithDependencies(this.flags, "surrealDb");
+    return this as unknown as TestSetupBuilder<TContext & SurrealContext>;
+  }
+
   // =============================================================================
   // Convenience Methods (Compose Multiple Services)
   // =============================================================================
@@ -472,8 +486,22 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   }
 
   /**
+   * Include SurrealDB services.
+   * Alias for withSurrealDB() for semantic clarity.
+   *
+   * Note: Requires `surreal` binary in PATH. Use `isSurrealAvailable()`
+   * to check availability before running tests.
+   */
+  withSurreal(): TestSetupBuilder<TContext & SurrealContext> {
+    return this.withSurrealDB() as unknown as TestSetupBuilder<
+      TContext & SurrealContext
+    >;
+  }
+
+  /**
    * Include all services.
    * This is the default behavior for backward compatibility.
+   * Note: SurrealDB is NOT included - use withSurrealDB() explicitly.
    */
   withAll(): TestSetupBuilder<FullTestContext> {
     enableAllServices(this.flags);
@@ -880,11 +908,20 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       );
     }
 
-    // STEP 15: Create cleanup function
+    // STEP 15: Create SurrealDB infrastructure if needed
+    if (this.flags.surrealDb) {
+      const surreal = await createSurrealInfrastructure(tempDir, this.migrationsDir);
+      context.surrealProcessManager = surreal.surrealProcessManager;
+      context.surrealDb = surreal.surrealDb;
+      context.surrealSupervisor = surreal.surrealSupervisor;
+    }
+
+    // STEP 16: Create cleanup function
     context.cleanup = createCleanupFunction(
       db,
       tempDir,
-      this.flags.consoleLogService ? context.consoleLogService : undefined
+      this.flags.consoleLogService ? context.consoleLogService : undefined,
+      this.flags.surrealDb ? context.surrealSupervisor : undefined
     );
 
     return context as TContext;
