@@ -51,7 +51,7 @@ Git sources automatically sync files from a Git repository. Files inside git cod
 
 ## Creating a Manual Source
 
-1. Navigate to `http://localhost:8000/web/code`
+1. Navigate to `http://localhost:9000/web/code`
 2. Click "Create New Source"
 3. Fill in the form:
    - **Name**: `my-api` (alphanumeric, hyphens, underscores, 1-64 chars)
@@ -68,7 +68,7 @@ The source is immediately ready for file uploads.
 - For private repos: Personal access token or deploy key
 - One of: branch name, tag name, or commit SHA
 
-1. Navigate to `http://localhost:8000/web/code`
+1. Navigate to `http://localhost:9000/web/code`
 2. Click "Create New Source"
 3. Choose the git source
 3. Fill in the form:
@@ -108,7 +108,7 @@ Trigger sync on-demand via web UI or API call.
 **Via API:**
 
 ```bash
-curl -X POST http://localhost:8000/api/sources/1/sync \
+curl -X POST http://localhost:9000/api/sources/1/sync \
   -H "X-API-Key: your-management-api-key"
 ```
 

@@ -38,6 +38,7 @@ To be able to deploy Crude Functions all you need is Docker and optionally Docke
 mkdir -p data code
 docker run -d \
   -p 8000:8000 \
+  -p 9000:9000 \
   -v ./data:/app/data \
   -v ./code:/app/code \
   --name crude-functions \
@@ -53,7 +54,8 @@ services:
   app:
     image: xkonti/crude-functions:latest-hardened
     ports:
-      - 8000:8000
+      - 8000:8000  # Function execution (/run/*)
+      - 9000:9000  # Management (API, Web UI)
     volumes:
       # Database and encryption keys
       - ./data:/app/data
@@ -69,7 +71,10 @@ mkdir -p data code
 docker compose up -d
 ```
 
-The server should be running on `http://localhost:8000`.
+The servers should be running on:
+
+- `http://localhost:8000` - Function execution (`/run/*`)
+- `http://localhost:9000` - Management API and Web UI (`/api/*`, `/web/*`)
 
 ## Understanding AUTH_BASE_URL
 
@@ -114,5 +119,66 @@ docker run -d \
 **Format:**
 
 - `https://your-domain.com` (with HTTPS in production)
-- `http://localhost:8000` (local development)
+- `http://localhost:9000` (local development, management port)
 - No trailing slash
+
+## Port Configuration
+
+Crude Functions runs on two ports by default:
+
+| Port | Environment Variable | Default | Endpoints |
+|------|---------------------|---------|-----------|
+| Function | `FUNCTION_PORT` | 8000 | `/run/*` - deployed function handlers |
+| Management | `MANAGEMENT_PORT` | 9000 | `/api/*`, `/web/*` - API and Web UI |
+
+This separation allows you to:
+
+- Expose only the function port to the public internet
+- Keep the management port on an internal network or behind a VPN
+- Apply different firewall rules or rate limits per port
+
+### Single Port Mode
+
+If you prefer running everything on a single port, set both variables to the same value:
+
+```yaml
+services:
+  app:
+    image: xkonti/crude-functions:latest-hardened
+    ports:
+      - 8000:8000
+    environment:
+      - FUNCTION_PORT=8000
+      - MANAGEMENT_PORT=8000
+    volumes:
+      - ./data:/app/data
+      - ./code:/app/code
+    restart: unless-stopped
+```
+
+In single port mode, all endpoints are available on the same port:
+
+- `/run/*` - Function execution
+- `/api/*` - Management API
+- `/web/*` - Web UI
+
+### Reverse Proxy Example
+
+When exposing both ports through a reverse proxy at the same domain:
+
+```nginx
+# Function execution - public
+location /run/ {
+    proxy_pass http://crude-functions:8000;
+}
+
+# Management - internal/authenticated
+location /api/ {
+    proxy_pass http://crude-functions:9000;
+    # Add IP restrictions, etc.
+}
+
+location /web/ {
+    proxy_pass http://crude-functions:9000;
+}
+```

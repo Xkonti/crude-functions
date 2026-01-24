@@ -23,10 +23,10 @@ The server is now ready for you to create your admin account.
 Navigate to the web interface:
 
 ```
-http://localhost:8000/web
+http://localhost:9000/web
 ```
 
-If deploying remotely, replace `localhost:8000` with your server's address.
+If deploying remotely, replace `localhost:9000` with your server's address.
 
 ![Web UI login page](../../../assets/screenshots/first-login.png)
 
@@ -44,7 +44,7 @@ Initially, access to API endpoints for managing the Crude Functions server is re
 
 ### Creating new management key
 
-Click the 🔑 icon in the navigation bar or go to `http://localhost:8000/web/keys`.
+Click the 🔑 icon in the navigation bar or go to `http://localhost:9000/web/keys`.
 
 ![API keys page](../../../assets/screenshots/api-keys-page.png)
 
@@ -60,7 +60,7 @@ Verify the key works:
 
 ```bash
 curl -H "X-API-Key: your-key-value-here" \
-  http://localhost:8000/api/key-groups
+  http://localhost:9000/api/key-groups
 ```
 
 You should receive a JSON response listing API key groups (at minimum the `management` group you just created a key for):

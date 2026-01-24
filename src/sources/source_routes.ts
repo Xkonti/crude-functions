@@ -79,6 +79,58 @@ function isNumericId(value: string): boolean {
 }
 
 /**
+ * Create the webhook route for code sources.
+ * This is exported separately because webhook endpoints require no auth
+ * (they use their own secret validation).
+ *
+ * Mounted at /api/sources before auth middleware.
+ */
+export function createSourceWebhookRoute(options: SourceRoutesOptions): Hono {
+  const { codeSourceService } = options;
+  const routes = new Hono();
+
+  // POST /api/sources/:id/webhook - Webhook trigger (no auth - uses secret)
+  routes.post("/:id/webhook", async (c) => {
+    const idParam = c.req.param("id");
+    if (!isNumericId(idParam)) {
+      return c.json({ error: "Invalid source ID" }, 400);
+    }
+
+    const id = validateId(idParam);
+    if (id === null) {
+      return c.json({ error: "Invalid source ID" }, 400);
+    }
+
+    // Get secret from header or query param (optional - only validated if source requires it)
+    const secret =
+      c.req.header("X-Webhook-Secret") ?? c.req.query("secret") ?? "";
+
+    try {
+      const job = await codeSourceService.triggerWebhookSync(id, secret);
+      if (job === null) {
+        return c.json({
+          message: "Sync skipped (source disabled or already in progress)",
+        });
+      }
+      return c.json({ message: "Sync triggered", jobId: job.id });
+    } catch (error) {
+      if (error instanceof SourceNotFoundError) {
+        return c.json({ error: error.message }, 404);
+      }
+      if (error instanceof WebhookDisabledError) {
+        return c.json({ error: "Webhooks disabled for this source" }, 403);
+      }
+      if (error instanceof WebhookAuthError) {
+        return c.json({ error: "Invalid webhook secret" }, 401);
+      }
+      throw error;
+    }
+  });
+
+  return routes;
+}
+
+/**
  * Create routes for code source management.
  * Mounted at /api/sources
  */
@@ -325,44 +377,6 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
       lastSyncError: source.lastSyncError,
       isSyncing: source.lastSyncStartedAt !== null,
     });
-  });
-
-  // POST /api/sources/:id/webhook - Webhook trigger
-  routes.post("/:id/webhook", async (c) => {
-    const idParam = c.req.param("id");
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    // Get secret from header or query param (optional - only validated if source requires it)
-    const secret =
-      c.req.header("X-Webhook-Secret") ?? c.req.query("secret") ?? "";
-
-    try {
-      const job = await codeSourceService.triggerWebhookSync(id, secret);
-      if (job === null) {
-        return c.json({
-          message: "Sync skipped (source disabled or already in progress)",
-        });
-      }
-      return c.json({ message: "Sync triggered", jobId: job.id });
-    } catch (error) {
-      if (error instanceof SourceNotFoundError) {
-        return c.json({ error: error.message }, 404);
-      }
-      if (error instanceof WebhookDisabledError) {
-        return c.json({ error: "Webhooks disabled for this source" }, 403);
-      }
-      if (error instanceof WebhookAuthError) {
-        return c.json({ error: "Invalid webhook secret" }, 401);
-      }
-      throw error;
-    }
   });
 
   return routes;

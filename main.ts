@@ -1,4 +1,3 @@
-import { Hono } from "@hono/hono";
 import "@std/dotenv/load";
 
 // Install environment isolation IMMEDIATELY after dotenv loads.
@@ -17,22 +16,15 @@ processIsolator.install();
 import { DatabaseService } from "./src/database/database_service.ts";
 import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
-import { createHybridAuthMiddleware } from "./src/auth/auth_middleware.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
-import { createApiKeyRoutes, createApiKeyGroupRoutes } from "./src/keys/api_key_routes.ts";
 import { RoutesService } from "./src/routes/routes_service.ts";
-import { createFunctionsRoutes } from "./src/routes/functions_routes.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
 import { SourceFileService } from "./src/files/source_file_service.ts";
-import { createSourceFileRoutes } from "./src/files/source_file_routes.ts";
 import { CodeSourceService } from "./src/sources/code_source_service.ts";
 import { ManualCodeSourceProvider } from "./src/sources/manual_code_source_provider.ts";
 import { GitCodeSourceProvider } from "./src/sources/git_code_source_provider.ts";
-import { createSourceRoutes } from "./src/sources/source_routes.ts";
 import type { SyncJobPayload } from "./src/sources/types.ts";
-import { createSettingsRoutes } from "./src/settings/settings_routes.ts";
-import { createWebRoutes } from "./src/web/web_routes.ts";
 import { ConsoleLogService } from "./src/logs/console_log_service.ts";
 import { StreamInterceptor } from "./src/logs/stream_interceptor.ts";
 import { ExecutionMetricsService } from "./src/metrics/execution_metrics_service.ts";
@@ -44,27 +36,23 @@ import type { LogTrimmingConfig } from "./src/logs/log_trimming_types.ts";
 import { KeyStorageService } from "./src/encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "./src/encryption/versioned_encryption_service.ts";
 import { KeyRotationService } from "./src/encryption/key_rotation_service.ts";
-import { createRotationRoutes } from "./src/encryption/rotation_routes.ts";
 import { HashService } from "./src/encryption/hash_service.ts";
 import type { KeyRotationConfig } from "./src/encryption/key_rotation_types.ts";
 import { SecretsService } from "./src/secrets/secrets_service.ts";
-import { createSecretsRoutes } from "./src/secrets/secrets_routes.ts";
-import { createLogsRoutes } from "./src/logs/logs_routes.ts";
-import { createMetricsRoutes } from "./src/metrics/metrics_routes.ts";
 import { SettingsService } from "./src/settings/settings_service.ts";
 import { SettingNames } from "./src/settings/types.ts";
 import { UserService } from "./src/users/user_service.ts";
-import { createUserRoutes } from "./src/users/user_routes.ts";
 import { initializeLogger, stopLoggerRefresh } from "./src/utils/logger.ts";
 import { InstanceIdService } from "./src/instance/instance_id_service.ts";
 import { JobQueueService } from "./src/jobs/job_queue_service.ts";
 import { JobProcessorService } from "./src/jobs/job_processor_service.ts";
 import { SchedulingService } from "./src/scheduling/scheduling_service.ts";
 import { EventBus } from "./src/events/mod.ts";
+import { createFunctionApp, createManagementApp } from "./src/apps/mod.ts";
 
 /**
  * Parse an environment variable as a positive integer.
- * Used only for PORT which remains an env var.
+ * Used for FUNCTION_PORT and MANAGEMENT_PORT.
  */
 function parseEnvInt(
   name: string,
@@ -122,8 +110,6 @@ const hashService = new HashService({
   hashKey: encryptionKeys.hash_key,
 });
 console.log("✓ Hash service initialized");
-
-const app = new Hono();
 
 // Initialize database
 // The database connection remains open for the application's lifetime and is
@@ -409,27 +395,11 @@ if (!existingKeyRotationSchedule) {
 
 console.log("✓ Job processor and scheduling services started");
 
-// Better Auth handler - handles /api/auth/* endpoints
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+// ============================================================================
+// File Services (used by management app)
+// ============================================================================
 
-// Hybrid auth middleware (accepts session OR API key)
-const hybridAuth = createHybridAuthMiddleware({ auth, apiKeyService, settingsService });
-
-// Protected API key group management routes
-app.use("/api/key-groups/*", hybridAuth);
-app.use("/api/key-groups", hybridAuth);
-app.route("/api/key-groups", createApiKeyGroupRoutes(apiKeyService));
-
-// Protected API key management routes
-app.use("/api/keys/*", hybridAuth);
-app.use("/api/keys", hybridAuth);
-app.route("/api/keys", createApiKeyRoutes(apiKeyService));
-
-app.use("/api/functions/*", hybridAuth);
-app.use("/api/functions", hybridAuth);
-app.route("/api/functions", createFunctionsRoutes(routesService));
-
-// Initialize file service (used by web UI and function router)
+// Initialize file service (used by web UI)
 const fileService = new FileService({
   basePath: "./code",
 });
@@ -440,115 +410,42 @@ const sourceFileService = new SourceFileService({
   codeDirectory: "./code",
 });
 
-// Protected source management routes (MUST be before file routes for route ordering)
-// Note: webhook endpoint is NOT protected by hybridAuth - it uses its own secret validation
-app.use("/api/sources/:id/sync", hybridAuth);
-app.use("/api/sources/:id/status", hybridAuth);
-app.use("/api/sources/:id", hybridAuth);
-app.use("/api/sources", hybridAuth);
-app.route("/api/sources", createSourceRoutes({ codeSourceService }));
+// ============================================================================
+// Create Hono Apps
+// ============================================================================
 
-// Protected source file management routes (after source routes)
-app.use("/api/sources/*/files/*", hybridAuth);
-app.use("/api/sources/*/files", hybridAuth);
-app.route("/api/sources", createSourceFileRoutes({
-  sourceFileService,
-  settingsService,
-}));
+// Function execution app (runs on FUNCTION_PORT)
+const functionApp = createFunctionApp(functionRouter);
 
-// Encryption key rotation API
-app.use("/api/encryption-keys/*", hybridAuth);
-app.use("/api/encryption-keys", hybridAuth);
-app.route("/api/encryption-keys", createRotationRoutes({
-  keyRotationService,
-  keyStorageService,
-  settingsService,
-  schedulingService,
-}));
-
-// Settings API (hybrid auth)
-app.use("/api/settings/*", hybridAuth);
-app.use("/api/settings", hybridAuth);
-app.route("/api/settings", createSettingsRoutes({
-  settingsService,
-  schedulingService,
-  keyStorageService,
-}));
-
-// Secrets API (hybrid auth)
-app.use("/api/secrets/*", hybridAuth);
-app.use("/api/secrets", hybridAuth);
-app.route("/api/secrets", createSecretsRoutes(secretsService));
-
-// Logs API (hybrid auth)
-app.use("/api/logs/*", hybridAuth);
-app.use("/api/logs", hybridAuth);
-app.route("/api/logs", createLogsRoutes({
-  consoleLogService,
-  routesService,
-}));
-
-// Metrics API (hybrid auth)
-app.use("/api/metrics/*", hybridAuth);
-app.use("/api/metrics", hybridAuth);
-app.route("/api/metrics", createMetricsRoutes({
-  executionMetricsService,
-  routesService,
-  settingsService,
-}));
-
-// User management API (hybrid auth)
-app.use("/api/users/*", hybridAuth);
-app.use("/api/users", hybridAuth);
-app.route("/api/users", createUserRoutes(userService));
-
-// Serve favicon at root level (browsers request /favicon.ico automatically)
-app.get("/favicon.ico", async (c) => {
-  try {
-    const faviconPath = new URL("./docs/public/favicon.svg", import.meta.url);
-    const content = await Deno.readFile(faviconPath);
-
-    return new Response(content, {
-      status: 200,
-      headers: {
-        "Content-Type": "image/svg+xml",
-        "Content-Length": String(content.length),
-        "Cache-Control": "public, max-age=3600",
-      },
-    });
-  } catch (error) {
-    console.error("Failed to serve favicon:", error);
-    return c.text("Favicon not found", 404);
-  }
-});
-
-// Web UI routes (session auth applied internally)
-app.route("/web", createWebRoutes({
+// Management app (runs on MANAGEMENT_PORT)
+const managementApp = createManagementApp({
   auth,
   db,
-  userService,
-  routesService,
   apiKeyService,
+  routesService,
   consoleLogService,
   executionMetricsService,
   encryptionService,
+  keyStorageService,
+  keyRotationService,
+  secretsService,
   settingsService,
+  userService,
   codeSourceService,
   sourceFileService,
-}));
+  schedulingService,
+});
 
-// Dynamic function router - catch all /run/* requests
-app.all("/run/*", (c) => functionRouter.handle(c));
-app.all("/run", (c) => functionRouter.handle(c));
+console.log("✓ Hono apps created");
 
-// Export app and services for testing
-export { app, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
+// Export apps and services for testing
+export { functionApp, managementApp, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
-    // 1. Stop accepting new requests first
+    // 1. Stop accepting new requests
     if (abortController) {
       abortController.abort();
       console.log("Stopped accepting new connections");
@@ -585,11 +482,12 @@ async function gracefulShutdown(signal: string) {
   Deno.exit(0);
 }
 
-// Start server only when run directly
+// Start servers only when run directly
 if (import.meta.main) {
-  const port = parseEnvInt("PORT", 8000, { min: 1, max: 65535 });
+  const functionPort = parseEnvInt("FUNCTION_PORT", 8000, { min: 1, max: 65535 });
+  const managementPort = parseEnvInt("MANAGEMENT_PORT", 9000, { min: 1, max: 65535 });
 
-  // Setup graceful shutdown - assign to module-scoped variable
+  // Setup graceful shutdown
   abortController = new AbortController();
 
   Deno.addSignalListener("SIGTERM", () => {
@@ -600,8 +498,38 @@ if (import.meta.main) {
     gracefulShutdown("SIGINT");
   });
 
-  Deno.serve({
-    port,
-    signal: abortController.signal,
-  }, app.fetch);
+  // Start server(s) based on port configuration
+  if (functionPort === managementPort) {
+    // Single port mode: mount function routes on management app
+    managementApp.all("/run/*", (c) => functionRouter.handle(c));
+    managementApp.all("/run", (c) => functionRouter.handle(c));
+
+    Deno.serve({
+      port: functionPort,
+      signal: abortController.signal,
+      onListen: () => {
+        console.log(`Server (combined): http://localhost:${functionPort}`);
+        console.log("  /run/* → Function execution");
+        console.log("  /api/* → Management API");
+        console.log("  /web/* → Web UI");
+      },
+    }, managementApp.fetch);
+  } else {
+    // Dual port mode: separate servers
+    Deno.serve({
+      port: functionPort,
+      signal: abortController.signal,
+      onListen: () => {
+        console.log(`Function server: http://localhost:${functionPort}/run/*`);
+      },
+    }, functionApp.fetch);
+
+    Deno.serve({
+      port: managementPort,
+      signal: abortController.signal,
+      onListen: () => {
+        console.log(`Management server: http://localhost:${managementPort}`);
+      },
+    }, managementApp.fetch);
+  }
 }

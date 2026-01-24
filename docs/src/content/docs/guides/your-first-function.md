@@ -18,7 +18,7 @@ A simple "Hello World" function that:
 
 Before starting, make sure you have:
 
-- Crude Functions running at `http://localhost:8000`
+- Crude Functions running (function port at `http://localhost:8000`, management at `http://localhost:9000`)
 - Completed the initial setup (created your admin account)
 - Access to the web UI or API
 
@@ -39,7 +39,7 @@ In this guide, we'll focus on the **manual code source** to keep things simple.
 
 When you first access the Code Management Page 📁, you will need to create your first code source:
 
-1. Navigate to the Code Management Page 📁 or go to `http://localhost:8000/web/code`
+1. Navigate to the Code Management Page 📁 or go to `http://localhost:9000/web/code`
 2. Click "New Code Source" button
 3. Choose the "Create Manual Source"
 3. Enter a name of the new source - this will be the name of the created directory (e.g., `my-functions`)
@@ -51,7 +51,7 @@ For the rest of this tutorial, we'll assume you have a source named `my-function
 
 Every function in Crude Functions is a TypeScript or JavaScript file with a default function export in the appropriate format. Let's create our first handler.
 
-1. Go to the 📁 code management page at `http://localhost:8000/web/code`
+1. Go to the 📁 code management page at `http://localhost:9000/web/code`
 2. Click on your code source (e.g., `my-functions`) to open it
 3. Click the `Upload New File` button
 4. Create a file called `hello.ts` with the following code:
@@ -97,7 +97,7 @@ See the [Handler Context Reference](/reference/handler-context) for the complete
 
 Now that we have our handler file, we need to register it as a function route.
 
-1. Navigate to `http://localhost:8000/web/functions` (the ⚡ tab)
+1. Navigate to `http://localhost:9000/web/functions` (the ⚡ tab)
 2. Click the "Create New Function" button
 3. Fill in the form:
 
@@ -142,7 +142,7 @@ You should see a JSON response like:
 
 Crude Functions automatically captures all console output from your functions.
 
-1. Go to `http://localhost:8000/web/functions`
+1. Go to `http://localhost:9000/web/functions`
 2. Click the 📝 button on the function entry
 
 The only thing you'll see are the `EXET_START` and `EXEC_END` events because our function doesn't write anything to the output. Let's add some logging.
@@ -205,7 +205,7 @@ Let's make our function more dynamic by accepting a path parameter.
 
 ### Update the route
 
-1. Go to `http://localhost:8000/web/functions`
+1. Go to `http://localhost:9000/web/functions`
 2. Click ✏️ on your `hello-world` function
 3. Change the **Route Path** to `/hello/:name`
 4. Click "Save"
@@ -379,7 +379,7 @@ Deno will automatically download and cache the packages on first import.
 
 Store sensitive data like API keys securely:
 
-1. Go to `http://localhost:8000/web/secrets`
+1. Go to `http://localhost:9000/web/secrets`
 2. Add a global secret:
    - **Name**: `GREETING_PREFIX`
    - **Value**: `Welcome to Crude Functions`
