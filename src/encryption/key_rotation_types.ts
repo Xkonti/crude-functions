@@ -10,8 +10,6 @@ import type { KeyStorageService } from "./key_storage_service.ts";
  * Configuration for key rotation.
  */
 export interface KeyRotationConfig {
-  /** How often to check if rotation is needed (seconds). Default: 10800 (3 hours) */
-  checkIntervalSeconds: number;
   /** How long between rotations (days). Default: 90 days */
   rotationIntervalDays: number;
   /** Batch size for re-encryption. Default: 100 */
@@ -54,7 +52,6 @@ export interface EncryptedRecord {
  * Default configuration values for key rotation.
  */
 export const DEFAULT_KEY_ROTATION_CONFIG: KeyRotationConfig = {
-  checkIntervalSeconds: 10800, // 3 hours
   rotationIntervalDays: 90,
   batchSize: 100,
   batchSleepMs: 100,
