@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
-import { createSourceRoutes } from "./source_routes.ts";
+import { createSourceRoutes, createSourceWebhookRoute } from "./source_routes.ts";
 
 /**
  * Create a test app with source routes.
@@ -10,6 +10,12 @@ async function createTestApp() {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
 
   const app = new Hono();
+  // Mount webhook route first (no auth)
+  app.route(
+    "/api/sources",
+    createSourceWebhookRoute({ codeSourceService: ctx.codeSourceService }),
+  );
+  // Then mount main source routes
   app.route(
     "/api/sources",
     createSourceRoutes({ codeSourceService: ctx.codeSourceService }),

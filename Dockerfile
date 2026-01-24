@@ -33,10 +33,11 @@ COPY --from=builder --chown=deno:deno /deno-dir /deno-dir
 COPY --from=builder --chown=deno:deno /app /app
 
 # Set environment variables
-ENV PORT=8000
+ENV FUNCTION_PORT=8000
+ENV MANAGEMENT_PORT=9000
 
-# Expose the application port
-EXPOSE 8000
+# Expose both ports
+EXPOSE 8000 9000
 
 # Run the application with necessary permissions
 ENTRYPOINT []
