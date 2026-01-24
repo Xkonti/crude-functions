@@ -81,9 +81,8 @@ function parseEnvInt(
   return parsed;
 }
 
-// AbortControllers for graceful shutdown - must be module-scoped
-let functionAbortController: AbortController | null = null;
-let managementAbortController: AbortController | null = null;
+// AbortController for graceful shutdown - must be module-scoped
+let abortController: AbortController | null = null;
 
 // ============================================================================
 // Encryption Key Initialization
@@ -446,14 +445,11 @@ export { functionApp, managementApp, apiKeyService, routesService, functionRoute
 async function gracefulShutdown(signal: string) {
   console.log(`\nReceived ${signal}, shutting down gracefully...`);
   try {
-    // 1. Stop accepting new requests on both servers
-    if (functionAbortController) {
-      functionAbortController.abort();
+    // 1. Stop accepting new requests
+    if (abortController) {
+      abortController.abort();
+      console.log("Stopped accepting new connections");
     }
-    if (managementAbortController) {
-      managementAbortController.abort();
-    }
-    console.log("Stopped accepting new connections on both ports");
 
     // 2. Wait for in-flight requests to drain (5 seconds)
     const drainTimeoutMs = 5000;
@@ -491,9 +487,8 @@ if (import.meta.main) {
   const functionPort = parseEnvInt("FUNCTION_PORT", 8000, { min: 1, max: 65535 });
   const managementPort = parseEnvInt("MANAGEMENT_PORT", 9000, { min: 1, max: 65535 });
 
-  // Setup graceful shutdown - assign to module-scoped variables
-  functionAbortController = new AbortController();
-  managementAbortController = new AbortController();
+  // Setup graceful shutdown
+  abortController = new AbortController();
 
   Deno.addSignalListener("SIGTERM", () => {
     gracefulShutdown("SIGTERM");
@@ -503,21 +498,38 @@ if (import.meta.main) {
     gracefulShutdown("SIGINT");
   });
 
-  // Start function execution server
-  Deno.serve({
-    port: functionPort,
-    signal: functionAbortController.signal,
-    onListen: () => {
-      console.log(`Function server: http://localhost:${functionPort}`);
-    },
-  }, functionApp.fetch);
+  // Start server(s) based on port configuration
+  if (functionPort === managementPort) {
+    // Single port mode: mount function routes on management app
+    managementApp.all("/run/*", (c) => functionRouter.handle(c));
+    managementApp.all("/run", (c) => functionRouter.handle(c));
 
-  // Start management server
-  Deno.serve({
-    port: managementPort,
-    signal: managementAbortController.signal,
-    onListen: () => {
-      console.log(`Management server: http://localhost:${managementPort}`);
-    },
-  }, managementApp.fetch);
+    Deno.serve({
+      port: functionPort,
+      signal: abortController.signal,
+      onListen: () => {
+        console.log(`Server (combined): http://localhost:${functionPort}`);
+        console.log("  /run/* → Function execution");
+        console.log("  /api/* → Management API");
+        console.log("  /web/* → Web UI");
+      },
+    }, managementApp.fetch);
+  } else {
+    // Dual port mode: separate servers
+    Deno.serve({
+      port: functionPort,
+      signal: abortController.signal,
+      onListen: () => {
+        console.log(`Function server: http://localhost:${functionPort}/run/*`);
+      },
+    }, functionApp.fetch);
+
+    Deno.serve({
+      port: managementPort,
+      signal: abortController.signal,
+      onListen: () => {
+        console.log(`Management server: http://localhost:${managementPort}`);
+      },
+    }, managementApp.fetch);
+  }
 }
