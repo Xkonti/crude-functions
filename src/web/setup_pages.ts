@@ -3,6 +3,7 @@ import type { Auth } from "../auth/auth.ts";
 import type { UserService } from "../users/user_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames, GlobalSettingDefaults } from "../settings/types.ts";
+import { getCsrfToken } from "./templates.ts";
 
 /**
  * Options for creating the setup pages router.
@@ -34,6 +35,7 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     // Fetch server name setting, with fallback to default if not found
     const serverName = await settingsService.getGlobalSetting(SettingNames.SERVER_NAME)
@@ -108,6 +110,7 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
       const errorDiv = document.getElementById('setup-error');
       const passwordInput = document.getElementById('password');
       const confirmPasswordInput = document.getElementById('confirmPassword');
+      const csrfToken = ${JSON.stringify(csrfToken)};
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -141,7 +144,7 @@ export function createSetupPages(options: SetupPagesOptions): Hono {
             // Set admin role for the new user
             await fetch('/web/setup/finalize', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
               body: JSON.stringify({ userId: data.user.id }),
               credentials: 'include'
             });

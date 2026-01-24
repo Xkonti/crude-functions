@@ -13,6 +13,22 @@ export interface AuthPagesOptions {
 }
 
 /**
+ * Validates that a redirect URL is safe (same-origin, relative path).
+ * Prevents open redirect attacks by rejecting absolute URLs and protocol-relative URLs.
+ */
+function isValidRedirectUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+
+  // Must be relative path (starts with /) and not protocol-relative (//)
+  if (url.startsWith("/") && !url.startsWith("//")) {
+    return true;
+  }
+
+  // Reject any absolute URLs or protocol-relative URLs
+  return false;
+}
+
+/**
  * Creates the authentication pages router.
  *
  * Provides login and logout pages for the Web UI.
@@ -29,7 +45,8 @@ export function createAuthPages(options: AuthPagesOptions): Hono {
       return c.redirect("/web/setup");
     }
 
-    const callbackUrl = c.req.query("callbackUrl") ?? "/web";
+    const rawCallbackUrl = c.req.query("callbackUrl");
+    const callbackUrl = isValidRedirectUrl(rawCallbackUrl) ? rawCallbackUrl : "/web";
     const error = c.req.query("error");
 
     const content = `<!DOCTYPE html>

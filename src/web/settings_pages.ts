@@ -13,7 +13,9 @@ import {
   escapeHtml,
   flashMessages,
   getLayoutUser,
+  getCsrfToken,
 } from "./templates.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 
 export interface SettingsPagesOptions {
   settingsService: SettingsService;
@@ -44,8 +46,9 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
 
     // Load available groups for checkboxGroup settings
     const availableGroups = await apiKeyService.getGroups();
+    const csrfToken = getCsrfToken(c);
 
-    const content = renderServerSettingsTab(settingsData, availableGroups, success, error);
+    const content = renderServerSettingsTab(settingsData, availableGroups, success, error, csrfToken);
     return c.html(await layout("Server Settings", content, getLayoutUser(c), settingsService));
   });
 
@@ -74,11 +77,12 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
       for (const name of Object.values(SettingNames)) {
         settingsData[name] = updates[name] ?? GlobalSettingDefaults[name];
       }
+      const csrfToken = getCsrfToken(c);
 
       return c.html(
         await layout(
           "Server Settings",
-          renderServerSettingsTab(settingsData, availableGroups, undefined, errors.join(". ")),
+          renderServerSettingsTab(settingsData, availableGroups, undefined, errors.join(". "), csrfToken),
           getLayoutUser(c),
           settingsService
         ),
@@ -146,7 +150,8 @@ function renderServerSettingsTab(
   data: Record<string, string>,
   availableGroups: ApiKeyGroup[],
   success?: string,
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     <h1>Settings</h1>
@@ -173,6 +178,7 @@ function renderServerSettingsTab(
     <article>
       <h3>Server Settings</h3>
       <form method="POST" action="/web/settings/server">
+        ${csrfToken ? csrfInput(csrfToken) : ""}
         ${renderSettingsForm(data, availableGroups)}
         <div class="grid" style="margin-bottom: 0;">
           <button type="submit" style="margin-bottom: 0;">Save Settings</button>
@@ -186,6 +192,7 @@ function renderServerSettingsTab(
       const statusEl = document.getElementById('rotation-info');
       const btnEl = document.getElementById('rotate-keys-btn');
       const messageEl = document.getElementById('rotation-status-message');
+      const csrfToken = ${JSON.stringify(csrfToken)};
 
       // Fetch rotation status
       async function loadStatus() {
@@ -227,7 +234,7 @@ function renderServerSettingsTab(
         try {
           const response = await fetch('/api/encryption-keys/rotation', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
           });
 
           const data = await response.json();

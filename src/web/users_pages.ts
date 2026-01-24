@@ -9,7 +9,9 @@ import {
   buttonLink,
   formatDate,
   getLayoutUser,
+  getCsrfToken,
 } from "./templates.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 
 /**
  * Session user type from Better Auth context.
@@ -101,7 +103,8 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
   // GET /create - Create user form
   routes.get("/create", async (c) => {
     const error = c.req.query("error");
-    return c.html(await layout("Create User", renderUserForm("/web/users/create", {}, error), getLayoutUser(c), settingsService));
+    const csrfToken = getCsrfToken(c);
+    return c.html(await layout("Create User", renderUserForm("/web/users/create", {}, error, csrfToken), getLayoutUser(c), settingsService));
   });
 
   // POST /create - Handle user creation
@@ -116,8 +119,9 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const { userData, errors } = parseCreateFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       return c.html(
-        layout("Create User", renderUserForm("/web/users/create", userData, errors.join(". ")), getLayoutUser(c), settingsService),
+        layout("Create User", renderUserForm("/web/users/create", userData, errors.join(". "), csrfToken), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -134,8 +138,9 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       return c.redirect("/web/users?success=" + encodeURIComponent(`User created: ${userData.email}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create user";
+      const csrfToken = getCsrfToken(c);
       return c.html(
-        layout("Create User", renderUserForm("/web/users/create", userData, message), getLayoutUser(c), settingsService),
+        layout("Create User", renderUserForm("/web/users/create", userData, message, csrfToken), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -145,6 +150,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
   routes.get("/edit/:id", async (c) => {
     const userId = c.req.param("id");
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const user = await userService.getById(userId);
 
@@ -155,7 +161,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     return c.html(
       layout(
         `Edit: ${user.email}`,
-        renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, user, error),
+        renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, user, error, csrfToken),
         getLayoutUser(c), settingsService
       )
     );
@@ -183,10 +189,11 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
     const { editData, errors } = parseEditFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${user.email}`,
-          renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, { ...user, ...editData }, errors.join(". ")),
+          renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, { ...user, ...editData }, errors.join(". "), csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -203,10 +210,11 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       return c.redirect("/web/users?success=" + encodeURIComponent(`User updated: ${user.email}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update user";
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${user.email}`,
-          renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, { ...user, ...editData }, message),
+          renderEditForm(`/web/users/edit/${encodeURIComponent(userId)}`, { ...user, ...editData }, message, csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -236,7 +244,9 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
         `Are you sure you want to delete the user "${user.email}"? This action cannot be undone.`,
         `/web/users/delete/${encodeURIComponent(userId)}`,
         "/web/users",
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -271,12 +281,14 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
 function renderUserForm(
   action: string,
   data: { email?: string; name?: string; role?: string } = {},
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     <h1>Create User</h1>
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="${escapeHtml(action)}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Email
         <input type="email" name="email" value="${escapeHtml(data.email ?? "")}"
@@ -316,13 +328,15 @@ function renderUserForm(
 function renderEditForm(
   action: string,
   user: { email: string; name?: string; roles?: string[] },
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   const roleString = user.roles ? user.roles.join(",") : "";
   return `
     <h1>Edit User</h1>
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="${escapeHtml(action)}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Email
         <input type="email" value="${escapeHtml(user.email)}" disabled />

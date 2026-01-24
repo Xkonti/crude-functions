@@ -23,11 +23,13 @@ import {
   confirmPage,
   buttonLink,
   getLayoutUser,
+  getCsrfToken,
   formatDate,
   secretScripts,
   parseSecretFormData,
   parseSecretEditFormData,
 } from "./templates.ts";
+import { csrfInput } from "../csrf/csrf_helpers.ts";
 import { validateId } from "../validation/common.ts";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
@@ -1102,7 +1104,8 @@ function renderFunctionForm(
   action: string,
   route: Partial<FunctionRoute> = {},
   availableGroups: ApiKeyGroup[] = [],
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   const isEdit = route.id !== undefined;
   const selectedKeys = route.keys ?? [];
@@ -1111,6 +1114,7 @@ function renderFunctionForm(
     <h1>${isEdit ? "Edit" : "Create"} Function</h1>
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="${escapeHtml(action)}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Name
         <input type="text" name="name" value="${escapeHtml(route.name ?? "")}"
@@ -1352,11 +1356,13 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
 function renderFunctionSecretCreateForm(
   functionId: number,
   data: { name?: string; value?: string; comment?: string } = {},
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="/web/functions/secrets/${functionId}/create">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name *
         <input type="text" name="name" value="${escapeHtml(data.name ?? "")}"
@@ -1391,11 +1397,13 @@ function renderFunctionSecretCreateForm(
 function renderFunctionSecretEditForm(
   functionId: number,
   secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
-  error?: string
+  error?: string,
+  csrfToken: string = ""
 ): string {
   return `
     ${error ? flashMessages(undefined, error) : ""}
     <form method="POST" action="/web/functions/secrets/${functionId}/edit/${secret.id}">
+      ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
         <input type="text" value="${escapeHtml(secret.name)}" disabled />
@@ -1588,7 +1596,8 @@ export function createFunctionsPages(
   routes.get("/create", async (c) => {
     const error = c.req.query("error");
     const groups = await apiKeyService.getGroups();
-    return c.html(await layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error), getLayoutUser(c), settingsService));
+    const csrfToken = getCsrfToken(c);
+    return c.html(await layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error, csrfToken), getLayoutUser(c), settingsService));
   });
 
   // Handle create
@@ -1604,8 +1613,9 @@ export function createFunctionsPages(
     const groups = await apiKeyService.getGroups();
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". ")), getLayoutUser(c), settingsService),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". "), csrfToken), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -1615,8 +1625,9 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?success=" + encodeURIComponent(`Function created: ${route.name}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create function";
+      const csrfToken = getCsrfToken(c);
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message), getLayoutUser(c), settingsService),
+        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message, csrfToken), getLayoutUser(c), settingsService),
         400
       );
     }
@@ -1626,6 +1637,7 @@ export function createFunctionsPages(
   routes.get("/edit/:id", async (c) => {
     const id = validateId(c.req.param("id"));
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     if (id === null) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
@@ -1640,7 +1652,7 @@ export function createFunctionsPages(
     return c.html(
       layout(
         `Edit: ${route.name}`,
-        renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error),
+        renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error, csrfToken),
         getLayoutUser(c), settingsService
       )
     );
@@ -1675,10 +1687,11 @@ export function createFunctionsPages(
     if (errors.length > 0) {
       // Need to include id for the form template to detect edit mode
       const routeWithId = { ...route, id };
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, errors.join(". ")),
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, errors.join(". "), csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -1692,10 +1705,11 @@ export function createFunctionsPages(
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update function";
       const routeWithId = { ...route, id };
+      const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, message),
+          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, message, csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -1744,7 +1758,9 @@ export function createFunctionsPages(
         `Are you sure you want to delete the function "${route.name}"? This action cannot be undone.`,
         `/web/functions/delete/${id}`,
         "/web/functions",
-        getLayoutUser(c), settingsService
+        getLayoutUser(c),
+        settingsService,
+        getCsrfToken(c)
       )
     );
   });
@@ -1975,6 +1991,7 @@ export function createFunctionsPages(
     }
 
     const error = c.req.query("error");
+    const csrfToken = getCsrfToken(c);
 
     const content = `
       <h1>Create Secret for ${escapeHtml(route.name)}</h1>
@@ -1983,7 +2000,7 @@ export function createFunctionsPages(
           ← Back to Secrets
         </a>
       </p>
-      ${renderFunctionSecretCreateForm(functionId, {}, error)}
+      ${renderFunctionSecretCreateForm(functionId, {}, error, csrfToken)}
     `;
 
     return c.html(
@@ -2022,6 +2039,7 @@ export function createFunctionsPages(
     const { secretData, errors } = parseSecretFormData(formData);
 
     if (errors.length > 0) {
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Create Secret for ${escapeHtml(route.name)}</h1>
         <p>
@@ -2029,7 +2047,7 @@ export function createFunctionsPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderFunctionSecretCreateForm(functionId, secretData, errors.join(". "))}
+        ${renderFunctionSecretCreateForm(functionId, secretData, errors.join(". "), csrfToken)}
       `;
       return c.html(
         layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService),
@@ -2052,6 +2070,7 @@ export function createFunctionsPages(
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to create secret";
+      const csrfToken = getCsrfToken(c);
       const content = `
         <h1>Create Secret for ${escapeHtml(route.name)}</h1>
         <p>
@@ -2059,7 +2078,7 @@ export function createFunctionsPages(
             ← Back to Secrets
           </a>
         </p>
-        ${renderFunctionSecretCreateForm(functionId, secretData, message)}
+        ${renderFunctionSecretCreateForm(functionId, secretData, message, csrfToken)}
       `;
       return c.html(
         layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService),
@@ -2108,7 +2127,7 @@ export function createFunctionsPages(
           ← Back to Secrets
         </a>
       </p>
-      ${renderFunctionSecretEditForm(functionId, secret, error)}
+      ${renderFunctionSecretEditForm(functionId, secret, error, getCsrfToken(c))}
     `;
 
     return c.html(
@@ -2170,7 +2189,8 @@ export function createFunctionsPages(
         ${renderFunctionSecretEditForm(
           functionId,
           { ...secret, ...editData },
-          errors.join(". ")
+          errors.join(". "),
+          getCsrfToken(c)
         )}
       `;
       return c.html(
@@ -2204,7 +2224,8 @@ export function createFunctionsPages(
         ${renderFunctionSecretEditForm(
           functionId,
           { ...secret, ...editData },
-          message
+          message,
+          getCsrfToken(c)
         )}
       `;
       return c.html(
@@ -2251,7 +2272,8 @@ export function createFunctionsPages(
         `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>" from function "${escapeHtml(route.name)}"? This action cannot be undone.`,
         `/web/functions/secrets/${functionId}/delete/${secretId}`,
         `/web/functions/secrets/${functionId}`,
-        getLayoutUser(c), settingsService
+        getLayoutUser(c), settingsService,
+        getCsrfToken(c)
       )
     );
   });
