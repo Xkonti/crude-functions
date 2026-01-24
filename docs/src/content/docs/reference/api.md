@@ -5,10 +5,28 @@ description: Documentation of all available API endpoints
 
 Crude Functions provides a comprehensive REST API for programmatic management.
 
-**Authentication:**
+## Ports
+
+By default, endpoints are split across two ports:
+
+| Port | Default | Endpoints | Purpose |
+|------|---------|-----------|---------|
+| `FUNCTION_PORT` | 8000 | `/run/*` | Function execution (public) |
+| `MANAGEMENT_PORT` | 9000 | `/api/*`, `/web/*` | Management API and Web UI |
+
+When both ports are set to the same value, all endpoints run on a single port. See [Deployment](/guides/deployment/#port-configuration) for configuration options.
+
+## Authentication
 
 - All `/api/*` endpoints require authentication via session cookie (web UI) OR `X-API-Key` header
 - The `X-API-Key` must belong to an authorized group (configurable in Settings, `management` by default)
+- The `/run/*` endpoints use per-function API key requirements (configured when creating functions)
+
+:::note
+The examples below use `localhost:9000` (management port). If running in single-port mode, use port 8000 instead.
+:::
+
+## Management API
 
 ### Functions
 
@@ -38,7 +56,7 @@ Crude Functions provides a comprehensive REST API for programmatic management.
 **Creating a manual source:**
 
 ```bash
-curl -X POST http://localhost:8000/api/sources \
+curl -X POST http://localhost:9000/api/sources \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -51,7 +69,7 @@ curl -X POST http://localhost:8000/api/sources \
 **Creating a git source:**
 
 ```bash
-curl -X POST http://localhost:8000/api/sources \
+curl -X POST http://localhost:9000/api/sources \
   -H "X-API-Key: your-key" \
   -H "Content-Type: application/json" \
   -d '{
@@ -99,17 +117,17 @@ curl -X POST http://localhost:8000/api/sources \
 # JSON body
 curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/json" \
   -d '{"content": "file contents", "encoding": "utf-8"}' \
-  http://localhost:8000/api/sources/my-api/files/example.ts
+  http://localhost:9000/api/sources/my-api/files/example.ts
 
 # Multipart form-data
 curl -X PUT -H "X-API-Key: key" \
   -F "file=@local-file.ts" \
-  http://localhost:8000/api/sources/my-api/files/example.ts
+  http://localhost:9000/api/sources/my-api/files/example.ts
 
 # Raw binary
 curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/octet-stream" \
   --data-binary @local-file.bin \
-  http://localhost:8000/api/sources/my-api/files/binary.bin
+  http://localhost:9000/api/sources/my-api/files/binary.bin
 ```
 
 ### API Key Groups
@@ -165,7 +183,7 @@ curl -X POST \
     "scope": "global",
     "comment": "Main database connection"
   }' \
-  http://localhost:8000/api/secrets
+  http://localhost:9000/api/secrets
 ```
 
 **Scopes:** Secrets support hierarchical scopes (key > group > function > global). More specific scopes override general ones.
@@ -229,7 +247,7 @@ curl -X POST \
 
 ```bash
 curl -H "X-API-Key: your-key" \
-  "http://localhost:8000/api/metrics?resolution=hours&functionId=1"
+  "http://localhost:9000/api/metrics?resolution=hours&functionId=1"
 ```
 
 Returns time-series data with execution counts, avg/max execution times, and summary statistics.
@@ -253,7 +271,7 @@ curl -X PUT \
       "metrics.retention-days": "30"
     }
   }' \
-  http://localhost:8000/api/settings
+  http://localhost:9000/api/settings
 ```
 
 Settings are managed through the web UI. See the Settings page for available options.
@@ -275,15 +293,15 @@ Settings are managed through the web UI. See the Settings page for available opt
 
 **Manual rotation:** Re-encrypts all secrets, API keys, and settings. Can take time with large datasets.
 
-### Function Execution
+## Function Execution
 
-Functions are executed via the `/run` prefix:
+Functions are executed via the `/run` prefix on the **function port** (default: 8000):
 
 ```bash
 # Call a function at /hello
 curl http://localhost:8000/run/hello
 
-# With API key
+# With API key (if function requires it)
 curl -H "X-API-Key: your-api-key" http://localhost:8000/run/users/123
 
 # POST with body
@@ -292,6 +310,8 @@ curl -X POST -H "X-API-Key: your-api-key" \
   -d '{"name": "John"}' \
   http://localhost:8000/run/users
 
-# API key in query param (avoid)
+# API key in query param (avoid in production)
 curl http://localhost:8000/run/hello?api_key=your-api-key
 ```
+
+**Note:** The function port is separate from the management port by default. This allows you to expose only function endpoints to the public internet while keeping management endpoints internal.
