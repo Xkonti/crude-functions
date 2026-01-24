@@ -16,7 +16,6 @@ export const SettingNames = {
   METRICS_RETENTION_DAYS: "metrics.retention-days",
 
   // Encryption key rotation
-  ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS: "encryption.key-rotation.check-interval-seconds",
   ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS: "encryption.key-rotation.interval-days",
   ENCRYPTION_KEY_ROTATION_BATCH_SIZE: "encryption.key-rotation.batch-size",
   ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS: "encryption.key-rotation.batch-sleep-ms",
@@ -53,7 +52,6 @@ export const GlobalSettingDefaults: Record<SettingName, string> = {
   [SettingNames.LOG_BATCHING_MAX_DELAY_MS]: "50",
   [SettingNames.METRICS_AGGREGATION_INTERVAL_SECONDS]: "60",
   [SettingNames.METRICS_RETENTION_DAYS]: "90",
-  [SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS]: "10800",
   [SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS]: "90",
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE]: "100",
   [SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS]: "100",
@@ -153,15 +151,6 @@ export const SettingsMetadata: Record<SettingName, SettingMetadata> = {
     max: 365,
     category: "Metrics",
   },
-  [SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS]: {
-    name: SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS,
-    label: "Key Rotation Check Interval",
-    description: "How often to check if key rotation is needed (seconds)",
-    inputType: "number",
-    min: 3600,
-    max: 86400,
-    category: "Encryption",
-  },
   [SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS]: {
     name: SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS,
     label: "Key Rotation Interval",
@@ -243,7 +232,6 @@ export const SettingsByCategory = {
     SettingNames.METRICS_RETENTION_DAYS,
   ],
   Encryption: [
-    SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS,
     SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS,
     SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE,
     SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS,

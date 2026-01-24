@@ -234,7 +234,6 @@ const logTrimmingService = new LogTrimmingService({
 
 // Initialize and start key rotation service
 const keyRotationConfig: KeyRotationConfig = {
-  checkIntervalSeconds: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_CHECK_INTERVAL_SECONDS, 10800),
   rotationIntervalDays: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_INTERVAL_DAYS, 90),
   batchSize: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SIZE, 100),
   batchSleepMs: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS, 100),

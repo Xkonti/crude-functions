@@ -84,7 +84,6 @@ async function createTestContext(
 
   // Fast config for testing
   const config: KeyRotationConfig = {
-    checkIntervalSeconds: 1,
     rotationIntervalDays: 0, // Immediate rotation for testing
     batchSize: 10,
     batchSleepMs: 1,
