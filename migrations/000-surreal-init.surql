@@ -23,41 +23,35 @@ UPSERT schema_version:current SET version = 0;
 -- Settings
 --------------------------------------------------------------------------------
 
--- Settings table - stores application settings (global and per-user)
+-- Settings table - stores application settings (global and in future per-user)
 DEFINE TABLE IF NOT EXISTS setting
   SCHEMAFULL TYPE NORMAL
   ;
 
 DEFINE FIELD IF NOT EXISTS
-  name ON TABLE settings
-  TYPE string
-  ;
-
--- No users defined yet
--- DEFINE FIELD IF NOT EXISTS
---   user ON TABLE settings
---   TYPE option<record<user>>
---   ;
-
-DEFINE FIELD IF NOT EXISTS
-  value ON TABLE settings
+  name ON TABLE setting
   TYPE string
   ;
 
 DEFINE FIELD IF NOT EXISTS
-  isEncrypted ON TABLE settings
+  value ON TABLE setting
+  TYPE string
+  ;
+
+DEFINE FIELD IF NOT EXISTS
+  isEncrypted ON TABLE setting
   TYPE bool
   ;
 
 DEFINE FIELD IF NOT EXISTS
-  updatedAt ON TABLE settings
+  updatedAt ON TABLE setting
   TYPE datetime
   VALUE time::now()
   ;
 
--- Combination of setting and user (or lack of it) is unique
+-- Each setting name should be unique
 DEFINE INDEX unique_setting
   ON setting
-  FIELDS name --, user
+  FIELDS name
   UNIQUE
   ;

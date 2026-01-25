@@ -1,5 +1,4 @@
 import { Hono } from "@hono/hono";
-import type { Context } from "@hono/hono";
 import type { SettingsService } from "./settings_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
 import type { KeyStorageService } from "../encryption/key_storage_service.ts";
@@ -10,7 +9,6 @@ import {
 } from "./types.ts";
 import {
   validateSettings,
-  requiresUserContext,
 } from "../validation/settings.ts";
 import { recalculateKeyRotationSchedule } from "../encryption/key_rotation_schedule_helper.ts";
 import { logger } from "../utils/logger.ts";
@@ -19,33 +17,6 @@ export interface SettingsRoutesOptions {
   settingsService: SettingsService;
   schedulingService?: SchedulingService;
   keyStorageService?: KeyStorageService;
-}
-
-/**
- * Resolved user context from session or query param
- */
-interface UserContext {
-  userId: string | null;
-  source: "session" | "query" | "none";
-}
-
-/**
- * Resolve user context from session or query parameter
- */
-function resolveUserContext(c: Context): UserContext {
-  // Check for ?userId=<id> query parameter (overrides session)
-  const userIdParam = c.req.query("userId");
-  if (userIdParam) {
-    return { userId: userIdParam, source: "query" };
-  }
-
-  // Check for authenticated session user
-  const sessionUser = c.get("user");
-  if (sessionUser?.id) {
-    return { userId: sessionUser.id, source: "session" };
-  }
-
-  return { userId: null, source: "none" };
 }
 
 /**
@@ -65,35 +36,16 @@ export function createSettingsRoutes(
 
   // GET /api/settings - Get all settings
   routes.get("/", async (c) => {
-    const userContext = resolveUserContext(c);
-    const result: SettingInfo[] = [];
-
     try {
-      // Always include global settings
-      const globalSettings = await settingsService.getAllGlobalSettings();
+      const settings = await settingsService.getAllGlobalSettings();
+      const result: SettingInfo[] = [];
 
-      for (const [name, value] of globalSettings) {
-        const defaultValue = GlobalSettingDefaults[name];
+      for (const [name, value] of settings) {
         result.push({
           name,
           value,
-          default: defaultValue,
+          default: GlobalSettingDefaults[name],
         });
-      }
-
-      // Include user settings if user context exists
-      if (userContext.userId) {
-        const userSettings = await settingsService.getAllUserSettings(
-          userContext.userId
-        );
-
-        for (const [name, value] of userSettings) {
-          result.push({
-            name,
-            value,
-            default: null, // User settings don't have defaults
-          });
-        }
       }
 
       return c.json({ settings: result });
@@ -131,40 +83,14 @@ export function createSettingsRoutes(
       );
     }
 
-    // Resolve user context
-    const userContext = resolveUserContext(c);
-
-    // Separate settings into user and global
+    // All settings are global now
     const globalSettings = new Map<SettingName, string>();
-    const userSettings = new Map<SettingName, string>();
-
     for (const [name, value] of Object.entries(body.settings)) {
-      if (requiresUserContext(name)) {
-        if (!userContext.userId) {
-          return c.json(
-            {
-              error: `Setting '${name}' requires user context. Authenticate or provide ?userId=<id>`,
-            },
-            400
-          );
-        }
-        userSettings.set(name as SettingName, value);
-      } else {
-        globalSettings.set(name as SettingName, value);
-      }
+      globalSettings.set(name as SettingName, value);
     }
 
-    // Apply updates atomically
     try {
-      if (globalSettings.size > 0) {
-        await settingsService.setGlobalSettingsBatch(globalSettings);
-      }
-      if (userSettings.size > 0 && userContext.userId) {
-        await settingsService.setUserSettingsBatch(
-          userContext.userId,
-          userSettings
-        );
-      }
+      await settingsService.setGlobalSettingsBatch(globalSettings);
 
       // Update related schedules when interval settings change
       if (schedulingService && globalSettings.size > 0) {
@@ -173,10 +99,7 @@ export function createSettingsRoutes(
 
       return c.json({
         success: true,
-        updated: {
-          global: globalSettings.size,
-          user: userSettings.size,
-        },
+        updated: globalSettings.size,
       });
     } catch (error) {
       console.error("Failed to update settings:", error);

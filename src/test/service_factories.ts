@@ -180,13 +180,20 @@ export function createHashService(keys: EncryptionKeyFile): HashService {
 
 /**
  * Creates the SettingsService and bootstraps global settings.
- * Requires database and encryption service.
+ * Requires SurrealDB connection factory and encryption service.
  */
 export async function createSettingsService(
-  db: DatabaseService,
-  encryptionService: VersionedEncryptionService
+  encryptionService: VersionedEncryptionService,
+  surrealFactory: SurrealConnectionFactory,
+  namespace?: string,
+  database?: string
 ): Promise<SettingsService> {
-  const settingsService = new SettingsService({ db, encryptionService });
+  const settingsService = new SettingsService({
+    surrealFactory,
+    encryptionService,
+    namespace,
+    database,
+  });
   await settingsService.bootstrapGlobalSettings();
   return settingsService;
 }

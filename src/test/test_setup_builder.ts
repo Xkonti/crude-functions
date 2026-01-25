@@ -772,7 +772,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 3: Create settings service if needed
     if (this.flags.settingsService || this.flags.consoleLogService) {
-      context.settingsService = await createSettingsService(db, context.encryptionService);
+      context.settingsService = await createSettingsService(
+        context.encryptionService,
+        surrealFactory,
+        surrealTestContext.namespace,
+        surrealTestContext.database
+      );
 
       // Apply deferred settings
       for (const { name, value } of this.deferredSettings) {

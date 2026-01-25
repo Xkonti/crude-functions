@@ -225,7 +225,12 @@ try {
 // ============================================================================
 
 // Initialize settings service and bootstrap defaults
-const settingsService = new SettingsService({ db, encryptionService });
+const settingsService = new SettingsService({
+  surrealFactory,
+  encryptionService,
+  namespace: "system",
+  database: "system",
+});
 await settingsService.bootstrapGlobalSettings();
 console.log("✓ Settings initialized");
 

@@ -1,45 +1,56 @@
-import type { DatabaseService } from "../database/database_service.ts";
+import { Mutex } from "@core/asyncutil/mutex";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import {
   type SettingName,
   GlobalSettingDefaults,
 } from "./types.ts";
+import { RecordId } from "surrealdb";
 
-/** Database row shape for settings queries */
-interface SettingRow {
-  id: number;
+/** SurrealDB setting record shape */
+interface Setting {
   name: string;
-  userId: string | null;
-  value: string | null;
-  isEncrypted: number;
+  value: string;
+  isEncrypted: boolean;
   updatedAt: string;
-  [key: string]: unknown; // Index signature for Row compatibility
 }
 
 /**
  * Options for constructing a SettingsService.
  */
 export interface SettingsServiceOptions {
-  db: DatabaseService;
-  /** Optional encryption service for encrypted settings (future use) */
+  surrealFactory: SurrealConnectionFactory;
   encryptionService?: IEncryptionService;
+  namespace?: string;  // Default "system"
+  database?: string;   // Default "system"
 }
 
+const tableName = "setting";
+
 /**
- * Service for managing application settings stored in the database.
+ * Service for managing application settings stored in SurrealDB.
  *
- * Settings can be global (userId is NULL) or user-specific.
+ * Settings are global only - user-specific settings have been temporarily removed.
  * Values are stored as strings and parsed by consumers as needed.
  *
  * Supports optional encryption for sensitive settings (via isEncrypted flag).
+ * Uses RecordID-based direct access for O(1) lookups.
+ *
+ * Write operations are mutex-protected to prevent SurrealDB transaction conflicts
+ * when multiple concurrent writes target the same setting.
  */
 export class SettingsService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly encryptionService?: IEncryptionService;
+  private readonly namespace: string;
+  private readonly database: string;
+  private readonly writeMutex = new Mutex();
 
   constructor(options: SettingsServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.encryptionService = options.encryptionService;
+    this.namespace = options.namespace ?? "system";
+    this.database = options.database ?? "system";
   }
 
   // ============== Read Operations ==============
@@ -49,48 +60,42 @@ export class SettingsService {
    * @param name - The setting name
    * @returns The setting value, or null if not found
    */
-  async getGlobalSetting(name: SettingName): Promise<string | null> {
-    const row = await this.db.queryOne<SettingRow>(
-      `SELECT * FROM settings WHERE name = ? AND userId IS NULL`,
-      [name]
-    );
+  async getGlobalSetting(name: SettingName): Promise<string | undefined> {
+    const db = await this.surrealFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
+    });
 
-    if (!row) return null;
+    try {
+      const settingId = new RecordId("setting", name);
+      const result = await db.query<[Setting | undefined]>(
+        `RETURN $settingId.*`,
+        { settingId: settingId }
+      );
 
-    // Handle encrypted values
-    if (row.isEncrypted && this.encryptionService && row.value) {
-      return await this.encryptionService.decrypt(row.value);
+      console.log("Get query result:", result)
+
+      const setting = result[0];
+      if (!setting) return undefined;
+
+      
+
+      // Decrypt if needed
+      if (setting.isEncrypted && this.encryptionService) {
+        return await this.encryptionService.decrypt(setting.value);
+      }
+
+      return setting.value;
+    } finally {
+      await db.close();
     }
-
-    return row.value;
-  }
-
-  /**
-   * Read a user-specific setting by name.
-   * @param name - The setting name
-   * @param userId - The user ID
-   * @returns The setting value, or null if not found
-   */
-  async getUserSetting(name: SettingName, userId: string): Promise<string | null> {
-    const row = await this.db.queryOne<SettingRow>(
-      `SELECT * FROM settings WHERE name = ? AND userId = ?`,
-      [name, userId]
-    );
-
-    if (!row) return null;
-
-    // Handle encrypted values
-    if (row.isEncrypted && this.encryptionService && row.value) {
-      return await this.encryptionService.decrypt(row.value);
-    }
-
-    return row.value;
   }
 
   // ============== Write Operations ==============
 
   /**
    * Set a global setting (upsert - insert or update if exists).
+   * Mutex-protected to prevent transaction conflicts on concurrent writes.
    * @param name - The setting name
    * @param value - The value to store
    * @param encrypted - Whether to encrypt the value (default: false)
@@ -100,45 +105,66 @@ export class SettingsService {
     value: string,
     encrypted = false
   ): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
     const finalValue =
       encrypted && this.encryptionService
         ? await this.encryptionService.encrypt(value)
         : value;
 
-    await this.db.execute(
-      `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
-       VALUES (?, NULL, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (name, COALESCE(userId, ''))
-       DO UPDATE SET value = ?, isEncrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
-      [name, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
-    );
+    const db = await this.surrealFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
+    });
+
+    const settingId = new RecordId("setting", name);
+
+    try {
+      const response = await db.query(
+        `UPSERT $settingId SET
+          name = $name,
+          value = $newValue,
+          isEncrypted = $encrypted`,
+        {
+          settingId,
+          name,
+          newValue: finalValue,
+          encrypted,
+        }
+      );
+      console.log("Set query result:", response)
+    } finally {
+      await db.close();
+    }
   }
 
   /**
-   * Set a user-specific setting (upsert - insert or update if exists).
-   * @param name - The setting name
-   * @param userId - The user ID
-   * @param value - The value to store
-   * @param encrypted - Whether to encrypt the value (default: false)
+   * Set multiple global settings at once.
+   * Mutex-protected to prevent transaction conflicts.
+   * @param settings - Map of setting names to values
    */
-  async setUserSetting(
-    name: SettingName,
-    userId: string,
-    value: string,
-    encrypted = false
-  ): Promise<void> {
-    const finalValue =
-      encrypted && this.encryptionService
-        ? await this.encryptionService.encrypt(value)
-        : value;
+  async setGlobalSettingsBatch(settings: Map<SettingName, string>): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
 
-    await this.db.execute(
-      `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (name, COALESCE(userId, ''))
-       DO UPDATE SET value = ?, isEncrypted = ?, updatedAt = CURRENT_TIMESTAMP`,
-      [name, userId, finalValue, encrypted ? 1 : 0, finalValue, encrypted ? 1 : 0]
-    );
+    const db = await this.surrealFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
+    });
+
+    try {
+      for (const [name, value] of settings) {
+        const settingId = new RecordId("setting", name);
+        await db.query(
+          `UPSERT $settingId SET
+            name = $name,
+            value = $newValue,
+            isEncrypted = false`,
+          { settingId, name, newValue: value }
+        );
+      }
+    } finally {
+      await db.close();
+    }
   }
 
   // ============== Batch Read Operations ==============
@@ -148,136 +174,64 @@ export class SettingsService {
    * @returns Map of setting names to values
    */
   async getAllGlobalSettings(): Promise<Map<SettingName, string>> {
-    const rows = await this.db.queryAll<SettingRow>(
-      `SELECT * FROM settings WHERE userId IS NULL`
-    );
-
-    const result = new Map<SettingName, string>();
-    for (const row of rows) {
-      if (!row.value) continue;
-
-      // Handle encrypted values
-      const value = row.isEncrypted && this.encryptionService
-        ? await this.encryptionService.decrypt(row.value)
-        : row.value;
-
-      result.set(row.name as SettingName, value);
-    }
-
-    return result;
-  }
-
-  /**
-   * Get all user-specific settings as a Map.
-   * @param userId - The user ID
-   * @returns Map of setting names to values
-   */
-  async getAllUserSettings(userId: string): Promise<Map<SettingName, string>> {
-    const rows = await this.db.queryAll<SettingRow>(
-      `SELECT * FROM settings WHERE userId = ?`,
-      [userId]
-    );
-
-    const result = new Map<SettingName, string>();
-    for (const row of rows) {
-      if (!row.value) continue;
-
-      // Handle encrypted values
-      const value = row.isEncrypted && this.encryptionService
-        ? await this.encryptionService.decrypt(row.value)
-        : row.value;
-
-      result.set(row.name as SettingName, value);
-    }
-
-    return result;
-  }
-
-  // ============== Batch Write Operations ==============
-
-  /**
-   * Atomically set multiple global settings.
-   * All settings are updated together in a transaction.
-   * Settings are stored as plain text (not encrypted).
-   * @param settings - Map of setting names to values
-   */
-  async setGlobalSettingsBatch(
-    settings: Map<SettingName, string>
-  ): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      for (const [name, value] of settings) {
-        await tx.execute(
-          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
-           VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)
-           ON CONFLICT (name, COALESCE(userId, ''))
-           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
-          [name, value, value]
-        );
-      }
+    const db = await this.surrealFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
     });
-  }
 
-  /**
-   * Atomically set multiple user-specific settings.
-   * All settings are updated together in a transaction.
-   * Settings are stored as plain text (not encrypted).
-   * @param userId - The user ID
-   * @param settings - Map of setting names to values
-   */
-  async setUserSettingsBatch(
-    userId: string,
-    settings: Map<SettingName, string>
-  ): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      for (const [name, value] of settings) {
-        await tx.execute(
-          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
-           VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
-           ON CONFLICT (name, COALESCE(userId, ''))
-           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
-          [name, userId, value, value]
-        );
+    try {
+      // Table scan - acceptable for settings UI (low frequency)
+      const result = await db.query<[Setting[]]>("SELECT * FROM setting");
+      const settings = result?.[0] ?? [];
+      const resultMap = new Map<SettingName, string>();
+
+      for (const setting of settings) {
+        if (!setting.value) continue;
+
+        // Decrypt if needed
+        const value = setting.isEncrypted && this.encryptionService
+          ? await this.encryptionService.decrypt(setting.value)
+          : setting.value;
+
+        resultMap.set(setting.name as SettingName, value);
       }
-    });
+
+      return resultMap;
+    } finally {
+      await db.close();
+    }
   }
 
   // ============== Reset Operations ==============
 
   /**
    * Reset global settings to their default values.
-   * All settings are reset together in a transaction.
+   * Mutex-protected to prevent transaction conflicts.
    * @param names - Array of setting names to reset
    */
   async resetGlobalSettings(names: SettingName[]): Promise<void> {
-    await this.db.transaction(async (tx) => {
-      for (const name of names) {
-        const defaultValue = GlobalSettingDefaults[name];
-        await tx.execute(
-          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
-           VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)
-           ON CONFLICT (name, COALESCE(userId, ''))
-           DO UPDATE SET value = ?, isEncrypted = 0, updatedAt = CURRENT_TIMESTAMP`,
-          [name, defaultValue, defaultValue]
-        );
-      }
-    });
-  }
+    using _lock = await this.writeMutex.acquire();
 
-  /**
-   * Reset user-specific settings by deleting them from the database.
-   * All settings are deleted together in a transaction.
-   * @param userId - The user ID
-   * @param names - Array of setting names to reset
-   */
-  async resetUserSettings(userId: string, names: SettingName[]): Promise<void> {
-    await this.db.transaction(async (tx) => {
+    const db = await this.surrealFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
+    });
+
+    try {
       for (const name of names) {
-        await tx.execute(
-          `DELETE FROM settings WHERE name = ? AND userId = ?`,
-          [name, userId]
+        const settingId = new RecordId("setting", name);
+        const defaultValue = GlobalSettingDefaults[name];
+        await db.query(
+          `UPSERT $settingId SET
+            name = $name,
+            value = $newValue,
+            isEncrypted = false`,
+          { settingId, name, newValue: defaultValue }
         );
       }
-    });
+    } finally {
+      await db.close();
+    }
   }
 
   // ============== Bootstrap Operations ==============
@@ -285,31 +239,34 @@ export class SettingsService {
   /**
    * Create all global settings with default values if they don't exist.
    * Called during application startup to ensure all settings are present.
+   * Idempotent - won't overwrite existing values.
+   * Mutex-protected to prevent transaction conflicts.
    */
   async bootstrapGlobalSettings(): Promise<void> {
-    for (const [name, defaultValue] of Object.entries(GlobalSettingDefaults)) {
-      const existing = await this.db.queryOne<{ id: number }>(
-        `SELECT id FROM settings WHERE name = ? AND userId IS NULL`,
-        [name]
-      );
+    using _lock = await this.writeMutex.acquire();
 
-      if (!existing) {
-        await this.db.execute(
-          `INSERT INTO settings (name, userId, value, isEncrypted, updatedAt)
-           VALUES (?, NULL, ?, 0, CURRENT_TIMESTAMP)`,
-          [name, defaultValue]
+    const db = await this.surrealFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
+    });
+
+    try {
+      for (const [name, defaultValue] of Object.entries(GlobalSettingDefaults)) {
+        const settingId = new RecordId("setting", name);
+
+        // INSERT IGNORE skips if record already exists, preserving existing values
+        await db.query(
+          `INSERT IGNORE INTO setting {
+            id: $settingId,
+            name: $name,
+            value: $newValue,
+            isEncrypted: false
+          }`,
+          { settingId, name, newValue: defaultValue }
         );
       }
+    } finally {
+      await db.close();
     }
-  }
-
-  /**
-   * Bootstrap user-specific settings for a given user.
-   * Currently a no-op as no user settings are defined yet.
-   * @param _userId - The user ID (unused for now)
-   */
-  bootstrapUserSettings(_userId: string): Promise<void> {
-    // No user-specific settings defined yet
-    return Promise.resolve();
   }
 }
