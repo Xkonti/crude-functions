@@ -45,7 +45,6 @@ ENV FUNCTION_PORT=8000
 ENV MANAGEMENT_PORT=9000
 
 # SurrealDB configuration - internal port, not exposed
-ENV SURREAL_ENABLED=true
 ENV SURREAL_PORT=5173
 ENV SURREAL_STORAGE=./data/surreal
 ENV SURREAL_BINARY=/surreal

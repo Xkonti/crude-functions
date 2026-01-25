@@ -150,9 +150,7 @@ if (migrationResult.appliedCount > 0) {
 
 // Initialize SurrealDB with supervisor for process lifecycle management
 // Runs alongside SQLite - does not replace it
-// Controlled by SURREAL_ENABLED environment variable (default: true)
 
-const surrealEnabled = Deno.env.get("SURREAL_ENABLED") !== "false";
 const surrealPort = parseEnvInt("SURREAL_PORT", 5173, { min: 1, max: 65535 });
 const surrealUser = Deno.env.get("SURREAL_USER") || "root";
 const surrealPass = Deno.env.get("SURREAL_PASS") || "root";
@@ -189,39 +187,37 @@ const surrealSupervisor = new SurrealSupervisor({
   restartCooldownMs: 5000,
 });
 
-if (surrealEnabled) {
-  try {
-    // Start supervisor (starts process, connects DB, starts monitoring)
-    await surrealSupervisor.start();
-    console.log("✓ SurrealDB supervisor started");
+try {
+  // Start supervisor (starts process, connects DB, starts monitoring)
+  await surrealSupervisor.start();
+  console.log("✓ SurrealDB supervisor started");
 
-    // Register status change listener for logging
-    surrealSupervisor.onStatusChange((event) => {
-      if (event.status !== event.previousStatus) {
-        console.log(`[SurrealDB] Health: ${event.previousStatus} -> ${event.status}`);
-        if (event.lastError) {
-          console.error(`[SurrealDB] Error: ${event.lastError.message}`);
-        }
+  // Register status change listener for logging
+  surrealSupervisor.onStatusChange((event) => {
+    if (event.status !== event.previousStatus) {
+      console.log(`[SurrealDB] Health: ${event.previousStatus} -> ${event.status}`);
+      if (event.lastError) {
+        console.error(`[SurrealDB] Error: ${event.lastError.message}`);
       }
-    });
-
-    // Run SurrealDB migrations
-    const surrealMigrationService = new SurrealMigrationService({
-      connectionFactory: surrealFactory,
-      migrationsDir: "./migrations",
-    });
-    const surrealMigrationResult = await surrealMigrationService.migrate();
-    if (surrealMigrationResult.appliedCount > 0) {
-      console.log(
-        `Applied ${surrealMigrationResult.appliedCount} SurrealDB migration(s): ` +
-        `version ${surrealMigrationResult.fromVersion ?? "none"} → ${surrealMigrationResult.toVersion}`
-      );
     }
-  } catch (error) {
-    console.warn("⚠ SurrealDB initialization failed (non-fatal):", error);
-    // Supervisor handles its own cleanup
-    // Don't throw - SurrealDB is experimental and optional
+  });
+
+  // Run SurrealDB migrations
+  const surrealMigrationService = new SurrealMigrationService({
+    connectionFactory: surrealFactory,
+    migrationsDir: "./migrations",
+  });
+  const surrealMigrationResult = await surrealMigrationService.migrate();
+  if (surrealMigrationResult.appliedCount > 0) {
+    console.log(
+      `Applied ${surrealMigrationResult.appliedCount} SurrealDB migration(s): ` +
+      `version ${surrealMigrationResult.fromVersion ?? "none"} → ${surrealMigrationResult.toVersion}`
+    );
   }
+} catch (error) {
+  console.warn("⚠ SurrealDB initialization failed (non-fatal):", error);
+  // Supervisor handles its own cleanup
+  // Don't throw - SurrealDB is experimental and optional
 }
 
 // ============================================================================
