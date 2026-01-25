@@ -72,11 +72,13 @@ function mapOperator(operator: string, field: string, paramName: string): string
  *
  * @param where - Array of where clause items from Better Auth
  * @param params - Object to populate with parameter values
+ * @param tableName - Table name for converting id fields to RecordId
  * @returns SurrealQL WHERE clause string (without "WHERE" keyword)
  */
 function buildWhereClause(
   where: WhereClauseItem[],
-  params: Record<string, unknown>
+  params: Record<string, unknown>,
+  tableName: string
 ): string {
   if (!where || where.length === 0) {
     return "";
@@ -88,9 +90,13 @@ function buildWhereClause(
     const item = where[i];
     const paramName = `w${i}`;
 
-    // Convert userId string to RecordId if this is a foreign key field
+    // Convert id and userId strings to RecordId
     let value = item.value;
-    if (item.field === "userId" && typeof value === "string") {
+    if (item.field === "id" && typeof value === "string") {
+      // id field - use the current table
+      value = new RecordId(tableName, value);
+    } else if (item.field === "userId" && typeof value === "string") {
+      // userId foreign key - always references user table
       value = new RecordId("user", value);
     }
 
@@ -255,7 +261,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<T | null> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = buildWhereClause(where, params);
+          const whereClause = buildWhereClause(where, params, tableName);
 
           return await surrealFactory.withSystemConnection({}, async (db) => {
             const query = whereClause
@@ -290,7 +296,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<T[]> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = where ? buildWhereClause(where, params) : "";
+          const whereClause = where ? buildWhereClause(where, params, tableName) : "";
 
           return await surrealFactory.withSystemConnection({}, async (db) => {
             let query = `SELECT * FROM type::table($table)`;
@@ -335,7 +341,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<T | null> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = buildWhereClause(where, params);
+          const whereClause = buildWhereClause(where, params, tableName);
 
           // Prepare update data (convert userId if needed, remove id)
           const { content: preparedUpdateData } = prepareDataForSurreal(
@@ -373,7 +379,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<number> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = buildWhereClause(where, params);
+          const whereClause = buildWhereClause(where, params, tableName);
 
           const { content: preparedUpdateData } = prepareDataForSurreal(updateData);
           params.updateData = preparedUpdateData;
@@ -402,7 +408,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<void> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = buildWhereClause(where, params);
+          const whereClause = buildWhereClause(where, params, tableName);
 
           await surrealFactory.withSystemConnection({}, async (db) => {
             // For user deletes, cascade to session and account
@@ -441,7 +447,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<number> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = buildWhereClause(where, params);
+          const whereClause = buildWhereClause(where, params, tableName);
 
           return await surrealFactory.withSystemConnection({}, async (db) => {
             // For user deletes, cascade to sessions and accounts
@@ -484,7 +490,7 @@ export const surrealAdapter = (config: SurrealAdapterConfig) =>
         }): Promise<number> => {
           const tableName = getModelName(model);
           const params: Record<string, unknown> = { table: tableName };
-          const whereClause = where ? buildWhereClause(where, params) : "";
+          const whereClause = where ? buildWhereClause(where, params, tableName) : "";
 
           return await surrealFactory.withSystemConnection({}, async (db) => {
             const query = whereClause
