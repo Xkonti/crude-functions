@@ -160,6 +160,9 @@ import {
  */
 export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext> {
   private migrationsDir = "./migrations";
+  private runSQLiteMigrations = true;
+  private runSurrealMigrations = true;
+  private baseOnly = false; // When true, skip all services (just base context)
 
   // Service flags - tracks which services to include
   private flags: ServiceFlags = createDefaultFlags();
@@ -190,6 +193,68 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
    */
   withMigrationsDir(dir: string): this {
     this.migrationsDir = dir;
+    return this;
+  }
+
+  /**
+   * Skip SurrealDB migrations during setup.
+   *
+   * Use this for tests that need to test migration logic itself,
+   * or tests that don't use SurrealDB features at all.
+   *
+   * @example
+   * ```typescript
+   * // For migration tests that manage their own migrations
+   * const ctx = await TestSetupBuilder.create()
+   *   .withMigrationsDir(tempMigrationsDir)
+   *   .withoutSurrealMigrations()
+   *   .build();
+   * ```
+   */
+  withoutSurrealMigrations(): this {
+    this.runSurrealMigrations = false;
+    return this;
+  }
+
+  /**
+   * Skip SQLite migrations during setup.
+   *
+   * Use this when testing with a custom migrations directory that has files
+   * SQLite might try to run (e.g., when testing that SurrealQL ignores .sql files).
+   *
+   * @example
+   * ```typescript
+   * const ctx = await TestSetupBuilder.create()
+   *   .withMigrationsDir(tempMigrationsDir)
+   *   .withoutSQLiteMigrations()
+   *   .withoutSurrealMigrations()
+   *   .withBaseOnly()
+   *   .build();
+   * ```
+   */
+  withoutSQLiteMigrations(): this {
+    this.runSQLiteMigrations = false;
+    return this;
+  }
+
+  /**
+   * Request only the base context (no services).
+   *
+   * This prevents the backward compatibility logic from enabling all services.
+   * Use this when testing infrastructure components that don't need any services.
+   *
+   * @example
+   * ```typescript
+   * // For migration tests or low-level infrastructure tests
+   * const ctx = await TestSetupBuilder.create()
+   *   .withMigrationsDir(tempMigrationsDir)
+   *   .withoutSurrealMigrations()
+   *   .withBaseOnly()
+   *   .build();
+   * ```
+   */
+  withBaseOnly(): this {
+    this.baseOnly = true;
     return this;
   }
 
@@ -474,6 +539,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   /**
    * Include all services.
    * This is the default behavior for backward compatibility.
+   * SurrealDB is always included as part of the base infrastructure.
    */
   withAll(): TestSetupBuilder<FullTestContext> {
     enableAllServices(this.flags);
@@ -641,14 +707,25 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
    */
   async build(): Promise<TContext> {
     // Backward compatibility: if no flags are set, enable all services
-    if (!hasAnyServiceEnabled(this.flags)) {
+    // (unless baseOnly is set, which means user explicitly wants no services)
+    if (!this.baseOnly && !hasAnyServiceEnabled(this.flags)) {
       enableAllServices(this.flags);
     }
 
     // STEP 1: Create core infrastructure (always needed)
-    const { tempDir, codeDir, databasePath, db } = await createCoreInfrastructure(
-      this.migrationsDir
-    );
+    // This includes SQLite database, shared SurrealDB connection, and migrations
+    const {
+      tempDir,
+      codeDir,
+      databasePath,
+      db,
+      surrealTestContext,
+      surrealDb,
+      surrealFactory,
+    } = await createCoreInfrastructure(this.migrationsDir, {
+      runSQLiteMigrations: this.runSQLiteMigrations,
+      runSurrealMigrations: this.runSurrealMigrations,
+    });
 
     // Build context incrementally
     // deno-lint-ignore no-explicit-any
@@ -657,6 +734,10 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       codeDir,
       databasePath,
       db,
+      surrealDb,
+      surrealFactory,
+      surrealNamespace: surrealTestContext.namespace,
+      surrealDatabase: surrealTestContext.database,
       cleanup: async () => {}, // Placeholder, will be replaced
     };
 
@@ -690,8 +771,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 3: Create settings service if needed
+    // Uses factory's default namespace/database (set by SharedSurrealManager)
     if (this.flags.settingsService || this.flags.consoleLogService) {
-      context.settingsService = await createSettingsService(db, context.encryptionService);
+      context.settingsService = await createSettingsService(
+        context.encryptionService,
+        surrealFactory,
+      );
 
       // Apply deferred settings
       for (const { name, value } of this.deferredSettings) {
@@ -884,6 +969,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     context.cleanup = createCleanupFunction(
       db,
       tempDir,
+      surrealTestContext,
       this.flags.consoleLogService ? context.consoleLogService : undefined
     );
 

@@ -27,7 +27,9 @@
  * ```
  */
 
+import type { Surreal } from "surrealdb";
 import type { DatabaseService } from "../database/database_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import type { HashService } from "../encryption/hash_service.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
@@ -55,6 +57,10 @@ import type { SettingName } from "../settings/types.ts";
 /**
  * Base test context that is always present.
  * Contains core infrastructure needed by all tests.
+ *
+ * SurrealDB is shared across all tests - each test gets a unique namespace
+ * for isolation. The process is managed by SharedSurrealManager and stays
+ * running for the duration of the test suite.
  */
 export interface BaseTestContext {
   /** Temp directory for test isolation (contains db, keys, code) */
@@ -63,11 +69,20 @@ export interface BaseTestContext {
   codeDir: string;
   /** Database path */
   databasePath: string;
-  /** Database service instance */
+  /** SQLite database service instance */
   db: DatabaseService;
+  /** Raw Surreal SDK connection (connected to isolated namespace) */
+  surrealDb: Surreal;
+  /** SurrealDB connection factory for this test's namespace */
+  surrealFactory: SurrealConnectionFactory;
+  /** SurrealDB namespace for this test (unique per test for isolation) */
+  surrealNamespace: string;
+  /** SurrealDB database name (same as namespace) */
+  surrealDatabase: string;
   /**
    * Cleanup function to tear down all resources.
    * Call this in a finally block after tests complete.
+   * Removes the SurrealDB namespace (shared process stays running).
    */
   cleanup: () => Promise<void>;
 }
@@ -208,6 +223,7 @@ export interface CodeSourcesContext extends SchedulingContext, EncryptionContext
   codeSourceService: CodeSourceService;
 }
 
+
 // =============================================================================
 // Full Context (All Services)
 // =============================================================================
@@ -215,6 +231,7 @@ export interface CodeSourcesContext extends SchedulingContext, EncryptionContext
 /**
  * Complete test context with all services.
  * This is the intersection of all individual contexts.
+ * SurrealDB is included in BaseTestContext and always available.
  */
 export type FullTestContext = BaseTestContext &
   EncryptionContext &

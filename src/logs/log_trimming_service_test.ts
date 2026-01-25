@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { LogTrimmingService } from "./log_trimming_service.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
@@ -47,7 +48,7 @@ async function cleanup(setup: {
 // Time-based retention tests
 // =====================
 
-Deno.test("LogTrimmingService deletes logs older than retention period", async () => {
+integrationTest("LogTrimmingService deletes logs older than retention period", async () => {
   const setup = await createTestSetup({ retentionSeconds: 3600 }); // 1 hour retention
 
   try {
@@ -86,7 +87,7 @@ Deno.test("LogTrimmingService deletes logs older than retention period", async (
   }
 });
 
-Deno.test("LogTrimmingService skips time-based deletion when retentionSeconds is 0", async () => {
+integrationTest("LogTrimmingService skips time-based deletion when retentionSeconds is 0", async () => {
   const setup = await createTestSetup({ retentionSeconds: 0 }); // Disabled
 
   try {
@@ -117,7 +118,7 @@ Deno.test("LogTrimmingService skips time-based deletion when retentionSeconds is
 // Count-based trimming tests
 // =====================
 
-Deno.test("LogTrimmingService trims logs exceeding max per route", async () => {
+integrationTest("LogTrimmingService trims logs exceeding max per route", async () => {
   const setup = await createTestSetup({ maxLogsPerRoute: 5 }); // Max 5 logs per route
 
   try {
@@ -148,7 +149,7 @@ Deno.test("LogTrimmingService trims logs exceeding max per route", async () => {
   }
 });
 
-Deno.test("LogTrimmingService processes multiple routes independently", async () => {
+integrationTest("LogTrimmingService processes multiple routes independently", async () => {
   const setup = await createTestSetup({ maxLogsPerRoute: 3 });
 
   try {
@@ -193,7 +194,7 @@ Deno.test("LogTrimmingService processes multiple routes independently", async ()
 // Combined behavior tests
 // =====================
 
-Deno.test("LogTrimmingService applies time-based deletion before count-based trimming", async () => {
+integrationTest("LogTrimmingService applies time-based deletion before count-based trimming", async () => {
   const setup = await createTestSetup({ retentionSeconds: 3600, maxLogsPerRoute: 5 }); // 1 hour, max 5
 
   try {
@@ -239,7 +240,7 @@ Deno.test("LogTrimmingService applies time-based deletion before count-based tri
 // Execution tests
 // =====================
 
-Deno.test("LogTrimmingService can be called multiple times", async () => {
+integrationTest("LogTrimmingService can be called multiple times", async () => {
   const setup = await createTestSetup({ maxLogsPerRoute: 5 });
 
   try {
@@ -270,7 +271,7 @@ Deno.test("LogTrimmingService can be called multiple times", async () => {
   }
 });
 
-Deno.test("LogTrimmingService does nothing when no logs exist", async () => {
+integrationTest("LogTrimmingService does nothing when no logs exist", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -293,7 +294,7 @@ Deno.test("LogTrimmingService does nothing when no logs exist", async () => {
 // getDistinctRouteIds tests
 // =====================
 
-Deno.test("LogTrimmingService handles logs with null routeId", async () => {
+integrationTest("LogTrimmingService handles logs with null routeId", async () => {
   const setup = await createTestSetup({ maxLogsPerRoute: 5 });
 
   try {

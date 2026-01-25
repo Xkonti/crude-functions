@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { createApiKeyGroupRoutes, createApiKeyRoutes } from "./api_key_routes.ts";
@@ -19,7 +20,7 @@ function createTestApp(ctx: BaseTestContext & ApiKeysContext): Hono {
 // =====================
 
 // GET /api/key-groups tests
-Deno.test("GET /api/key-groups returns management group by default", async () => {
+integrationTest("GET /api/key-groups returns management group by default", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -37,7 +38,7 @@ Deno.test("GET /api/key-groups returns management group by default", async () =>
   }
 });
 
-Deno.test("GET /api/key-groups returns all groups", async () => {
+integrationTest("GET /api/key-groups returns all groups", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email", "Email keys")
     .withApiKeyGroup("webhook", "Webhook keys")
@@ -61,7 +62,7 @@ Deno.test("GET /api/key-groups returns all groups", async () => {
 });
 
 // POST /api/key-groups tests
-Deno.test("POST /api/key-groups creates new group", async () => {
+integrationTest("POST /api/key-groups creates new group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -88,7 +89,7 @@ Deno.test("POST /api/key-groups creates new group", async () => {
   }
 });
 
-Deno.test("POST /api/key-groups rejects duplicate group", async () => {
+integrationTest("POST /api/key-groups rejects duplicate group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email", "First")
     .build();
@@ -107,7 +108,7 @@ Deno.test("POST /api/key-groups rejects duplicate group", async () => {
   }
 });
 
-Deno.test("POST /api/key-groups rejects invalid group name", async () => {
+integrationTest("POST /api/key-groups rejects invalid group name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -129,7 +130,7 @@ Deno.test("POST /api/key-groups rejects invalid group name", async () => {
   }
 });
 
-Deno.test("POST /api/key-groups rejects missing name", async () => {
+integrationTest("POST /api/key-groups rejects missing name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -152,7 +153,7 @@ Deno.test("POST /api/key-groups rejects missing name", async () => {
 });
 
 // GET /api/key-groups/:groupId tests
-Deno.test("GET /api/key-groups/:groupId returns group by ID", async () => {
+integrationTest("GET /api/key-groups/:groupId returns group by ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email", "Email keys")
     .build();
@@ -173,7 +174,7 @@ Deno.test("GET /api/key-groups/:groupId returns group by ID", async () => {
   }
 });
 
-Deno.test("GET /api/key-groups/:groupId returns 404 for nonexistent", async () => {
+integrationTest("GET /api/key-groups/:groupId returns 404 for nonexistent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -187,7 +188,7 @@ Deno.test("GET /api/key-groups/:groupId returns 404 for nonexistent", async () =
   }
 });
 
-Deno.test("GET /api/key-groups/:groupId returns 400 for invalid ID", async () => {
+integrationTest("GET /api/key-groups/:groupId returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -202,7 +203,7 @@ Deno.test("GET /api/key-groups/:groupId returns 400 for invalid ID", async () =>
 });
 
 // PUT /api/key-groups/:groupId tests
-Deno.test("PUT /api/key-groups/:groupId updates group description", async () => {
+integrationTest("PUT /api/key-groups/:groupId updates group description", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email", "Old desc")
     .build();
@@ -226,7 +227,7 @@ Deno.test("PUT /api/key-groups/:groupId updates group description", async () => 
   }
 });
 
-Deno.test("PUT /api/key-groups/:groupId returns 404 for nonexistent", async () => {
+integrationTest("PUT /api/key-groups/:groupId returns 404 for nonexistent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -246,7 +247,7 @@ Deno.test("PUT /api/key-groups/:groupId returns 404 for nonexistent", async () =
 });
 
 // DELETE /api/key-groups/:groupId tests
-Deno.test("DELETE /api/key-groups/:groupId deletes empty group", async () => {
+integrationTest("DELETE /api/key-groups/:groupId deletes empty group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email", "Email keys")
     .build();
@@ -268,7 +269,7 @@ Deno.test("DELETE /api/key-groups/:groupId deletes empty group", async () => {
   }
 });
 
-Deno.test("DELETE /api/key-groups/:groupId blocks deleting management group", async () => {
+integrationTest("DELETE /api/key-groups/:groupId blocks deleting management group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -290,7 +291,7 @@ Deno.test("DELETE /api/key-groups/:groupId blocks deleting management group", as
   }
 });
 
-Deno.test("DELETE /api/key-groups/:groupId returns 409 when keys exist", async () => {
+integrationTest("DELETE /api/key-groups/:groupId returns 409 when keys exist", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key")
@@ -313,7 +314,7 @@ Deno.test("DELETE /api/key-groups/:groupId returns 409 when keys exist", async (
   }
 });
 
-Deno.test("DELETE /api/key-groups/:groupId error includes key count", async () => {
+integrationTest("DELETE /api/key-groups/:groupId error includes key count", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "key-1")
@@ -338,7 +339,7 @@ Deno.test("DELETE /api/key-groups/:groupId error includes key count", async () =
   }
 });
 
-Deno.test("DELETE /api/key-groups/:groupId works after keys deleted", async () => {
+integrationTest("DELETE /api/key-groups/:groupId works after keys deleted", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key")
@@ -371,7 +372,7 @@ Deno.test("DELETE /api/key-groups/:groupId works after keys deleted", async () =
 // =====================
 
 // GET /api/keys tests
-Deno.test("GET /api/keys returns empty array when no keys", async () => {
+integrationTest("GET /api/keys returns empty array when no keys", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -388,7 +389,7 @@ Deno.test("GET /api/keys returns empty array when no keys", async () => {
   }
 });
 
-Deno.test("GET /api/keys returns all keys", async () => {
+integrationTest("GET /api/keys returns all keys", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .withApiKeyGroup("service")
@@ -411,7 +412,7 @@ Deno.test("GET /api/keys returns all keys", async () => {
   }
 });
 
-Deno.test("GET /api/keys filters by groupId", async () => {
+integrationTest("GET /api/keys filters by groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .withApiKeyGroup("service")
@@ -438,7 +439,7 @@ Deno.test("GET /api/keys filters by groupId", async () => {
   }
 });
 
-Deno.test("GET /api/keys returns 400 for invalid groupId", async () => {
+integrationTest("GET /api/keys returns 400 for invalid groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -452,7 +453,7 @@ Deno.test("GET /api/keys returns 400 for invalid groupId", async () => {
   }
 });
 
-Deno.test("GET /api/keys returns 404 for nonexistent groupId", async () => {
+integrationTest("GET /api/keys returns 404 for nonexistent groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -467,7 +468,7 @@ Deno.test("GET /api/keys returns 404 for nonexistent groupId", async () => {
 });
 
 // POST /api/keys tests
-Deno.test("POST /api/keys creates key with groupId in body", async () => {
+integrationTest("POST /api/keys creates key with groupId in body", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .build();
@@ -496,7 +497,7 @@ Deno.test("POST /api/keys creates key with groupId in body", async () => {
   }
 });
 
-Deno.test("POST /api/keys generates value when not provided", async () => {
+integrationTest("POST /api/keys generates value when not provided", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .build();
@@ -523,7 +524,7 @@ Deno.test("POST /api/keys generates value when not provided", async () => {
   }
 });
 
-Deno.test("POST /api/keys rejects missing groupId", async () => {
+integrationTest("POST /api/keys rejects missing groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -545,7 +546,7 @@ Deno.test("POST /api/keys rejects missing groupId", async () => {
   }
 });
 
-Deno.test("POST /api/keys rejects invalid groupId", async () => {
+integrationTest("POST /api/keys rejects invalid groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -564,7 +565,7 @@ Deno.test("POST /api/keys rejects invalid groupId", async () => {
   }
 });
 
-Deno.test("POST /api/keys rejects nonexistent groupId", async () => {
+integrationTest("POST /api/keys rejects nonexistent groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -583,7 +584,7 @@ Deno.test("POST /api/keys rejects nonexistent groupId", async () => {
   }
 });
 
-Deno.test("POST /api/keys rejects missing name", async () => {
+integrationTest("POST /api/keys rejects missing name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .build();
@@ -607,7 +608,7 @@ Deno.test("POST /api/keys rejects missing name", async () => {
   }
 });
 
-Deno.test("POST /api/keys rejects invalid key name", async () => {
+integrationTest("POST /api/keys rejects invalid key name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .build();
@@ -631,7 +632,7 @@ Deno.test("POST /api/keys rejects invalid key name", async () => {
   }
 });
 
-Deno.test("POST /api/keys rejects invalid key value", async () => {
+integrationTest("POST /api/keys rejects invalid key value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .build();
@@ -655,7 +656,7 @@ Deno.test("POST /api/keys rejects invalid key value", async () => {
   }
 });
 
-Deno.test("POST /api/keys returns 409 for duplicate key name", async () => {
+integrationTest("POST /api/keys returns 409 for duplicate key name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .withApiKey("email", "existing-value", "existing-key")
@@ -681,7 +682,7 @@ Deno.test("POST /api/keys returns 409 for duplicate key name", async () => {
 });
 
 // GET /api/keys/:keyId tests
-Deno.test("GET /api/keys/:keyId returns key by ID", async () => {
+integrationTest("GET /api/keys/:keyId returns key by ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .withApiKey("email", "test-value", "test-key", "Test description")
@@ -706,7 +707,7 @@ Deno.test("GET /api/keys/:keyId returns key by ID", async () => {
   }
 });
 
-Deno.test("GET /api/keys/:keyId returns 404 for nonexistent", async () => {
+integrationTest("GET /api/keys/:keyId returns 404 for nonexistent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -720,7 +721,7 @@ Deno.test("GET /api/keys/:keyId returns 404 for nonexistent", async () => {
   }
 });
 
-Deno.test("GET /api/keys/:keyId returns 400 for invalid ID", async () => {
+integrationTest("GET /api/keys/:keyId returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -735,7 +736,7 @@ Deno.test("GET /api/keys/:keyId returns 400 for invalid ID", async () => {
 });
 
 // PUT /api/keys/:keyId tests
-Deno.test("PUT /api/keys/:keyId updates name", async () => {
+integrationTest("PUT /api/keys/:keyId updates name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "original-value", "original-name")
@@ -764,7 +765,7 @@ Deno.test("PUT /api/keys/:keyId updates name", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId updates value", async () => {
+integrationTest("PUT /api/keys/:keyId updates value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "original-value", "test-key")
@@ -791,7 +792,7 @@ Deno.test("PUT /api/keys/:keyId updates value", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId updates description", async () => {
+integrationTest("PUT /api/keys/:keyId updates description", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key", "Old description")
@@ -817,7 +818,7 @@ Deno.test("PUT /api/keys/:keyId updates description", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId returns 400 for invalid name", async () => {
+integrationTest("PUT /api/keys/:keyId returns 400 for invalid name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key")
@@ -843,7 +844,7 @@ Deno.test("PUT /api/keys/:keyId returns 400 for invalid name", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId returns 400 for invalid value", async () => {
+integrationTest("PUT /api/keys/:keyId returns 400 for invalid value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key")
@@ -869,7 +870,7 @@ Deno.test("PUT /api/keys/:keyId returns 400 for invalid value", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId returns 404 for non-existent key", async () => {
+integrationTest("PUT /api/keys/:keyId returns 404 for non-existent key", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -891,7 +892,7 @@ Deno.test("PUT /api/keys/:keyId returns 404 for non-existent key", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId returns 409 for duplicate name", async () => {
+integrationTest("PUT /api/keys/:keyId returns 409 for duplicate name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "key-one")
@@ -918,7 +919,7 @@ Deno.test("PUT /api/keys/:keyId returns 409 for duplicate name", async () => {
   }
 });
 
-Deno.test("PUT /api/keys/:keyId returns 400 for invalid ID", async () => {
+integrationTest("PUT /api/keys/:keyId returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -941,7 +942,7 @@ Deno.test("PUT /api/keys/:keyId returns 400 for invalid ID", async () => {
 });
 
 // DELETE /api/keys/:keyId tests
-Deno.test("DELETE /api/keys/:keyId removes key by ID", async () => {
+integrationTest("DELETE /api/keys/:keyId removes key by ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("email")
     .withApiKey("email", "key1-value", "key-1")
@@ -970,7 +971,7 @@ Deno.test("DELETE /api/keys/:keyId removes key by ID", async () => {
   }
 });
 
-Deno.test("DELETE /api/keys/:keyId returns 404 for non-existent key", async () => {
+integrationTest("DELETE /api/keys/:keyId returns 404 for non-existent key", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
@@ -987,7 +988,7 @@ Deno.test("DELETE /api/keys/:keyId returns 404 for non-existent key", async () =
   }
 });
 
-Deno.test("DELETE /api/keys/:keyId returns 400 for invalid ID", async () => {
+integrationTest("DELETE /api/keys/:keyId returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();

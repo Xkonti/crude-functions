@@ -8,6 +8,8 @@
 
 /**
  * All available service keys that can be selectively included.
+ * Note: SurrealDB is not a toggleable service - it's always included
+ * as part of the base test infrastructure.
  */
 export type ServiceKey =
   | "executionMetricsService"
@@ -31,6 +33,7 @@ export type ServiceKey =
  * Service flags interface - tracks which services to include.
  * All flags default to false. When a flag is true, the service
  * will be initialized during build().
+ * Note: SurrealDB is not a flag - it's always included as base infrastructure.
  */
 export interface ServiceFlags {
   executionMetricsService: boolean;

@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
@@ -86,7 +87,7 @@ async function insertMetric(
 
 // Basic Queries
 
-Deno.test("GET /api/metrics returns empty array when no metrics exist", async () => {
+integrationTest("GET /api/metrics returns empty array when no metrics exist", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/?resolution=minutes");
@@ -105,7 +106,7 @@ Deno.test("GET /api/metrics returns empty array when no metrics exist", async ()
   }
 });
 
-Deno.test("GET /api/metrics returns metrics for specific function", async () => {
+integrationTest("GET /api/metrics returns metrics for specific function", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -138,7 +139,7 @@ Deno.test("GET /api/metrics returns metrics for specific function", async () => 
   }
 });
 
-Deno.test("GET /api/metrics returns global metrics when functionId omitted", async () => {
+integrationTest("GET /api/metrics returns global metrics when functionId omitted", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -168,7 +169,7 @@ Deno.test("GET /api/metrics returns global metrics when functionId omitted", asy
   }
 });
 
-Deno.test("GET /api/metrics filters by resolution (minutes/hours/days)", async () => {
+integrationTest("GET /api/metrics filters by resolution (minutes/hours/days)", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -215,7 +216,7 @@ Deno.test("GET /api/metrics filters by resolution (minutes/hours/days)", async (
   }
 });
 
-Deno.test("GET /api/metrics returns metrics ordered by timestamp ASC", async () => {
+integrationTest("GET /api/metrics returns metrics ordered by timestamp ASC", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -272,7 +273,7 @@ Deno.test("GET /api/metrics returns metrics ordered by timestamp ASC", async () 
 
 // Validation Tests
 
-Deno.test("GET /api/metrics returns 400 for missing resolution parameter", async () => {
+integrationTest("GET /api/metrics returns 400 for missing resolution parameter", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/");
@@ -285,7 +286,7 @@ Deno.test("GET /api/metrics returns 400 for missing resolution parameter", async
   }
 });
 
-Deno.test("GET /api/metrics returns 400 for invalid resolution value", async () => {
+integrationTest("GET /api/metrics returns 400 for invalid resolution value", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/?resolution=invalid");
@@ -298,7 +299,7 @@ Deno.test("GET /api/metrics returns 400 for invalid resolution value", async () 
   }
 });
 
-Deno.test("GET /api/metrics returns 400 for invalid functionId format", async () => {
+integrationTest("GET /api/metrics returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/?resolution=minutes&functionId=abc");
@@ -311,7 +312,7 @@ Deno.test("GET /api/metrics returns 400 for invalid functionId format", async ()
   }
 });
 
-Deno.test("GET /api/metrics returns 404 for non-existent functionId", async () => {
+integrationTest("GET /api/metrics returns 404 for non-existent functionId", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/?resolution=minutes&functionId=999999");
@@ -326,7 +327,7 @@ Deno.test("GET /api/metrics returns 404 for non-existent functionId", async () =
 
 // Summary Calculation Tests
 
-Deno.test("GET /api/metrics summary totalExecutions sums all execution counts", async () => {
+integrationTest("GET /api/metrics summary totalExecutions sums all execution counts", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -369,7 +370,7 @@ Deno.test("GET /api/metrics summary totalExecutions sums all execution counts", 
   }
 });
 
-Deno.test("GET /api/metrics summary avgExecutionTime is weighted average", async () => {
+integrationTest("GET /api/metrics summary avgExecutionTime is weighted average", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -405,7 +406,7 @@ Deno.test("GET /api/metrics summary avgExecutionTime is weighted average", async
   }
 });
 
-Deno.test("GET /api/metrics summary maxExecutionTime is maximum of all max values", async () => {
+integrationTest("GET /api/metrics summary maxExecutionTime is maximum of all max values", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -448,7 +449,7 @@ Deno.test("GET /api/metrics summary maxExecutionTime is maximum of all max value
   }
 });
 
-Deno.test("GET /api/metrics summary periodCount matches number of metric records", async () => {
+integrationTest("GET /api/metrics summary periodCount matches number of metric records", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -474,7 +475,7 @@ Deno.test("GET /api/metrics summary periodCount matches number of metric records
   }
 });
 
-Deno.test("GET /api/metrics summary handles empty metrics correctly", async () => {
+integrationTest("GET /api/metrics summary handles empty metrics correctly", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/?resolution=minutes");
@@ -492,7 +493,7 @@ Deno.test("GET /api/metrics summary handles empty metrics correctly", async () =
 
 // Edge Cases
 
-Deno.test("GET /api/metrics handles metrics with identical timestamps", async () => {
+integrationTest("GET /api/metrics handles metrics with identical timestamps", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -532,7 +533,7 @@ Deno.test("GET /api/metrics handles metrics with identical timestamps", async ()
   }
 });
 
-Deno.test("GET /api/metrics returns all available metrics regardless of count", async () => {
+integrationTest("GET /api/metrics returns all available metrics regardless of count", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -560,7 +561,7 @@ Deno.test("GET /api/metrics returns all available metrics regardless of count", 
 
 // Response Format Tests
 
-Deno.test("GET /api/metrics success response has correct data wrapper structure", async () => {
+integrationTest("GET /api/metrics success response has correct data wrapper structure", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/?resolution=minutes");
@@ -577,7 +578,7 @@ Deno.test("GET /api/metrics success response has correct data wrapper structure"
   }
 });
 
-Deno.test("GET /api/metrics metrics objects have all required fields", async () => {
+integrationTest("GET /api/metrics metrics objects have all required fields", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();
@@ -604,7 +605,7 @@ Deno.test("GET /api/metrics metrics objects have all required fields", async () 
   }
 });
 
-Deno.test("GET /api/metrics timestamps are in ISO 8601 format", async () => {
+integrationTest("GET /api/metrics timestamps are in ISO 8601 format", async () => {
   const ctx = await createTestContext();
   try {
     const now = new Date();

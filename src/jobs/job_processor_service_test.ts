@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { JobProcessorService } from "./job_processor_service.ts";
@@ -8,7 +9,7 @@ import type { CancellationToken } from "./types.ts";
 // Handler Registration
 // =============================================================================
 
-Deno.test("JobProcessorService.registerHandler registers handler", async () => {
+integrationTest("JobProcessorService.registerHandler registers handler", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -28,7 +29,7 @@ Deno.test("JobProcessorService.registerHandler registers handler", async () => {
   }
 });
 
-Deno.test("JobProcessorService.unregisterHandler removes handler", async () => {
+integrationTest("JobProcessorService.unregisterHandler removes handler", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -53,7 +54,7 @@ Deno.test("JobProcessorService.unregisterHandler removes handler", async () => {
   }
 });
 
-Deno.test("JobProcessorService.getStatus returns registered handlers", async () => {
+integrationTest("JobProcessorService.getStatus returns registered handlers", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -82,7 +83,7 @@ Deno.test("JobProcessorService.getStatus returns registered handlers", async () 
 // processOne() - Single Job Processing
 // =============================================================================
 
-Deno.test("JobProcessorService.processOne processes pending job", async () => {
+integrationTest("JobProcessorService.processOne processes pending job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -120,7 +121,7 @@ Deno.test("JobProcessorService.processOne processes pending job", async () => {
   }
 });
 
-Deno.test("JobProcessorService.processOne returns null when queue is empty", async () => {
+integrationTest("JobProcessorService.processOne returns null when queue is empty", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -140,7 +141,7 @@ Deno.test("JobProcessorService.processOne returns null when queue is empty", asy
   }
 });
 
-Deno.test("JobProcessorService.processOne marks job failed when handler throws", async () => {
+integrationTest("JobProcessorService.processOne marks job failed when handler throws", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -174,7 +175,7 @@ Deno.test("JobProcessorService.processOne marks job failed when handler throws",
   }
 });
 
-Deno.test("JobProcessorService.processOne fails job when no handler registered", async () => {
+integrationTest("JobProcessorService.processOne fails job when no handler registered", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -204,7 +205,7 @@ Deno.test("JobProcessorService.processOne fails job when no handler registered",
   }
 });
 
-Deno.test("JobProcessorService.processOne processes highest priority job first", async () => {
+integrationTest("JobProcessorService.processOne processes highest priority job first", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -247,7 +248,7 @@ Deno.test("JobProcessorService.processOne processes highest priority job first",
 // Lifecycle (start/stop)
 // =============================================================================
 
-Deno.test("JobProcessorService.start and stop lifecycle", async () => {
+integrationTest("JobProcessorService.start and stop lifecycle", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -274,7 +275,7 @@ Deno.test("JobProcessorService.start and stop lifecycle", async () => {
   }
 });
 
-Deno.test("JobProcessorService.start processes pending jobs", async () => {
+integrationTest("JobProcessorService.start processes pending jobs", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -309,7 +310,7 @@ Deno.test("JobProcessorService.start processes pending jobs", async () => {
   }
 });
 
-Deno.test("JobProcessorService warns when start called twice", async () => {
+integrationTest("JobProcessorService warns when start called twice", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -334,7 +335,7 @@ Deno.test("JobProcessorService warns when start called twice", async () => {
 // Orphan Recovery
 // =============================================================================
 
-Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
+integrationTest("JobProcessorService recovers orphaned jobs on startup", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -378,7 +379,7 @@ Deno.test("JobProcessorService recovers orphaned jobs on startup", async () => {
   }
 });
 
-Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async () => {
+integrationTest("JobProcessorService marks exhausted orphaned jobs as failed", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -418,7 +419,7 @@ Deno.test("JobProcessorService marks exhausted orphaned jobs as failed", async (
 // Multiple Jobs Processing
 // =============================================================================
 
-Deno.test("JobProcessorService processes multiple jobs in sequence", async () => {
+integrationTest("JobProcessorService processes multiple jobs in sequence", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -460,7 +461,7 @@ Deno.test("JobProcessorService processes multiple jobs in sequence", async () =>
 // Job Context Available to Handler
 // =============================================================================
 
-Deno.test("JobProcessorService passes full job context to handler", async () => {
+integrationTest("JobProcessorService passes full job context to handler", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -506,7 +507,7 @@ Deno.test("JobProcessorService passes full job context to handler", async () => 
 // Cancellation Tests
 // =============================================================================
 
-Deno.test("JobProcessorService passes cancellation token to handler", async () => {
+integrationTest("JobProcessorService passes cancellation token to handler", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -536,7 +537,7 @@ Deno.test("JobProcessorService passes cancellation token to handler", async () =
   }
 });
 
-Deno.test("JobProcessorService marks job cancelled when handler throws JobCancellationError", async () => {
+integrationTest("JobProcessorService marks job cancelled when handler throws JobCancellationError", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -566,7 +567,7 @@ Deno.test("JobProcessorService marks job cancelled when handler throws JobCancel
   }
 });
 
-Deno.test("JobProcessorService does not process deleted cancelled jobs", async () => {
+integrationTest("JobProcessorService does not process deleted cancelled jobs", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -603,7 +604,7 @@ Deno.test("JobProcessorService does not process deleted cancelled jobs", async (
   }
 });
 
-Deno.test("JobProcessorService handler can check cancellation via token.isCancelled", async () => {
+integrationTest("JobProcessorService handler can check cancellation via token.isCancelled", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({
@@ -639,7 +640,7 @@ Deno.test("JobProcessorService handler can check cancellation via token.isCancel
   }
 });
 
-Deno.test("JobProcessorService handler can use token.throwIfCancelled()", async () => {
+integrationTest("JobProcessorService handler can use token.throwIfCancelled()", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   const processor = new JobProcessorService({

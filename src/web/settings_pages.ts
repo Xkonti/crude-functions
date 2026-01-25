@@ -26,16 +26,10 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
   const { settingsService, apiKeyService } = options;
   const routes = new Hono();
 
-  // GET / - Main settings page with tab support
+  // GET / - Main settings page
   routes.get("/", async (c) => {
     const success = c.req.query("success");
     const error = c.req.query("error");
-    const tab = c.req.query("tab") || "server";
-
-    if (tab === "user") {
-      const content = renderUserSettingsTab();
-      return c.html(await layout("User Settings", content, getLayoutUser(c), settingsService));
-    }
 
     // Load all global settings
     const settingsData: Record<string, string> = {};
@@ -48,21 +42,17 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
     const availableGroups = await apiKeyService.getGroups();
     const csrfToken = getCsrfToken(c);
 
-    const content = renderServerSettingsTab(settingsData, availableGroups, success, error, csrfToken);
-    return c.html(await layout("Server Settings", content, getLayoutUser(c), settingsService));
+    const content = renderSettingsPage(settingsData, availableGroups, success, error, csrfToken);
+    return c.html(await layout("Settings", content, getLayoutUser(c), settingsService));
   });
 
-  // Redirect routes for clean URLs
-  routes.get("/user", (c) => c.redirect("/web/settings?tab=user"));
-  routes.get("/server", (c) => c.redirect("/web/settings?tab=server"));
-
-  // POST /server - Handle settings update
-  routes.post("/server", async (c) => {
+  // POST / - Handle settings update
+  routes.post("/", async (c) => {
     let formData: FormData;
     try {
       formData = await c.req.formData();
     } catch {
-      return c.redirect("/web/settings?tab=server&error=" +
+      return c.redirect("/web/settings?error=" +
         encodeURIComponent("Invalid form data"));
     }
 
@@ -81,8 +71,8 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
 
       return c.html(
         await layout(
-          "Server Settings",
-          renderServerSettingsTab(settingsData, availableGroups, undefined, errors.join(". "), csrfToken),
+          "Settings",
+          renderSettingsPage(settingsData, availableGroups, undefined, errors.join(". "), csrfToken),
           getLayoutUser(c),
           settingsService
         ),
@@ -111,42 +101,15 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
       ? `Settings saved (${updatedCount} updated)`
       : "Settings saved";
 
-    return c.redirect("/web/settings?tab=server&success=" +
+    return c.redirect("/web/settings?success=" +
       encodeURIComponent(message));
   });
 
   return routes;
 }
 
-// Helper: Render tab navigation
-function renderTabs(activeTab: "user" | "server"): string {
-  return `
-    <div class="tabs">
-      <a href="/web/settings?tab=server" class="${activeTab === "server" ? "active" : ""}">
-        Server Settings
-      </a>
-      <a href="/web/settings?tab=user" class="${activeTab === "user" ? "active" : ""}">
-        User Settings
-      </a>
-    </div>
-  `;
-}
-
-// Helper: Render user settings tab (placeholder)
-function renderUserSettingsTab(): string {
-  return `
-    <h1>Settings</h1>
-    ${renderTabs("user")}
-    <article>
-      <header><strong>User Settings</strong></header>
-      <p>User-specific settings are not yet implemented.</p>
-      <small>Future user preferences will appear here.</small>
-    </article>
-  `;
-}
-
-// Helper: Render server settings tab
-function renderServerSettingsTab(
+// Helper: Render settings page
+function renderSettingsPage(
   data: Record<string, string>,
   availableGroups: ApiKeyGroup[],
   success?: string,
@@ -155,7 +118,6 @@ function renderServerSettingsTab(
 ): string {
   return `
     <h1>Settings</h1>
-    ${renderTabs("server")}
     ${flashMessages(success, error)}
 
     <div id="rotation-status-message" style="display: none;"></div>
@@ -177,7 +139,7 @@ function renderServerSettingsTab(
 
     <article>
       <h3>Server Settings</h3>
-      <form method="POST" action="/web/settings/server">
+      <form method="POST" action="/web/settings">
         ${csrfToken ? csrfInput(csrfToken) : ""}
         ${renderSettingsForm(data, availableGroups)}
         <div class="grid" style="margin-bottom: 0;">

@@ -144,23 +144,6 @@ export function validateSettings(
 }
 
 /**
- * Checks if a setting name requires user context.
- * User settings are identified by the "user." prefix.
- *
- * @param name - The setting name to check
- * @returns True if the setting requires user context
- *
- * @example
- * ```typescript
- * requiresUserContext("user.theme");  // true
- * requiresUserContext("log.level");   // false
- * ```
- */
-export function requiresUserContext(name: string): boolean {
-  return name.startsWith("user.");
-}
-
-/**
  * Validates that a setting name exists in the SettingNames registry.
  *
  * @param name - The setting name to validate

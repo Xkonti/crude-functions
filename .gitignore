@@ -5,6 +5,9 @@
 code/
 data/
 
+# Local binaries (downloaded by deno task setup)
+.bin/
+
 # IDE
 .idea/
 .vscode/

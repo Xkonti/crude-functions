@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { KeyRotationService } from "./key_rotation_service.ts";
@@ -133,7 +134,7 @@ async function insertApiKey(
 // Basic service tests
 // =====================
 
-Deno.test("KeyRotationService - performRotationCheck completes successfully", async () => {
+integrationTest("KeyRotationService - performRotationCheck completes successfully", async () => {
   const ctx = await createTestContext();
 
   try {
@@ -156,7 +157,7 @@ Deno.test("KeyRotationService - performRotationCheck completes successfully", as
   }
 });
 
-Deno.test("KeyRotationService - concurrent performRotationCheck calls are serialized", async () => {
+integrationTest("KeyRotationService - concurrent performRotationCheck calls are serialized", async () => {
   const ctx = await createTestContext({
     last_rotation_finished_at: new Date().toISOString(),
   });
@@ -189,7 +190,7 @@ Deno.test("KeyRotationService - concurrent performRotationCheck calls are serial
 // Rotation trigger tests
 // =====================
 
-Deno.test("KeyRotationService - does not rotate when interval not reached", async () => {
+integrationTest("KeyRotationService - does not rotate when interval not reached", async () => {
   // Set last_rotation to now
   const ctx = await createTestContext({
     last_rotation_finished_at: new Date().toISOString(),
@@ -222,7 +223,7 @@ Deno.test("KeyRotationService - does not rotate when interval not reached", asyn
   }
 });
 
-Deno.test("KeyRotationService - triggers rotation when interval exceeded", async () => {
+integrationTest("KeyRotationService - triggers rotation when interval exceeded", async () => {
   // Set last_rotation to past
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 100); // 100 days ago
@@ -268,7 +269,7 @@ Deno.test("KeyRotationService - triggers rotation when interval exceeded", async
 // Resume incomplete rotation tests
 // =====================
 
-Deno.test("KeyRotationService - resumes incomplete rotation", async () => {
+integrationTest("KeyRotationService - resumes incomplete rotation", async () => {
   // Create context with rotation in progress (both keys exist)
   const ctx = await createTestContext({
     current_key: TEST_KEY_B,
@@ -333,7 +334,7 @@ Deno.test("KeyRotationService - resumes incomplete rotation", async () => {
 // Batch processing tests
 // =====================
 
-Deno.test("KeyRotationService - processes multiple secrets in batches", async () => {
+integrationTest("KeyRotationService - processes multiple secrets in batches", async () => {
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 100);
 
@@ -377,7 +378,7 @@ Deno.test("KeyRotationService - processes multiple secrets in batches", async ()
 // API keys rotation tests
 // =====================
 
-Deno.test("KeyRotationService - rotates apiKeys table", async () => {
+integrationTest("KeyRotationService - rotates apiKeys table", async () => {
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 100);
 
@@ -425,7 +426,7 @@ Deno.test("KeyRotationService - rotates apiKeys table", async () => {
 // Data integrity tests
 // =====================
 
-Deno.test("KeyRotationService - preserves data integrity after rotation", async () => {
+integrationTest("KeyRotationService - preserves data integrity after rotation", async () => {
   const pastDate = new Date();
   pastDate.setDate(pastDate.getDate() - 100);
 
@@ -477,7 +478,7 @@ Deno.test("KeyRotationService - preserves data integrity after rotation", async 
 // Version wrapping tests
 // =====================
 
-Deno.test("KeyStorageService.getNextVersion wraps correctly through rotation", () => {
+integrationTest("KeyStorageService.getNextVersion wraps correctly through rotation", () => {
   const keyStorage = new KeyStorageService();
 
   // Test full cycle from A to Z and back to A
@@ -496,7 +497,7 @@ Deno.test("KeyStorageService.getNextVersion wraps correctly through rotation", (
 // Manual rotation tests
 // =====================
 
-Deno.test("KeyRotationService - triggerManualRotation forces rotation", async () => {
+integrationTest("KeyRotationService - triggerManualRotation forces rotation", async () => {
   // Set last_rotation to now (so scheduled rotation wouldn't trigger)
   const ctx = await createTestContext({
     last_rotation_finished_at: new Date().toISOString(),
@@ -526,7 +527,7 @@ Deno.test("KeyRotationService - triggerManualRotation forces rotation", async ()
   }
 });
 
-Deno.test("KeyRotationService - triggerManualRotation rejects when rotation in progress", async () => {
+integrationTest("KeyRotationService - triggerManualRotation rejects when rotation in progress", async () => {
   const ctx = await createTestContext();
 
   try {
@@ -564,7 +565,7 @@ Deno.test("KeyRotationService - triggerManualRotation rejects when rotation in p
 // Status tests
 // =====================
 
-Deno.test("KeyRotationService - getRotationStatus returns current state", async () => {
+integrationTest("KeyRotationService - getRotationStatus returns current state", async () => {
   const ctx = await createTestContext();
 
   try {

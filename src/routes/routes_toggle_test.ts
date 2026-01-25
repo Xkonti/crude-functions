@@ -10,6 +10,7 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { FunctionRouter } from "../functions/function_router.ts";
 import type { TestContext } from "../test/types.ts";
 
@@ -31,7 +32,7 @@ function createFunctionRouterWithContext(ctx: TestContext) {
   });
 }
 
-Deno.test("Disabled route returns 404 from /run/*", async () => {
+integrationTest("Disabled route returns 404 from /run/*", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -63,7 +64,7 @@ Deno.test("Disabled route returns 404 from /run/*", async () => {
   }
 });
 
-Deno.test("Enabled route works normally", async () => {
+integrationTest("Enabled route works normally", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -88,7 +89,7 @@ Deno.test("Enabled route works normally", async () => {
   }
 });
 
-Deno.test("Re-enabling disabled route makes it work again", async () => {
+integrationTest("Re-enabling disabled route makes it work again", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -118,7 +119,7 @@ Deno.test("Re-enabling disabled route makes it work again", async () => {
   }
 });
 
-Deno.test("Disabled route does not execute handler", async () => {
+integrationTest("Disabled route does not execute handler", async () => {
   // Handler that would fail if executed
   const failingHandler = `
 export default async function (c, ctx) {
@@ -154,7 +155,7 @@ export default async function (c, ctx) {
   }
 });
 
-Deno.test("Multiple routes can be independently toggled", async () => {
+integrationTest("Multiple routes can be independently toggled", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -192,7 +193,7 @@ Deno.test("Multiple routes can be independently toggled", async () => {
   }
 });
 
-Deno.test("Disabled route with API key protection returns 404, not 401", async () => {
+integrationTest("Disabled route with API key protection returns 404, not 401", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("test-group", "Test group")
@@ -228,7 +229,7 @@ Deno.test("Disabled route with API key protection returns 404, not 401", async (
   }
 });
 
-Deno.test("New routes are enabled by default", async () => {
+integrationTest("New routes are enabled by default", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {

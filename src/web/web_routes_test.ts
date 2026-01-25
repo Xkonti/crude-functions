@@ -10,6 +10,8 @@ import { EncryptionService } from "../encryption/encryption_service.ts";
 import { HashService } from "../encryption/hash_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
 import { UserService } from "../users/user_service.ts";
+import { SharedSurrealManager, type SharedSurrealTestContext } from "../test/shared_surreal_manager.ts";
+import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
 import type { Auth } from "../auth/auth.ts";
 import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
@@ -200,6 +202,7 @@ interface TestContext {
   app: Hono;
   tempDir: string;
   db: DatabaseService;
+  surrealTestContext: SharedSurrealTestContext;
   apiKeyService: ApiKeyService;
   routesService: RoutesService;
   codeSourceService: CodeSourceService;
@@ -221,7 +224,7 @@ async function createTestApp(
   const tempDir = await Deno.makeTempDir();
   const codePath = `${tempDir}/code`;
 
-  // Set up database
+  // Set up SQLite database
   const db = new DatabaseService({ databasePath: `${tempDir}/test.db` });
   await db.open();
   await db.exec(API_KEYS_SCHEMA);
@@ -229,6 +232,18 @@ async function createTestApp(
   await db.exec(EXECUTION_LOGS_SCHEMA);
   await db.exec(EXECUTION_METRICS_SCHEMA);
   await db.exec(SETTINGS_SCHEMA);
+
+  // Set up SurrealDB for SettingsService
+  const surrealManager = SharedSurrealManager.getInstance();
+  const surrealTestContext = await surrealManager.createTestContext();
+  surrealTestContext.factory.initializePool({ idleTimeoutMs: 30000 });
+
+  // Run SurrealDB migrations
+  const surrealMigrationService = new SurrealMigrationService({
+    connectionFactory: surrealTestContext.factory,
+    migrationsDir: "./migrations",
+  });
+  await surrealMigrationService.migrate();
 
   await Deno.mkdir(codePath);
 
@@ -243,7 +258,7 @@ async function createTestApp(
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
   const routesService = new RoutesService({ db });
-  const settingsService = new SettingsService({ db, encryptionService });
+  const settingsService = new SettingsService({ surrealFactory: surrealTestContext.factory, encryptionService });
   await settingsService.bootstrapGlobalSettings();
   const consoleLogService = new ConsoleLogService({ db, settingsService });
   const executionMetricsService = new ExecutionMetricsService({ db });
@@ -267,17 +282,31 @@ async function createTestApp(
     createWebRoutes({ auth, db, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService })
   );
 
-  return { app, tempDir, db, apiKeyService, routesService, codeSourceService, sourceFileService, consoleLogService, executionMetricsService, settingsService };
+  return { app, tempDir, db, surrealTestContext, apiKeyService, routesService, codeSourceService, sourceFileService, consoleLogService, executionMetricsService, settingsService };
 }
 
-async function cleanup(db: DatabaseService, tempDir: string) {
+async function cleanup(
+  db: DatabaseService,
+  tempDir: string,
+  surrealTestContext: SharedSurrealTestContext,
+  consoleLogService: ConsoleLogService
+) {
+  // Shutdown console log service first (flush pending logs)
+  await consoleLogService.shutdown();
+
+  // Close SurrealDB pool and delete namespace
+  await surrealTestContext.factory.closePool();
+  const surrealManager = SharedSurrealManager.getInstance();
+  await surrealManager.deleteTestContext(surrealTestContext.namespace, surrealTestContext.db);
+
+  // Close SQLite and remove temp directory
   await db.close();
   await Deno.remove(tempDir, { recursive: true });
 }
 
 // Authentication tests
-Deno.test("GET /web redirects to login without session", async () => {
-  const { app, db, tempDir } = await createTestApp({ authenticated: false });
+Deno.test({ name: "GET /web redirects to login without session", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp({ authenticated: false });
   try {
     const res = await app.request("/web");
     expect(res.status).toBe(302);
@@ -285,25 +314,25 @@ Deno.test("GET /web redirects to login without session", async () => {
     // Middleware redirects to login with callbackUrl
     expect(location?.startsWith("/web/login")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web returns 200 with valid session", async () => {
-  const { app, db, tempDir } = await createTestApp({ authenticated: true });
+Deno.test({ name: "GET /web returns 200 with valid session", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp({ authenticated: true });
   try {
     const res = await app.request("/web");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Dashboard");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
 // Dashboard tests
-Deno.test("Dashboard contains links to all sections", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "Dashboard contains links to all sections", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web");
     const html = await res.text();
@@ -311,13 +340,13 @@ Deno.test("Dashboard contains links to all sections", async () => {
     expect(html).toContain('href="/web/functions"');
     expect(html).toContain('href="/web/keys"');
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
 // Code sources pages tests
-Deno.test("GET /web/code lists sources", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/code lists sources", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/code");
     expect(res.status).toBe(200);
@@ -325,12 +354,12 @@ Deno.test("GET /web/code lists sources", async () => {
     expect(html).toContain("Code Sources");
     expect(html).toContain("New Code Source");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/code/sources/new shows type selection", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/code/sources/new shows type selection", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/code/sources/new");
     expect(res.status).toBe(200);
@@ -339,12 +368,12 @@ Deno.test("GET /web/code/sources/new shows type selection", async () => {
     expect(html).toContain("Manual Source");
     expect(html).toContain("Git Source");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/code/sources/new/manual shows manual source form", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/code/sources/new/manual shows manual source form", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/code/sources/new/manual");
     expect(res.status).toBe(200);
@@ -352,12 +381,12 @@ Deno.test("GET /web/code/sources/new/manual shows manual source form", async () 
     expect(html).toContain("Create Manual Source");
     expect(html).toContain('name="name"');
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/code/sources/new/git shows git source form", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/code/sources/new/git shows git source form", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/code/sources/new/git");
     expect(res.status).toBe(200);
@@ -366,12 +395,12 @@ Deno.test("GET /web/code/sources/new/git shows git source form", async () => {
     expect(html).toContain('name="name"');
     expect(html).toContain('name="url"');
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
 // Functions pages tests
-Deno.test("GET /web/functions lists functions", async () => {
+Deno.test({ name: "GET /web/functions lists functions", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     {
       name: "test-fn",
@@ -381,7 +410,7 @@ Deno.test("GET /web/functions lists functions", async () => {
       description: "Test function",
     },
   ];
-  const { app, db, tempDir } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp({ initialRoutes });
   try {
     const res = await app.request("/web/functions");
     expect(res.status).toBe(200);
@@ -390,12 +419,12 @@ Deno.test("GET /web/functions lists functions", async () => {
     expect(html).toContain("/test");
     expect(html).toContain("GET");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/create shows form", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/functions/create shows form", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/functions/create");
     expect(res.status).toBe(200);
@@ -405,12 +434,12 @@ Deno.test("GET /web/functions/create shows form", async () => {
     expect(html).toContain('name="handler"');
     expect(html).toContain('name="route"');
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/functions/create creates function", async () => {
-  const { app, db, tempDir, routesService } = await createTestApp();
+Deno.test({ name: "POST /web/functions/create creates function", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp();
   try {
     const formData = new FormData();
     formData.append("name", "new-fn");
@@ -432,15 +461,15 @@ Deno.test("POST /web/functions/create creates function", async () => {
     expect(fn!.methods).toContain("GET");
     expect(fn!.methods).toContain("POST");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/functions/delete/:id removes function", async () => {
+Deno.test({ name: "POST /web/functions/delete/:id removes function", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("to-delete");
 
@@ -453,15 +482,15 @@ Deno.test("POST /web/functions/delete/:id removes function", async () => {
     const fn = await routesService.getById(route!.id);
     expect(fn).toBeNull();
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/edit/:id shows edit form", async () => {
+Deno.test({ name: "GET /web/functions/edit/:id shows edit form", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"], description: "Test" },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -473,15 +502,15 @@ Deno.test("GET /web/functions/edit/:id shows edit form", async () => {
     // Name field should now be editable (not readonly)
     expect(html).not.toContain("readonly");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/functions/edit/:id updates function and allows name change", async () => {
+Deno.test({ name: "POST /web/functions/edit/:id updates function and allows name change", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "old-name", handler: "old.ts", route: "/old", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("old-name");
     const originalId = route!.id;
@@ -510,37 +539,37 @@ Deno.test("POST /web/functions/edit/:id updates function and allows name change"
     const oldName = await routesService.getByName("old-name");
     expect(oldName).toBeNull();
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/edit/:id returns error for invalid ID", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/functions/edit/:id returns error for invalid ID", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/functions/edit/invalid");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/edit/:id returns error for non-existent ID", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/functions/edit/:id returns error for non-existent ID", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/functions/edit/999");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/delete/:id shows confirmation", async () => {
+Deno.test({ name: "GET /web/functions/delete/:id shows confirmation", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("to-delete");
 
@@ -550,13 +579,13 @@ Deno.test("GET /web/functions/delete/:id shows confirmation", async () => {
     expect(html).toContain("Delete Function");
     expect(html).toContain("to-delete");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
 // Keys pages tests
-Deno.test("GET /web/keys lists keys grouped by group", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "GET /web/keys lists keys grouped by group", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     // Add additional key
     await apiKeyService.addKey("api", "key-1", "key1", "user");
@@ -569,12 +598,12 @@ Deno.test("GET /web/keys lists keys grouped by group", async () => {
     expect(html).toContain("api");
     expect(html).toContain("key1");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/keys/create shows form", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/keys/create shows form", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/keys/create");
     expect(res.status).toBe(200);
@@ -583,12 +612,12 @@ Deno.test("GET /web/keys/create shows form", async () => {
     expect(html).toContain('name="groupId"');
     expect(html).toContain('name="value"');
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/keys/create with group param prefills form", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "GET /web/keys/create with group param prefills form", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     // Create a group and get its ID
     const groupId = await apiKeyService.createGroup("mykey");
@@ -599,12 +628,12 @@ Deno.test("GET /web/keys/create with group param prefills form", async () => {
     expect(html).toContain('value="mykey"');
     expect(html).toContain("readonly");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/keys/create creates key", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "POST /web/keys/create creates key", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     // Create group first and get its ID
     const groupId = await apiKeyService.createGroup("newkey");
@@ -626,12 +655,12 @@ Deno.test("POST /web/keys/create creates key", async () => {
     expect(keys).not.toBeNull();
     expect(keys!.some((k) => k.value === "newvalue123")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/keys/delete removes key by ID", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "POST /web/keys/delete removes key by ID", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     await apiKeyService.addKey("mykey", "key-1", "val1");
     await apiKeyService.addKey("mykey", "key-2", "val2");
@@ -650,12 +679,12 @@ Deno.test("POST /web/keys/delete removes key by ID", async () => {
     expect(updatedKeys!.some((k) => k.value === "val1")).toBe(false);
     expect(updatedKeys!.some((k) => k.value === "val2")).toBe(true);
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/keys/delete-group removes empty group", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "POST /web/keys/delete-group removes empty group", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     // Create empty group (no keys)
     await apiKeyService.createGroup("toremove", "Group to remove");
@@ -671,12 +700,12 @@ Deno.test("POST /web/keys/delete-group removes empty group", async () => {
     const deletedGroup = await apiKeyService.getGroupByName("toremove");
     expect(deletedGroup).toBeNull();
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/keys/delete-group rejects group with keys", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "POST /web/keys/delete-group rejects group with keys", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     await apiKeyService.addKey("haskeys", "key-1", "val1");
     const group = await apiKeyService.getGroupByName("haskeys");
@@ -692,24 +721,24 @@ Deno.test("POST /web/keys/delete-group rejects group with keys", async () => {
     const existingGroup = await apiKeyService.getGroupByName("haskeys");
     expect(existingGroup).not.toBeNull();
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
 // Error handling tests
-Deno.test("GET /web/code/sources/999 returns error for non-existent source", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/code/sources/999 returns error for non-existent source", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/code/sources/999");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("POST /web/keys/create rejects invalid groupId", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "POST /web/keys/create rejects invalid groupId", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const formData = new FormData();
     formData.append("groupId", "not-a-number");
@@ -723,12 +752,12 @@ Deno.test("POST /web/keys/create rejects invalid groupId", async () => {
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/keys/delete-group blocks deleting management group", async () => {
-  const { app, db, tempDir, apiKeyService } = await createTestApp();
+Deno.test({ name: "GET /web/keys/delete-group blocks deleting management group", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     const group = await apiKeyService.getGroupByName("management");
     const res = await app.request(`/web/keys/delete-group?id=${group!.id}`);
@@ -736,16 +765,16 @@ Deno.test("GET /web/keys/delete-group blocks deleting management group", async (
     expect(res.headers.get("Location")).toContain("error=");
     expect(res.headers.get("Location")).toContain("management");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
 // Metrics pages tests
-Deno.test("GET /web/functions/metrics/:id shows metrics page", async () => {
+Deno.test({ name: "GET /web/functions/metrics/:id shows metrics page", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -757,15 +786,15 @@ Deno.test("GET /web/functions/metrics/:id shows metrics page", async () => {
     expect(html).toContain("Last 24 Hours");
     expect(html).toContain("metrics-tabs"); // Mode switching tabs
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/metrics/:id with mode=day shows day view", async () => {
+Deno.test({ name: "GET /web/functions/metrics/:id with mode=day shows day view", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -774,15 +803,15 @@ Deno.test("GET /web/functions/metrics/:id with mode=day shows day view", async (
     const html = await res.text();
     expect(html).toContain("Last 24 Hours");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/metrics/:id shows no data message for new function", async () => {
+Deno.test({ name: "GET /web/functions/metrics/:id shows no data message for new function", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -791,15 +820,15 @@ Deno.test("GET /web/functions/metrics/:id shows no data message for new function
     const html = await res.text();
     expect(html).toContain("No metrics recorded");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/metrics/:id with data shows charts", async () => {
+Deno.test({ name: "GET /web/functions/metrics/:id with data shows charts", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -825,52 +854,52 @@ Deno.test("GET /web/functions/metrics/:id with data shows charts", async () => {
     expect(html).toContain("requestCountChart");
     expect(html).toContain("Avg Execution Time");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/metrics/:id returns error for invalid ID", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/functions/metrics/:id returns error for invalid ID", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/functions/metrics/invalid");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/metrics/:id returns error for non-existent ID", async () => {
-  const { app, db, tempDir } = await createTestApp();
+Deno.test({ name: "GET /web/functions/metrics/:id returns error for non-existent ID", sanitizeResources: false, sanitizeOps: false }, async () => {
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp();
   try {
     const res = await app.request("/web/functions/metrics/999");
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("Functions list includes Metrics link", async () => {
+Deno.test({ name: "Functions list includes Metrics link", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp({ initialRoutes });
   try {
     const res = await app.request("/web/functions");
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("/web/functions/metrics/");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });
 
-Deno.test("GET /web/functions/metrics/:id shows current period from raw execution data", async () => {
+Deno.test({ name: "GET /web/functions/metrics/:id shows current period from raw execution data", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
     { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
-  const { app, db, tempDir, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
+  const { app, db, tempDir, surrealTestContext, consoleLogService, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
 
@@ -903,6 +932,6 @@ Deno.test("GET /web/functions/metrics/:id shows current period from raw executio
     // Should NOT show "no data" message
     expect(html).not.toContain("No metrics recorded");
   } finally {
-    await cleanup(db, tempDir);
+    await cleanup(db, tempDir, surrealTestContext, consoleLogService);
   }
 });

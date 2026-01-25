@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { createSecretsRoutes } from "./secrets_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import type { BaseTestContext, SecretsContext } from "../test/types.ts";
 
 /**
@@ -15,7 +16,7 @@ function createTestApp(ctx: BaseTestContext & SecretsContext): Hono {
 
 // ============== GET /api/secrets tests ==============
 
-Deno.test("GET /api/secrets returns empty array when no secrets", async () => {
+integrationTest("GET /api/secrets returns empty array when no secrets", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -32,7 +33,7 @@ Deno.test("GET /api/secrets returns empty array when no secrets", async () => {
   }
 });
 
-Deno.test("GET /api/secrets returns all secrets without values by default", async () => {
+integrationTest("GET /api/secrets returns all secrets without values by default", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -57,7 +58,7 @@ Deno.test("GET /api/secrets returns all secrets without values by default", asyn
   }
 });
 
-Deno.test("GET /api/secrets?includeValues=true returns secrets with values", async () => {
+integrationTest("GET /api/secrets?includeValues=true returns secrets with values", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -78,7 +79,7 @@ Deno.test("GET /api/secrets?includeValues=true returns secrets with values", asy
   }
 });
 
-Deno.test("GET /api/secrets?scope=global filters by scope", async () => {
+integrationTest("GET /api/secrets?scope=global filters by scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoutes()
     .withSecrets()
@@ -110,7 +111,7 @@ Deno.test("GET /api/secrets?scope=global filters by scope", async () => {
   }
 });
 
-Deno.test("GET /api/secrets?scope=function&functionId=1 filters by function", async () => {
+integrationTest("GET /api/secrets?scope=function&functionId=1 filters by function", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoutes()
     .withSecrets()
@@ -150,7 +151,7 @@ Deno.test("GET /api/secrets?scope=function&functionId=1 filters by function", as
   }
 });
 
-Deno.test("GET /api/secrets rejects invalid scope", async () => {
+integrationTest("GET /api/secrets rejects invalid scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -167,7 +168,7 @@ Deno.test("GET /api/secrets rejects invalid scope", async () => {
   }
 });
 
-Deno.test("GET /api/secrets rejects invalid functionId", async () => {
+integrationTest("GET /api/secrets rejects invalid functionId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -186,7 +187,7 @@ Deno.test("GET /api/secrets rejects invalid functionId", async () => {
 
 // ============== GET /api/secrets/:id tests ==============
 
-Deno.test("GET /api/secrets/:id returns secret by ID", async () => {
+integrationTest("GET /api/secrets/:id returns secret by ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -212,7 +213,7 @@ Deno.test("GET /api/secrets/:id returns secret by ID", async () => {
   }
 });
 
-Deno.test("GET /api/secrets/:id returns 404 for non-existent ID", async () => {
+integrationTest("GET /api/secrets/:id returns 404 for non-existent ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -229,7 +230,7 @@ Deno.test("GET /api/secrets/:id returns 404 for non-existent ID", async () => {
   }
 });
 
-Deno.test("GET /api/secrets/:id returns 400 for invalid ID", async () => {
+integrationTest("GET /api/secrets/:id returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -248,7 +249,7 @@ Deno.test("GET /api/secrets/:id returns 400 for invalid ID", async () => {
 
 // ============== GET /api/secrets/by-name/:name tests ==============
 
-Deno.test("GET /api/secrets/by-name/:name returns matching secrets", async () => {
+integrationTest("GET /api/secrets/by-name/:name returns matching secrets", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -269,7 +270,7 @@ Deno.test("GET /api/secrets/by-name/:name returns matching secrets", async () =>
   }
 });
 
-Deno.test("GET /api/secrets/by-name/:name returns 404 when not found", async () => {
+integrationTest("GET /api/secrets/by-name/:name returns 404 when not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -286,7 +287,7 @@ Deno.test("GET /api/secrets/by-name/:name returns 404 when not found", async () 
   }
 });
 
-Deno.test("GET /api/secrets/by-name/:name?scope=global filters by scope", async () => {
+integrationTest("GET /api/secrets/by-name/:name?scope=global filters by scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoutes()
     .withSecrets()
@@ -318,7 +319,7 @@ Deno.test("GET /api/secrets/by-name/:name?scope=global filters by scope", async 
   }
 });
 
-Deno.test("GET /api/secrets/by-name/:name rejects invalid scope", async () => {
+integrationTest("GET /api/secrets/by-name/:name rejects invalid scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -337,7 +338,7 @@ Deno.test("GET /api/secrets/by-name/:name rejects invalid scope", async () => {
 
 // ============== POST /api/secrets tests ==============
 
-Deno.test("POST /api/secrets creates global secret", async () => {
+integrationTest("POST /api/secrets creates global secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -371,7 +372,7 @@ Deno.test("POST /api/secrets creates global secret", async () => {
   }
 });
 
-Deno.test("POST /api/secrets creates function-scoped secret", async () => {
+integrationTest("POST /api/secrets creates function-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoutes()
     .withSecrets()
@@ -412,7 +413,7 @@ Deno.test("POST /api/secrets creates function-scoped secret", async () => {
   }
 });
 
-Deno.test("POST /api/secrets creates group-scoped secret", async () => {
+integrationTest("POST /api/secrets creates group-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSecrets()
@@ -447,7 +448,7 @@ Deno.test("POST /api/secrets creates group-scoped secret", async () => {
   }
 });
 
-Deno.test("POST /api/secrets creates key-scoped secret", async () => {
+integrationTest("POST /api/secrets creates key-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSecrets()
@@ -485,7 +486,7 @@ Deno.test("POST /api/secrets creates key-scoped secret", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects missing name", async () => {
+integrationTest("POST /api/secrets rejects missing name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -510,7 +511,7 @@ Deno.test("POST /api/secrets rejects missing name", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects invalid name", async () => {
+integrationTest("POST /api/secrets rejects invalid name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -536,7 +537,7 @@ Deno.test("POST /api/secrets rejects invalid name", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects missing value", async () => {
+integrationTest("POST /api/secrets rejects missing value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -561,7 +562,7 @@ Deno.test("POST /api/secrets rejects missing value", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects empty value", async () => {
+integrationTest("POST /api/secrets rejects empty value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -587,7 +588,7 @@ Deno.test("POST /api/secrets rejects empty value", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects missing scope", async () => {
+integrationTest("POST /api/secrets rejects missing scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -612,7 +613,7 @@ Deno.test("POST /api/secrets rejects missing scope", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects invalid scope", async () => {
+integrationTest("POST /api/secrets rejects invalid scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -638,7 +639,7 @@ Deno.test("POST /api/secrets rejects invalid scope", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects function scope without functionId", async () => {
+integrationTest("POST /api/secrets rejects function scope without functionId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -664,7 +665,7 @@ Deno.test("POST /api/secrets rejects function scope without functionId", async (
   }
 });
 
-Deno.test("POST /api/secrets rejects group scope without groupId", async () => {
+integrationTest("POST /api/secrets rejects group scope without groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -690,7 +691,7 @@ Deno.test("POST /api/secrets rejects group scope without groupId", async () => {
   }
 });
 
-Deno.test("POST /api/secrets rejects key scope without keyId", async () => {
+integrationTest("POST /api/secrets rejects key scope without keyId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -716,7 +717,7 @@ Deno.test("POST /api/secrets rejects key scope without keyId", async () => {
   }
 });
 
-Deno.test("POST /api/secrets returns 409 for duplicate names in same scope", async () => {
+integrationTest("POST /api/secrets returns 409 for duplicate names in same scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -746,7 +747,7 @@ Deno.test("POST /api/secrets returns 409 for duplicate names in same scope", asy
 
 // ============== PUT /api/secrets/:id tests ==============
 
-Deno.test("PUT /api/secrets/:id updates name", async () => {
+integrationTest("PUT /api/secrets/:id updates name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -777,7 +778,7 @@ Deno.test("PUT /api/secrets/:id updates name", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id updates value", async () => {
+integrationTest("PUT /api/secrets/:id updates value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -805,7 +806,7 @@ Deno.test("PUT /api/secrets/:id updates value", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id updates comment", async () => {
+integrationTest("PUT /api/secrets/:id updates comment", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -832,7 +833,7 @@ Deno.test("PUT /api/secrets/:id updates comment", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id updates multiple fields", async () => {
+integrationTest("PUT /api/secrets/:id updates multiple fields", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -865,7 +866,7 @@ Deno.test("PUT /api/secrets/:id updates multiple fields", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id rejects when no fields provided", async () => {
+integrationTest("PUT /api/secrets/:id rejects when no fields provided", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -891,7 +892,7 @@ Deno.test("PUT /api/secrets/:id rejects when no fields provided", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id rejects invalid name", async () => {
+integrationTest("PUT /api/secrets/:id rejects invalid name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -917,7 +918,7 @@ Deno.test("PUT /api/secrets/:id rejects invalid name", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id rejects empty value", async () => {
+integrationTest("PUT /api/secrets/:id rejects empty value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -943,7 +944,7 @@ Deno.test("PUT /api/secrets/:id rejects empty value", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id returns 404 for non-existent ID", async () => {
+integrationTest("PUT /api/secrets/:id returns 404 for non-existent ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -965,7 +966,7 @@ Deno.test("PUT /api/secrets/:id returns 404 for non-existent ID", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id returns 400 for invalid ID", async () => {
+integrationTest("PUT /api/secrets/:id returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -987,7 +988,7 @@ Deno.test("PUT /api/secrets/:id returns 400 for invalid ID", async () => {
   }
 });
 
-Deno.test("PUT /api/secrets/:id returns 409 for duplicate name in same scope", async () => {
+integrationTest("PUT /api/secrets/:id returns 409 for duplicate name in same scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -1017,7 +1018,7 @@ Deno.test("PUT /api/secrets/:id returns 409 for duplicate name in same scope", a
 
 // ============== DELETE /api/secrets/:id tests ==============
 
-Deno.test("DELETE /api/secrets/:id deletes secret", async () => {
+integrationTest("DELETE /api/secrets/:id deletes secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -1045,7 +1046,7 @@ Deno.test("DELETE /api/secrets/:id deletes secret", async () => {
   }
 });
 
-Deno.test("DELETE /api/secrets/:id returns 404 for non-existent ID", async () => {
+integrationTest("DELETE /api/secrets/:id returns 404 for non-existent ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -1065,7 +1066,7 @@ Deno.test("DELETE /api/secrets/:id returns 404 for non-existent ID", async () =>
   }
 });
 
-Deno.test("DELETE /api/secrets/:id returns 400 for invalid ID", async () => {
+integrationTest("DELETE /api/secrets/:id returns 400 for invalid ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();

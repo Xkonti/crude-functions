@@ -6,8 +6,15 @@
  * for a particular test, reducing setup time and complexity.
  */
 
+import type { Surreal } from "surrealdb";
 import { DatabaseService } from "../database/database_service.ts";
 import { MigrationService } from "../database/migration_service.ts";
+import { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
+import {
+  SharedSurrealManager,
+  type SharedSurrealTestContext,
+} from "./shared_surreal_manager.ts";
 import { KeyStorageService } from "../encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import { HashService } from "../encryption/hash_service.ts";
@@ -51,33 +58,86 @@ export interface FactoryContext {
 // =============================================================================
 
 /**
- * Creates the base infrastructure: temp directory, code directory, database, and migrations.
- * This is always called first and is required for all test contexts.
+ * Options for creating core infrastructure.
  */
-export async function createCoreInfrastructure(migrationsDir: string): Promise<{
+export interface CoreInfrastructureOptions {
+  /** Whether to run SQLite migrations (default: true) */
+  runSQLiteMigrations?: boolean;
+  /** Whether to run SurrealDB migrations (default: true) */
+  runSurrealMigrations?: boolean;
+}
+
+/**
+ * Creates the base infrastructure: temp directory, code directory, SQLite database,
+ * and shared SurrealDB connection with isolated namespace.
+ *
+ * SurrealDB is shared across all tests - each test gets a unique namespace for isolation.
+ * This dramatically improves test performance by avoiding process startup overhead per test.
+ *
+ * @param migrationsDir - Directory containing migration files
+ * @param options - Configuration options
+ * @throws Error if SurrealDB binary is not available
+ */
+export async function createCoreInfrastructure(
+  migrationsDir: string,
+  options: CoreInfrastructureOptions = {}
+): Promise<{
   tempDir: string;
   codeDir: string;
   databasePath: string;
   db: DatabaseService;
+  surrealTestContext: SharedSurrealTestContext;
+  surrealDb: Surreal;
+  surrealFactory: SurrealConnectionFactory;
 }> {
+  const { runSQLiteMigrations = true, runSurrealMigrations = true } = options;
+
   // Create temp directory for test isolation
   const tempDir = await Deno.makeTempDir();
   const codeDir = `${tempDir}/code`;
   await Deno.mkdir(codeDir, { recursive: true });
 
-  // Open database
+  // Open SQLite database
   const databasePath = `${tempDir}/database.db`;
   const db = new DatabaseService({ databasePath });
   await db.open();
 
-  // Run real migrations
-  const migrationService = new MigrationService({
-    db,
-    migrationsDir,
-  });
-  await migrationService.migrate();
+  // Run SQLite migrations if requested
+  if (runSQLiteMigrations) {
+    const migrationService = new MigrationService({
+      db,
+      migrationsDir,
+    });
+    await migrationService.migrate();
+  }
 
-  return { tempDir, codeDir, databasePath, db };
+  // Get shared SurrealDB context with unique namespace
+  const manager = SharedSurrealManager.getInstance();
+  const surrealTestContext = await manager.createTestContext();
+
+  // Initialize the connection pool for this test's factory
+  // Use shorter idle timeout for tests (30 seconds)
+  surrealTestContext.factory.initializePool({ idleTimeoutMs: 30000 });
+
+  // Run SurrealDB migrations in this namespace if requested
+  // Uses factory's default namespace/database (set by SharedSurrealManager)
+  if (runSurrealMigrations) {
+    const surrealMigrationService = new SurrealMigrationService({
+      connectionFactory: surrealTestContext.factory,
+      migrationsDir,
+    });
+    await surrealMigrationService.migrate();
+  }
+
+  return {
+    tempDir,
+    codeDir,
+    databasePath,
+    db,
+    surrealTestContext,
+    surrealDb: surrealTestContext.db,
+    surrealFactory: surrealTestContext.factory,
+  };
 }
 
 // =============================================================================
@@ -123,13 +183,17 @@ export function createHashService(keys: EncryptionKeyFile): HashService {
 
 /**
  * Creates the SettingsService and bootstraps global settings.
- * Requires database and encryption service.
+ * Requires SurrealDB connection factory and encryption service.
+ * Uses the factory's default namespace/database.
  */
 export async function createSettingsService(
-  db: DatabaseService,
-  encryptionService: VersionedEncryptionService
+  encryptionService: VersionedEncryptionService,
+  surrealFactory: SurrealConnectionFactory,
 ): Promise<SettingsService> {
-  const settingsService = new SettingsService({ db, encryptionService });
+  const settingsService = new SettingsService({
+    surrealFactory,
+    encryptionService,
+  });
   await settingsService.bootstrapGlobalSettings();
   return settingsService;
 }
@@ -390,11 +454,16 @@ export function createCodeSourceService(
 
 /**
  * Creates a cleanup function for the test context.
- * Handles proper teardown order.
+ * Handles proper teardown order: namespace deletion before SQLite closes,
+ * both before temp dir removal.
+ *
+ * Note: SurrealDB process is shared and managed by SharedSurrealManager.
+ * We only clean up the namespace here, not the process.
  */
 export function createCleanupFunction(
   db: DatabaseService,
   tempDir: string,
+  surrealTestContext: SharedSurrealTestContext,
   consoleLogService?: ConsoleLogService
 ): () => Promise<void> {
   return async () => {
@@ -403,10 +472,20 @@ export function createCleanupFunction(
       await consoleLogService.shutdown();
     }
 
-    // 2. Close database
+    // 2. Close SurrealDB connection pool for this test
+    await surrealTestContext.factory.closePool();
+
+    // 3. Delete SurrealDB namespace (fast cleanup, shared process stays running)
+    const manager = SharedSurrealManager.getInstance();
+    await manager.deleteTestContext(
+      surrealTestContext.namespace,
+      surrealTestContext.db
+    );
+
+    // 4. Close SQLite database
     await db.close();
 
-    // 3. Remove temp directory
+    // 5. Remove temp directory
     try {
       await Deno.remove(tempDir, { recursive: true });
     } catch {

@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import {
@@ -11,7 +12,7 @@ import {
 // Basic CRUD Operations
 // =============================================================================
 
-Deno.test("JobQueueService.enqueue creates a pending job", async () => {
+integrationTest("JobQueueService.enqueue creates a pending job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -36,7 +37,7 @@ Deno.test("JobQueueService.enqueue creates a pending job", async () => {
   }
 });
 
-Deno.test("JobQueueService.enqueue accepts custom maxRetries and priority", async () => {
+integrationTest("JobQueueService.enqueue accepts custom maxRetries and priority", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -53,7 +54,7 @@ Deno.test("JobQueueService.enqueue accepts custom maxRetries and priority", asyn
   }
 });
 
-Deno.test("JobQueueService.getJob retrieves job by ID", async () => {
+integrationTest("JobQueueService.getJob retrieves job by ID", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -72,7 +73,7 @@ Deno.test("JobQueueService.getJob retrieves job by ID", async () => {
   }
 });
 
-Deno.test("JobQueueService.getJob returns null for non-existent job", async () => {
+integrationTest("JobQueueService.getJob returns null for non-existent job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -87,7 +88,7 @@ Deno.test("JobQueueService.getJob returns null for non-existent job", async () =
 // Reference Constraint Tests
 // =============================================================================
 
-Deno.test("JobQueueService.enqueue with reference stores referenceType and referenceId", async () => {
+integrationTest("JobQueueService.enqueue with reference stores referenceType and referenceId", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -104,7 +105,7 @@ Deno.test("JobQueueService.enqueue with reference stores referenceType and refer
   }
 });
 
-Deno.test("JobQueueService.enqueue throws DuplicateActiveJobError for same reference", async () => {
+integrationTest("JobQueueService.enqueue throws DuplicateActiveJobError for same reference", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -128,7 +129,7 @@ Deno.test("JobQueueService.enqueue throws DuplicateActiveJobError for same refer
   }
 });
 
-Deno.test("JobQueueService.enqueue allows different references", async () => {
+integrationTest("JobQueueService.enqueue allows different references", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -152,7 +153,7 @@ Deno.test("JobQueueService.enqueue allows different references", async () => {
   }
 });
 
-Deno.test("JobQueueService.enqueue allows same reference after job completes", async () => {
+integrationTest("JobQueueService.enqueue allows same reference after job completes", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -181,7 +182,7 @@ Deno.test("JobQueueService.enqueue allows same reference after job completes", a
   }
 });
 
-Deno.test("JobQueueService.enqueueIfNotExists returns null on duplicate", async () => {
+integrationTest("JobQueueService.enqueueIfNotExists returns null on duplicate", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -209,7 +210,7 @@ Deno.test("JobQueueService.enqueueIfNotExists returns null on duplicate", async 
 // Query Operations
 // =============================================================================
 
-Deno.test("JobQueueService.getJobsByStatus returns jobs with matching status", async () => {
+integrationTest("JobQueueService.getJobsByStatus returns jobs with matching status", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -227,7 +228,7 @@ Deno.test("JobQueueService.getJobsByStatus returns jobs with matching status", a
   }
 });
 
-Deno.test("JobQueueService.getJobsByType returns jobs with matching type", async () => {
+integrationTest("JobQueueService.getJobsByType returns jobs with matching type", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -243,7 +244,7 @@ Deno.test("JobQueueService.getJobsByType returns jobs with matching type", async
   }
 });
 
-Deno.test("JobQueueService.getJobsByType filters by status when provided", async () => {
+integrationTest("JobQueueService.getJobsByType filters by status when provided", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -272,7 +273,7 @@ Deno.test("JobQueueService.getJobsByType filters by status when provided", async
   }
 });
 
-Deno.test("JobQueueService.getActiveJobForReference returns active job", async () => {
+integrationTest("JobQueueService.getActiveJobForReference returns active job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -300,7 +301,7 @@ Deno.test("JobQueueService.getActiveJobForReference returns active job", async (
   }
 });
 
-Deno.test("JobQueueService.getNextPendingJob returns highest priority first", async () => {
+integrationTest("JobQueueService.getNextPendingJob returns highest priority first", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -317,7 +318,7 @@ Deno.test("JobQueueService.getNextPendingJob returns highest priority first", as
   }
 });
 
-Deno.test("JobQueueService.getNextPendingJob uses FIFO within same priority", async () => {
+integrationTest("JobQueueService.getNextPendingJob uses FIFO within same priority", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -333,7 +334,7 @@ Deno.test("JobQueueService.getNextPendingJob uses FIFO within same priority", as
   }
 });
 
-Deno.test("JobQueueService.getNextPendingJob filters by type when provided", async () => {
+integrationTest("JobQueueService.getNextPendingJob filters by type when provided", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -348,7 +349,7 @@ Deno.test("JobQueueService.getNextPendingJob filters by type when provided", asy
   }
 });
 
-Deno.test("JobQueueService.getNextPendingJob returns null when queue is empty", async () => {
+integrationTest("JobQueueService.getNextPendingJob returns null when queue is empty", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -363,7 +364,7 @@ Deno.test("JobQueueService.getNextPendingJob returns null when queue is empty", 
 // Claim/Complete/Fail Operations
 // =============================================================================
 
-Deno.test("JobQueueService.claimJob sets status to running", async () => {
+integrationTest("JobQueueService.claimJob sets status to running", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -378,7 +379,7 @@ Deno.test("JobQueueService.claimJob sets status to running", async () => {
   }
 });
 
-Deno.test("JobQueueService.claimJob throws JobNotFoundError for non-existent job", async () => {
+integrationTest("JobQueueService.claimJob throws JobNotFoundError for non-existent job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -390,7 +391,7 @@ Deno.test("JobQueueService.claimJob throws JobNotFoundError for non-existent job
   }
 });
 
-Deno.test("JobQueueService.claimJob throws JobAlreadyClaimedError if not pending", async () => {
+integrationTest("JobQueueService.claimJob throws JobAlreadyClaimedError if not pending", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -408,7 +409,7 @@ Deno.test("JobQueueService.claimJob throws JobAlreadyClaimedError if not pending
   }
 });
 
-Deno.test("JobQueueService.completeJob sets status to completed with result", async () => {
+integrationTest("JobQueueService.completeJob sets status to completed with result", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -432,7 +433,7 @@ Deno.test("JobQueueService.completeJob sets status to completed with result", as
   }
 });
 
-Deno.test("JobQueueService.completeJob works without result", async () => {
+integrationTest("JobQueueService.completeJob works without result", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -451,7 +452,7 @@ Deno.test("JobQueueService.completeJob works without result", async () => {
   }
 });
 
-Deno.test("JobQueueService.completeJob throws JobNotFoundError for non-existent job", async () => {
+integrationTest("JobQueueService.completeJob throws JobNotFoundError for non-existent job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -463,7 +464,7 @@ Deno.test("JobQueueService.completeJob throws JobNotFoundError for non-existent 
   }
 });
 
-Deno.test("JobQueueService.failJob sets status to failed with error details", async () => {
+integrationTest("JobQueueService.failJob sets status to failed with error details", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -490,7 +491,7 @@ Deno.test("JobQueueService.failJob sets status to failed with error details", as
   }
 });
 
-Deno.test("JobQueueService.failJob throws JobNotFoundError for non-existent job", async () => {
+integrationTest("JobQueueService.failJob throws JobNotFoundError for non-existent job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -506,7 +507,7 @@ Deno.test("JobQueueService.failJob throws JobNotFoundError for non-existent job"
 // Orphan Detection and Recovery
 // =============================================================================
 
-Deno.test("JobQueueService.getOrphanedJobs finds jobs with different instance ID", async () => {
+integrationTest("JobQueueService.getOrphanedJobs finds jobs with different instance ID", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -526,7 +527,7 @@ Deno.test("JobQueueService.getOrphanedJobs finds jobs with different instance ID
   }
 });
 
-Deno.test("JobQueueService.getOrphanedJobs excludes jobs with current instance ID", async () => {
+integrationTest("JobQueueService.getOrphanedJobs excludes jobs with current instance ID", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -541,7 +542,7 @@ Deno.test("JobQueueService.getOrphanedJobs excludes jobs with current instance I
   }
 });
 
-Deno.test("JobQueueService.resetOrphanedJob resets job to pending", async () => {
+integrationTest("JobQueueService.resetOrphanedJob resets job to pending", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -566,7 +567,7 @@ Deno.test("JobQueueService.resetOrphanedJob resets job to pending", async () => 
   }
 });
 
-Deno.test("JobQueueService.resetOrphanedJob throws MaxRetriesExceededError when limit reached", async () => {
+integrationTest("JobQueueService.resetOrphanedJob throws MaxRetriesExceededError when limit reached", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -588,7 +589,7 @@ Deno.test("JobQueueService.resetOrphanedJob throws MaxRetriesExceededError when 
   }
 });
 
-Deno.test("JobQueueService.resetOrphanedJob throws JobNotFoundError for non-existent job", async () => {
+integrationTest("JobQueueService.resetOrphanedJob throws JobNotFoundError for non-existent job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -604,7 +605,7 @@ Deno.test("JobQueueService.resetOrphanedJob throws JobNotFoundError for non-exis
 // Stats Operations
 // =============================================================================
 
-Deno.test("JobQueueService.getJobCounts returns counts by status", async () => {
+integrationTest("JobQueueService.getJobCounts returns counts by status", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -632,7 +633,7 @@ Deno.test("JobQueueService.getJobCounts returns counts by status", async () => {
 // Null/Empty Payload Handling
 // =============================================================================
 
-Deno.test("JobQueueService handles null payload", async () => {
+integrationTest("JobQueueService handles null payload", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -649,7 +650,7 @@ Deno.test("JobQueueService handles null payload", async () => {
   }
 });
 
-Deno.test("JobQueueService handles undefined payload", async () => {
+integrationTest("JobQueueService handles undefined payload", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -664,7 +665,7 @@ Deno.test("JobQueueService handles undefined payload", async () => {
   }
 });
 
-Deno.test("JobQueueService handles complex payload", async () => {
+integrationTest("JobQueueService handles complex payload", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -693,7 +694,7 @@ Deno.test("JobQueueService handles complex payload", async () => {
 // Deferred Job Pattern (withJob)
 // =============================================================================
 
-Deno.test("TestSetupBuilder.withJob seeds jobs during build", async () => {
+integrationTest("TestSetupBuilder.withJob seeds jobs during build", async () => {
   const ctx = await TestSetupBuilder.create()
     .withJob({ type: "seeded-job", payload: { test: true }, priority: 5 })
     .withJob({ type: "another-job" })
@@ -716,7 +717,7 @@ Deno.test("TestSetupBuilder.withJob seeds jobs during build", async () => {
 // Cancellation Operations
 // =============================================================================
 
-Deno.test("JobQueueService.cancelJob cancels pending job immediately", async () => {
+integrationTest("JobQueueService.cancelJob cancels pending job immediately", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -738,7 +739,7 @@ Deno.test("JobQueueService.cancelJob cancels pending job immediately", async () 
   }
 });
 
-Deno.test("JobQueueService.cancelJob sets cancelledAt on running job", async () => {
+integrationTest("JobQueueService.cancelJob sets cancelledAt on running job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -757,7 +758,7 @@ Deno.test("JobQueueService.cancelJob sets cancelledAt on running job", async () 
   }
 });
 
-Deno.test("JobQueueService.cancelJob throws JobNotFoundError for completed job", async () => {
+integrationTest("JobQueueService.cancelJob throws JobNotFoundError for completed job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -774,7 +775,7 @@ Deno.test("JobQueueService.cancelJob throws JobNotFoundError for completed job",
   }
 });
 
-Deno.test("JobQueueService.cancelJob throws JobNotFoundError for failed job", async () => {
+integrationTest("JobQueueService.cancelJob throws JobNotFoundError for failed job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -791,7 +792,7 @@ Deno.test("JobQueueService.cancelJob throws JobNotFoundError for failed job", as
   }
 });
 
-Deno.test("JobQueueService.cancelJob throws JobNotFoundError for non-existent job", async () => {
+integrationTest("JobQueueService.cancelJob throws JobNotFoundError for non-existent job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -803,7 +804,7 @@ Deno.test("JobQueueService.cancelJob throws JobNotFoundError for non-existent jo
   }
 });
 
-Deno.test("JobQueueService.cancelJob is idempotent for already cancelled jobs", async () => {
+integrationTest("JobQueueService.cancelJob is idempotent for already cancelled jobs", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -822,7 +823,7 @@ Deno.test("JobQueueService.cancelJob is idempotent for already cancelled jobs", 
   }
 });
 
-Deno.test("JobQueueService.cancelJobs cancels multiple pending jobs by type", async () => {
+integrationTest("JobQueueService.cancelJobs cancels multiple pending jobs by type", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -850,7 +851,7 @@ Deno.test("JobQueueService.cancelJobs cancels multiple pending jobs by type", as
   }
 });
 
-Deno.test("JobQueueService.cancelJobs cancels jobs by reference", async () => {
+integrationTest("JobQueueService.cancelJobs cancels jobs by reference", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -877,7 +878,7 @@ Deno.test("JobQueueService.cancelJobs cancels jobs by reference", async () => {
   }
 });
 
-Deno.test("JobQueueService.getCancellationStatus returns null for non-cancelled job", async () => {
+integrationTest("JobQueueService.getCancellationStatus returns null for non-cancelled job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -890,7 +891,7 @@ Deno.test("JobQueueService.getCancellationStatus returns null for non-cancelled 
   }
 });
 
-Deno.test("JobQueueService.getCancellationStatus returns cancellation info for running job", async () => {
+integrationTest("JobQueueService.getCancellationStatus returns cancellation info for running job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -909,7 +910,7 @@ Deno.test("JobQueueService.getCancellationStatus returns cancellation info for r
   }
 });
 
-Deno.test("JobQueueService.markJobCancelled marks running job as cancelled", async () => {
+integrationTest("JobQueueService.markJobCancelled marks running job as cancelled", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -931,7 +932,7 @@ Deno.test("JobQueueService.markJobCancelled marks running job as cancelled", asy
   }
 });
 
-Deno.test("JobQueueService cancelled pending jobs are deleted", async () => {
+integrationTest("JobQueueService cancelled pending jobs are deleted", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -950,7 +951,7 @@ Deno.test("JobQueueService cancelled pending jobs are deleted", async () => {
   }
 });
 
-Deno.test("JobQueueService cancelled pending jobs result in zero cancelled count", async () => {
+integrationTest("JobQueueService cancelled pending jobs result in zero cancelled count", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -970,7 +971,7 @@ Deno.test("JobQueueService cancelled pending jobs result in zero cancelled count
 // Execution Mode Tests
 // =============================================================================
 
-Deno.test("JobQueueService.enqueue defaults to sequential execution mode", async () => {
+integrationTest("JobQueueService.enqueue defaults to sequential execution mode", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -982,7 +983,7 @@ Deno.test("JobQueueService.enqueue defaults to sequential execution mode", async
   }
 });
 
-Deno.test("JobQueueService.enqueue accepts concurrent execution mode", async () => {
+integrationTest("JobQueueService.enqueue accepts concurrent execution mode", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -997,7 +998,7 @@ Deno.test("JobQueueService.enqueue accepts concurrent execution mode", async () 
   }
 });
 
-Deno.test("JobQueueService.enqueue allows concurrent jobs with same reference", async () => {
+integrationTest("JobQueueService.enqueue allows concurrent jobs with same reference", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1023,7 +1024,7 @@ Deno.test("JobQueueService.enqueue allows concurrent jobs with same reference", 
   }
 });
 
-Deno.test("JobQueueService.enqueue throws DuplicateActiveJobError for sequential jobs with same reference", async () => {
+integrationTest("JobQueueService.enqueue throws DuplicateActiveJobError for sequential jobs with same reference", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1047,7 +1048,7 @@ Deno.test("JobQueueService.enqueue throws DuplicateActiveJobError for sequential
   }
 });
 
-Deno.test("JobQueueService.enqueue allows sequential job when concurrent exists for same reference", async () => {
+integrationTest("JobQueueService.enqueue allows sequential job when concurrent exists for same reference", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1073,7 +1074,7 @@ Deno.test("JobQueueService.enqueue allows sequential job when concurrent exists 
   }
 });
 
-Deno.test("JobQueueService.enqueue allows concurrent job when sequential exists for same reference", async () => {
+integrationTest("JobQueueService.enqueue allows concurrent job when sequential exists for same reference", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1099,7 +1100,7 @@ Deno.test("JobQueueService.enqueue allows concurrent job when sequential exists 
   }
 });
 
-Deno.test("TestSetupBuilder.withJob seeds jobs with execution mode", async () => {
+integrationTest("TestSetupBuilder.withJob seeds jobs with execution mode", async () => {
   const ctx = await TestSetupBuilder.create()
     .withJob({ type: "seeded-sequential" })
     .withJob({ type: "seeded-concurrent", executionMode: "concurrent" })
@@ -1122,7 +1123,7 @@ Deno.test("TestSetupBuilder.withJob seeds jobs with execution mode", async () =>
 // Event Subscription Tests
 // =============================================================================
 
-Deno.test("JobQueueService.subscribeToCompletion notifies on job completion", async () => {
+integrationTest("JobQueueService.subscribeToCompletion notifies on job completion", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1145,7 +1146,7 @@ Deno.test("JobQueueService.subscribeToCompletion notifies on job completion", as
   }
 });
 
-Deno.test("JobQueueService.subscribeToCompletion notifies on job failure", async () => {
+integrationTest("JobQueueService.subscribeToCompletion notifies on job failure", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1168,7 +1169,7 @@ Deno.test("JobQueueService.subscribeToCompletion notifies on job failure", async
   }
 });
 
-Deno.test("JobQueueService.subscribeToCompletion notifies on job cancellation", async () => {
+integrationTest("JobQueueService.subscribeToCompletion notifies on job cancellation", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1191,7 +1192,7 @@ Deno.test("JobQueueService.subscribeToCompletion notifies on job cancellation", 
   }
 });
 
-Deno.test("JobQueueService.subscribeToCompletion unsubscribe works", async () => {
+integrationTest("JobQueueService.subscribeToCompletion unsubscribe works", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1216,7 +1217,7 @@ Deno.test("JobQueueService.subscribeToCompletion unsubscribe works", async () =>
   }
 });
 
-Deno.test("JobQueueService.subscribeToCancellation notifies on cancellation request", async () => {
+integrationTest("JobQueueService.subscribeToCancellation notifies on cancellation request", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
@@ -1240,7 +1241,7 @@ Deno.test("JobQueueService.subscribeToCancellation notifies on cancellation requ
   }
 });
 
-Deno.test("JobQueueService supports multiple subscribers per job", async () => {
+integrationTest("JobQueueService supports multiple subscribers per job", async () => {
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {

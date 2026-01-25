@@ -2,7 +2,6 @@ import { expect } from "@std/expect";
 import {
   validateSettingValue,
   validateSettings,
-  requiresUserContext,
   isValidSettingName,
 } from "./settings.ts";
 import { SettingNames } from "../settings/types.ts";
@@ -174,20 +173,6 @@ Deno.test("validateSettings - returns all errors for mixed valid/invalid", () =>
 Deno.test("validateSettings - accepts empty settings object", () => {
   const result = validateSettings({});
   expect(result.valid).toBe(true);
-});
-
-// ============== requiresUserContext ==============
-
-Deno.test("requiresUserContext - returns true for user. prefix", () => {
-  expect(requiresUserContext("user.theme")).toBe(true);
-  expect(requiresUserContext("user.notifications")).toBe(true);
-  expect(requiresUserContext("user.")).toBe(true);
-});
-
-Deno.test("requiresUserContext - returns false for system settings", () => {
-  expect(requiresUserContext(SettingNames.LOG_LEVEL)).toBe(false);
-  expect(requiresUserContext(SettingNames.API_ACCESS_GROUPS)).toBe(false);
-  expect(requiresUserContext("log.level")).toBe(false);
 });
 
 // ============== isValidSettingName ==============

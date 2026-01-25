@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { SettingNames } from "../settings/types.ts";
 import {
   initializeLogger,
@@ -99,7 +100,7 @@ async function createLoggerTestContext(
 // Log level filtering tests
 // =====================
 
-Deno.test("logger.debug outputs at debug level", async () => {
+integrationTest("logger.debug outputs at debug level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -118,7 +119,7 @@ Deno.test("logger.debug outputs at debug level", async () => {
   }
 });
 
-Deno.test("logger.debug suppressed at info level", async () => {
+integrationTest("logger.debug suppressed at info level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -135,7 +136,7 @@ Deno.test("logger.debug suppressed at info level", async () => {
   }
 });
 
-Deno.test("logger.info outputs at info level", async () => {
+integrationTest("logger.info outputs at info level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -154,7 +155,7 @@ Deno.test("logger.info outputs at info level", async () => {
   }
 });
 
-Deno.test("logger.info suppressed at warn level", async () => {
+integrationTest("logger.info suppressed at warn level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("warn");
   const spy = createConsoleSpy();
 
@@ -171,7 +172,7 @@ Deno.test("logger.info suppressed at warn level", async () => {
   }
 });
 
-Deno.test("logger.warn outputs at warn level", async () => {
+integrationTest("logger.warn outputs at warn level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("warn");
   const spy = createConsoleSpy();
 
@@ -190,7 +191,7 @@ Deno.test("logger.warn outputs at warn level", async () => {
   }
 });
 
-Deno.test("logger.warn suppressed at error level", async () => {
+integrationTest("logger.warn suppressed at error level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("error");
   const spy = createConsoleSpy();
 
@@ -207,7 +208,7 @@ Deno.test("logger.warn suppressed at error level", async () => {
   }
 });
 
-Deno.test("logger.error outputs at error level", async () => {
+integrationTest("logger.error outputs at error level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("error");
   const spy = createConsoleSpy();
 
@@ -226,7 +227,7 @@ Deno.test("logger.error outputs at error level", async () => {
   }
 });
 
-Deno.test("logger.error suppressed at none level", async () => {
+integrationTest("logger.error suppressed at none level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("none");
   const spy = createConsoleSpy();
 
@@ -243,7 +244,7 @@ Deno.test("logger.error suppressed at none level", async () => {
   }
 });
 
-Deno.test("all log methods output at debug level", async () => {
+integrationTest("all log methods output at debug level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -269,7 +270,7 @@ Deno.test("all log methods output at debug level", async () => {
   }
 });
 
-Deno.test("none level suppresses all log methods", async () => {
+integrationTest("none level suppresses all log methods", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("none");
   const spy = createConsoleSpy();
 
@@ -293,7 +294,7 @@ Deno.test("none level suppresses all log methods", async () => {
 // Initialization tests
 // =====================
 
-Deno.test("initializeLogger fetches log level from settings", async () => {
+integrationTest("initializeLogger fetches log level from settings", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -311,7 +312,7 @@ Deno.test("initializeLogger fetches log level from settings", async () => {
   }
 });
 
-Deno.test("logger uses default info level before initialization", () => {
+integrationTest("logger uses default info level before initialization", () => {
   const spy = createConsoleSpy();
 
   try {
@@ -339,7 +340,7 @@ Deno.test("logger uses default info level before initialization", () => {
 // Stop refresh tests
 // =====================
 
-Deno.test("stopLoggerRefresh is idempotent", async () => {
+integrationTest("stopLoggerRefresh is idempotent", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
 
   try {
@@ -356,7 +357,7 @@ Deno.test("stopLoggerRefresh is idempotent", async () => {
   }
 });
 
-Deno.test("stopLoggerRefresh allows re-initialization", async () => {
+integrationTest("stopLoggerRefresh allows re-initialization", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -385,7 +386,7 @@ Deno.test("stopLoggerRefresh allows re-initialization", async () => {
 // Message formatting tests
 // =====================
 
-Deno.test("logger.debug prefixes with [DEBUG]", async () => {
+integrationTest("logger.debug prefixes with [DEBUG]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -402,7 +403,7 @@ Deno.test("logger.debug prefixes with [DEBUG]", async () => {
   }
 });
 
-Deno.test("logger.info prefixes with [INFO]", async () => {
+integrationTest("logger.info prefixes with [INFO]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -419,7 +420,7 @@ Deno.test("logger.info prefixes with [INFO]", async () => {
   }
 });
 
-Deno.test("logger.warn prefixes with [WARN]", async () => {
+integrationTest("logger.warn prefixes with [WARN]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("warn");
   const spy = createConsoleSpy();
 
@@ -436,7 +437,7 @@ Deno.test("logger.warn prefixes with [WARN]", async () => {
   }
 });
 
-Deno.test("logger.error prefixes with [ERROR]", async () => {
+integrationTest("logger.error prefixes with [ERROR]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("error");
   const spy = createConsoleSpy();
 
@@ -453,7 +454,7 @@ Deno.test("logger.error prefixes with [ERROR]", async () => {
   }
 });
 
-Deno.test("logger passes additional args to console", async () => {
+integrationTest("logger passes additional args to console", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -471,7 +472,7 @@ Deno.test("logger passes additional args to console", async () => {
   }
 });
 
-Deno.test("logger passes multiple args to console", async () => {
+integrationTest("logger passes multiple args to console", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -492,7 +493,7 @@ Deno.test("logger passes multiple args to console", async () => {
 // Settings integration tests
 // =====================
 
-Deno.test("logger updates level when settings change", async () => {
+integrationTest("logger updates level when settings change", async () => {
   // Start with info level
   const ctx = await TestSetupBuilder.create()
     .withSettings()
@@ -530,7 +531,7 @@ Deno.test("logger updates level when settings change", async () => {
   }
 });
 
-Deno.test("logger handles invalid log level gracefully", async () => {
+integrationTest("logger handles invalid log level gracefully", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withSetting(SettingNames.LOG_LEVEL, "debug")

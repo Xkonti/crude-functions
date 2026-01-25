@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import type { Context } from "@hono/hono";
@@ -52,7 +53,7 @@ function createMockApiKeyService(
 // Missing API Key Tests
 // =====================
 
-Deno.test("ApiKeyValidator returns error when no API key found", async () => {
+integrationTest("ApiKeyValidator returns error when no API key found", async () => {
   const mockApiKeyService = createMockApiKeyService(new Map());
   const validator = new ApiKeyValidator({
     apiKeyService: mockApiKeyService,
@@ -71,7 +72,7 @@ Deno.test("ApiKeyValidator returns error when no API key found", async () => {
   expect(result.source).toBeUndefined();
 });
 
-Deno.test("ApiKeyValidator returns error when no extractors provided", async () => {
+integrationTest("ApiKeyValidator returns error when no extractors provided", async () => {
   const mockApiKeyService = createMockApiKeyService(new Map());
   const validator = new ApiKeyValidator({
     apiKeyService: mockApiKeyService,
@@ -93,7 +94,7 @@ Deno.test("ApiKeyValidator returns error when no extractors provided", async () 
 // Invalid API Key Tests
 // =====================
 
-Deno.test("ApiKeyValidator returns error when API key not in any allowed group", async () => {
+integrationTest("ApiKeyValidator returns error when API key not in any allowed group", async () => {
   const mockApiKeyService = createMockApiKeyService(new Map());
   const validator = new ApiKeyValidator({
     apiKeyService: mockApiKeyService,
@@ -110,7 +111,7 @@ Deno.test("ApiKeyValidator returns error when API key not in any allowed group",
   expect(result.keyGroup).toBeUndefined();
 });
 
-Deno.test("ApiKeyValidator returns error when key exists in different group", async () => {
+integrationTest("ApiKeyValidator returns error when key exists in different group", async () => {
   // Key exists in group 10, not in groups 1 or 2
   const keyGroups = new Map([
     [
@@ -138,7 +139,7 @@ Deno.test("ApiKeyValidator returns error when key exists in different group", as
 // Valid API Key Tests
 // ===================
 
-Deno.test("ApiKeyValidator validates key in first allowed group", async () => {
+integrationTest("ApiKeyValidator validates key in first allowed group", async () => {
   // Key exists in group 100
   const keyGroups = new Map([
     [
@@ -166,7 +167,7 @@ Deno.test("ApiKeyValidator validates key in first allowed group", async () => {
   expect(result.error).toBeUndefined();
 });
 
-Deno.test("ApiKeyValidator validates key in second allowed group", async () => {
+integrationTest("ApiKeyValidator validates key in second allowed group", async () => {
   // Key exists in group 200, not in group 100
   const keyGroups = new Map([
     [
@@ -193,7 +194,7 @@ Deno.test("ApiKeyValidator validates key in second allowed group", async () => {
   expect(result.source).toBe("Authorization Bearer");
 });
 
-Deno.test("ApiKeyValidator returns first matching group when key exists in multiple groups", async () => {
+integrationTest("ApiKeyValidator returns first matching group when key exists in multiple groups", async () => {
   // Same key exists in both groups 10 and 20
   const keyGroups = new Map([
     [
@@ -226,7 +227,7 @@ Deno.test("ApiKeyValidator returns first matching group when key exists in multi
 // Extractor Priority Tests
 // ==========================
 
-Deno.test("ApiKeyValidator uses first extractor that finds a key", async () => {
+integrationTest("ApiKeyValidator uses first extractor that finds a key", async () => {
   const keyGroups = new Map([
     [
       1,
@@ -250,7 +251,7 @@ Deno.test("ApiKeyValidator uses first extractor that finds a key", async () => {
   expect(result.source).toBe("first source");
 });
 
-Deno.test("ApiKeyValidator falls back to second extractor when first returns null", async () => {
+integrationTest("ApiKeyValidator falls back to second extractor when first returns null", async () => {
   const keyGroups = new Map([
     [
       2,
@@ -278,7 +279,7 @@ Deno.test("ApiKeyValidator falls back to second extractor when first returns nul
 // Default Extractors Tests
 // ==========================
 
-Deno.test("ApiKeyValidator uses default extractors when none provided", async () => {
+integrationTest("ApiKeyValidator uses default extractors when none provided", async () => {
   const keyGroups = new Map([
     [
       5,
@@ -304,7 +305,7 @@ Deno.test("ApiKeyValidator uses default extractors when none provided", async ()
   expect(result.source).toBe("X-API-Key header");
 });
 
-Deno.test("ApiKeyValidator default extractors work with Authorization Bearer", async () => {
+integrationTest("ApiKeyValidator default extractors work with Authorization Bearer", async () => {
   const keyGroups = new Map([
     [
       8,
@@ -328,7 +329,7 @@ Deno.test("ApiKeyValidator default extractors work with Authorization Bearer", a
   expect(result.source).toBe("Authorization Bearer");
 });
 
-Deno.test("ApiKeyValidator default extractors work with query parameter", async () => {
+integrationTest("ApiKeyValidator default extractors work with query parameter", async () => {
   const keyGroups = new Map([
     [
       15,
@@ -354,7 +355,7 @@ Deno.test("ApiKeyValidator default extractors work with query parameter", async 
 // Integration Test with Real Service
 // ==================================
 
-Deno.test("ApiKeyValidator integration with real ApiKeyService", async () => {
+integrationTest("ApiKeyValidator integration with real ApiKeyService", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("production", "Production API keys")
     .withApiKey("production", "real-api-key-123", "primary-key")
@@ -399,7 +400,7 @@ Deno.test("ApiKeyValidator integration with real ApiKeyService", async () => {
   }
 });
 
-Deno.test("ApiKeyValidator integration rejects key from wrong group", async () => {
+integrationTest("ApiKeyValidator integration rejects key from wrong group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("admin", "Admin keys")
     .withApiKeyGroup("user", "User keys")
@@ -432,7 +433,7 @@ Deno.test("ApiKeyValidator integration rejects key from wrong group", async () =
   }
 });
 
-Deno.test("ApiKeyValidator integration with multiple allowed groups", async () => {
+integrationTest("ApiKeyValidator integration with multiple allowed groups", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("primary", "Primary keys")
     .withApiKeyGroup("secondary", "Secondary keys")
@@ -469,7 +470,7 @@ Deno.test("ApiKeyValidator integration with multiple allowed groups", async () =
 // Empty Allowed Groups
 // ====================
 
-Deno.test("ApiKeyValidator rejects when allowed groups list is empty", async () => {
+integrationTest("ApiKeyValidator rejects when allowed groups list is empty", async () => {
   const keyGroups = new Map([
     [
       1,

@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 
@@ -5,7 +6,7 @@ import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 // ExecutionMetricsService tests
 // =====================
 
-Deno.test("ExecutionMetricsService stores metric entry", async () => {
+integrationTest("ExecutionMetricsService stores metric entry", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -31,7 +32,7 @@ Deno.test("ExecutionMetricsService stores metric entry", async () => {
   }
 });
 
-Deno.test("ExecutionMetricsService stores metric with custom timestamp", async () => {
+integrationTest("ExecutionMetricsService stores metric with custom timestamp", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -55,7 +56,7 @@ Deno.test("ExecutionMetricsService stores metric with custom timestamp", async (
   }
 });
 
-Deno.test("ExecutionMetricsService retrieves metrics by routeId", async () => {
+integrationTest("ExecutionMetricsService retrieves metrics by routeId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -76,7 +77,7 @@ Deno.test("ExecutionMetricsService retrieves metrics by routeId", async () => {
   }
 });
 
-Deno.test("ExecutionMetricsService retrieves metrics by routeId with type filter", async () => {
+integrationTest("ExecutionMetricsService retrieves metrics by routeId with type filter", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -94,7 +95,7 @@ Deno.test("ExecutionMetricsService retrieves metrics by routeId with type filter
   }
 });
 
-Deno.test("ExecutionMetricsService retrieves metrics by routeId with limit", async () => {
+integrationTest("ExecutionMetricsService retrieves metrics by routeId with limit", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -114,7 +115,7 @@ Deno.test("ExecutionMetricsService retrieves metrics by routeId with limit", asy
   }
 });
 
-Deno.test("ExecutionMetricsService getRecent returns most recent metrics", async () => {
+integrationTest("ExecutionMetricsService getRecent returns most recent metrics", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -135,7 +136,7 @@ Deno.test("ExecutionMetricsService getRecent returns most recent metrics", async
   }
 });
 
-Deno.test("ExecutionMetricsService deletes metrics older than date", async () => {
+integrationTest("ExecutionMetricsService deletes metrics older than date", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -156,7 +157,7 @@ Deno.test("ExecutionMetricsService deletes metrics older than date", async () =>
   }
 });
 
-Deno.test("ExecutionMetricsService deletes metrics by routeId", async () => {
+integrationTest("ExecutionMetricsService deletes metrics by routeId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -178,7 +179,7 @@ Deno.test("ExecutionMetricsService deletes metrics by routeId", async () => {
   }
 });
 
-Deno.test("ExecutionMetricsService stores all metric types", async () => {
+integrationTest("ExecutionMetricsService stores all metric types", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -202,7 +203,7 @@ Deno.test("ExecutionMetricsService stores all metric types", async () => {
   }
 });
 
-Deno.test("ExecutionMetricsService getDistinctRouteIds returns all unique route IDs", async () => {
+integrationTest("ExecutionMetricsService getDistinctRouteIds returns all unique route IDs", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -220,7 +221,7 @@ Deno.test("ExecutionMetricsService getDistinctRouteIds returns all unique route 
   }
 });
 
-Deno.test("ExecutionMetricsService getDistinctRouteIdsByType returns route IDs for specific type", async () => {
+integrationTest("ExecutionMetricsService getDistinctRouteIdsByType returns route IDs for specific type", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -241,7 +242,7 @@ Deno.test("ExecutionMetricsService getDistinctRouteIdsByType returns route IDs f
   }
 });
 
-Deno.test("ExecutionMetricsService getByRouteIdTypeAndTimeRange returns metrics in range", async () => {
+integrationTest("ExecutionMetricsService getByRouteIdTypeAndTimeRange returns metrics in range", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -288,7 +289,7 @@ Deno.test("ExecutionMetricsService getByRouteIdTypeAndTimeRange returns metrics 
   }
 });
 
-Deno.test("ExecutionMetricsService deleteByRouteIdTypeAndTimeRange deletes metrics in range", async () => {
+integrationTest("ExecutionMetricsService deleteByRouteIdTypeAndTimeRange deletes metrics in range", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -336,7 +337,7 @@ Deno.test("ExecutionMetricsService deleteByRouteIdTypeAndTimeRange deletes metri
   }
 });
 
-Deno.test("ExecutionMetricsService getMostRecentByType returns most recent metric", async () => {
+integrationTest("ExecutionMetricsService getMostRecentByType returns most recent metric", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -378,7 +379,7 @@ Deno.test("ExecutionMetricsService getMostRecentByType returns most recent metri
   }
 });
 
-Deno.test("ExecutionMetricsService getMostRecentByType returns null when no metrics", async () => {
+integrationTest("ExecutionMetricsService getMostRecentByType returns null when no metrics", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -391,7 +392,7 @@ Deno.test("ExecutionMetricsService getMostRecentByType returns null when no metr
   }
 });
 
-Deno.test("ExecutionMetricsService getOldestByType returns oldest metric", async () => {
+integrationTest("ExecutionMetricsService getOldestByType returns oldest metric", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();
@@ -425,7 +426,7 @@ Deno.test("ExecutionMetricsService getOldestByType returns oldest metric", async
   }
 });
 
-Deno.test("ExecutionMetricsService deleteByTypeOlderThan deletes old metrics of type", async () => {
+integrationTest("ExecutionMetricsService deleteByTypeOlderThan deletes old metrics of type", async () => {
   const ctx = await TestSetupBuilder.create()
     .withExecutionMetricsService()
     .build();

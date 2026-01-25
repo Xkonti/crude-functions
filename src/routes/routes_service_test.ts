@@ -6,11 +6,12 @@ import {
   validateMethods,
 } from "../validation/routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 
 // ============== Validation Function Tests ==============
 
 // Validation tests - route name
-Deno.test("validateRouteName accepts valid names", () => {
+integrationTest("validateRouteName accepts valid names", () => {
   expect(validateRouteName("hello")).toBe(true);
   expect(validateRouteName("user-create")).toBe(true);
   expect(validateRouteName("get_users")).toBe(true);
@@ -18,14 +19,14 @@ Deno.test("validateRouteName accepts valid names", () => {
   expect(validateRouteName("a")).toBe(true);
 });
 
-Deno.test("validateRouteName rejects empty/whitespace names", () => {
+integrationTest("validateRouteName rejects empty/whitespace names", () => {
   expect(validateRouteName("")).toBe(false);
   expect(validateRouteName("  ")).toBe(false);
   expect(validateRouteName("\t")).toBe(false);
 });
 
 // Validation tests - route path
-Deno.test("validateRoutePath accepts valid paths", () => {
+integrationTest("validateRoutePath accepts valid paths", () => {
   expect(validateRoutePath("/")).toBe(true);
   expect(validateRoutePath("/users")).toBe(true);
   expect(validateRoutePath("/users/:id")).toBe(true);
@@ -33,14 +34,14 @@ Deno.test("validateRoutePath accepts valid paths", () => {
   expect(validateRoutePath("/users/:id/posts/:postId")).toBe(true);
 });
 
-Deno.test("validateRoutePath rejects invalid paths", () => {
+integrationTest("validateRoutePath rejects invalid paths", () => {
   expect(validateRoutePath("")).toBe(false);
   expect(validateRoutePath("users")).toBe(false); // must start with /
   expect(validateRoutePath("//users")).toBe(false); // double slash
 });
 
 // Validation tests - methods
-Deno.test("validateMethods accepts valid HTTP methods", () => {
+integrationTest("validateMethods accepts valid HTTP methods", () => {
   expect(validateMethods(["GET"])).toBe(true);
   expect(validateMethods(["POST"])).toBe(true);
   expect(validateMethods(["PUT"])).toBe(true);
@@ -51,11 +52,11 @@ Deno.test("validateMethods accepts valid HTTP methods", () => {
   expect(validateMethods(["GET", "POST", "PUT"])).toBe(true);
 });
 
-Deno.test("validateMethods rejects empty array", () => {
+integrationTest("validateMethods rejects empty array", () => {
   expect(validateMethods([])).toBe(false);
 });
 
-Deno.test("validateMethods rejects invalid methods", () => {
+integrationTest("validateMethods rejects invalid methods", () => {
   expect(validateMethods(["INVALID"])).toBe(false);
   expect(validateMethods(["get"])).toBe(false); // lowercase
   expect(validateMethods(["GET", "INVALID"])).toBe(false);
@@ -64,7 +65,7 @@ Deno.test("validateMethods rejects invalid methods", () => {
 // ============== RoutesService Tests ==============
 
 // Basic CRUD tests
-Deno.test("RoutesService.getAll returns empty array initially", async () => {
+integrationTest("RoutesService.getAll returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     const routes = await ctx.routesService.getAll();
@@ -74,7 +75,7 @@ Deno.test("RoutesService.getAll returns empty array initially", async () => {
   }
 });
 
-Deno.test("RoutesService.addRoute creates route with required fields", async () => {
+integrationTest("RoutesService.addRoute creates route with required fields", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -97,7 +98,7 @@ Deno.test("RoutesService.addRoute creates route with required fields", async () 
   }
 });
 
-Deno.test("RoutesService.addRoute creates route with all fields", async () => {
+integrationTest("RoutesService.addRoute creates route with all fields", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     // Use dummy group ID (no FK constraint in routes table)
@@ -122,7 +123,7 @@ Deno.test("RoutesService.addRoute creates route with all fields", async () => {
   }
 });
 
-Deno.test("RoutesService.getByName returns route or null", async () => {
+integrationTest("RoutesService.getByName returns route or null", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -142,7 +143,7 @@ Deno.test("RoutesService.getByName returns route or null", async () => {
   }
 });
 
-Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
+integrationTest("RoutesService.addRoute throws on duplicate name", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -165,7 +166,7 @@ Deno.test("RoutesService.addRoute throws on duplicate name", async () => {
   }
 });
 
-Deno.test("RoutesService.addRoute throws on duplicate route+method", async () => {
+integrationTest("RoutesService.addRoute throws on duplicate route+method", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -188,7 +189,7 @@ Deno.test("RoutesService.addRoute throws on duplicate route+method", async () =>
   }
 });
 
-Deno.test("RoutesService.addRoute allows same route with different methods", async () => {
+integrationTest("RoutesService.addRoute allows same route with different methods", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -213,7 +214,7 @@ Deno.test("RoutesService.addRoute allows same route with different methods", asy
   }
 });
 
-Deno.test("RoutesService.removeRoute removes by name", async () => {
+integrationTest("RoutesService.removeRoute removes by name", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -239,7 +240,7 @@ Deno.test("RoutesService.removeRoute removes by name", async () => {
   }
 });
 
-Deno.test("RoutesService.removeRoute is no-op for non-existent name", async () => {
+integrationTest("RoutesService.removeRoute is no-op for non-existent name", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -260,7 +261,7 @@ Deno.test("RoutesService.removeRoute is no-op for non-existent name", async () =
 
 // ============== Dirty Flag & Rebuild Tests ==============
 
-Deno.test("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async () => {
+integrationTest("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -286,7 +287,7 @@ Deno.test("rebuildIfNeeded triggers rebuild on first call (starts dirty)", async
   }
 });
 
-Deno.test("rebuildIfNeeded skips rebuild when not dirty", async () => {
+integrationTest("rebuildIfNeeded skips rebuild when not dirty", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     let rebuildCount = 0;
@@ -303,7 +304,7 @@ Deno.test("rebuildIfNeeded skips rebuild when not dirty", async () => {
   }
 });
 
-Deno.test("rebuildIfNeeded rebuilds after addRoute", async () => {
+integrationTest("rebuildIfNeeded rebuilds after addRoute", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     let rebuildCount = 0;
@@ -328,7 +329,7 @@ Deno.test("rebuildIfNeeded rebuilds after addRoute", async () => {
   }
 });
 
-Deno.test("rebuildIfNeeded rebuilds after removeRoute", async () => {
+integrationTest("rebuildIfNeeded rebuilds after removeRoute", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -361,7 +362,7 @@ Deno.test("rebuildIfNeeded rebuilds after removeRoute", async () => {
   }
 });
 
-Deno.test("removeRoute does not mark dirty if nothing deleted", async () => {
+integrationTest("removeRoute does not mark dirty if nothing deleted", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     let rebuildCount = 0;
@@ -383,7 +384,7 @@ Deno.test("removeRoute does not mark dirty if nothing deleted", async () => {
 
 // ============== Concurrency Tests ==============
 
-Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
+integrationTest("concurrent rebuildIfNeeded calls share single rebuild", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -413,7 +414,7 @@ Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
   }
 });
 
-Deno.test("addRoute waits for in-progress rebuild", async () => {
+integrationTest("addRoute waits for in-progress rebuild", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     const events: string[] = [];
@@ -454,7 +455,7 @@ Deno.test("addRoute waits for in-progress rebuild", async () => {
   }
 });
 
-Deno.test("multiple writes are serialized", async () => {
+integrationTest("multiple writes are serialized", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     // Clear initial dirty flag
@@ -484,7 +485,7 @@ Deno.test("multiple writes are serialized", async () => {
 
 // ============== updateRoute Tests ==============
 
-Deno.test("RoutesService.updateRoute updates route in place", async () => {
+integrationTest("RoutesService.updateRoute updates route in place", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -521,7 +522,7 @@ Deno.test("RoutesService.updateRoute updates route in place", async () => {
   }
 });
 
-Deno.test("RoutesService.updateRoute throws on non-existent ID", async () => {
+integrationTest("RoutesService.updateRoute throws on non-existent ID", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await expect(
@@ -537,7 +538,7 @@ Deno.test("RoutesService.updateRoute throws on non-existent ID", async () => {
   }
 });
 
-Deno.test("RoutesService.updateRoute throws on duplicate name", async () => {
+integrationTest("RoutesService.updateRoute throws on duplicate name", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -568,7 +569,7 @@ Deno.test("RoutesService.updateRoute throws on duplicate name", async () => {
   }
 });
 
-Deno.test("RoutesService.updateRoute allows keeping same name", async () => {
+integrationTest("RoutesService.updateRoute allows keeping same name", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -596,7 +597,7 @@ Deno.test("RoutesService.updateRoute allows keeping same name", async () => {
   }
 });
 
-Deno.test("RoutesService.updateRoute throws on duplicate route+method", async () => {
+integrationTest("RoutesService.updateRoute throws on duplicate route+method", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -627,7 +628,7 @@ Deno.test("RoutesService.updateRoute throws on duplicate route+method", async ()
   }
 });
 
-Deno.test("RoutesService.updateRoute allows keeping same route+method", async () => {
+integrationTest("RoutesService.updateRoute allows keeping same route+method", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -654,7 +655,7 @@ Deno.test("RoutesService.updateRoute allows keeping same route+method", async ()
   }
 });
 
-Deno.test("RoutesService.updateRoute marks dirty flag", async () => {
+integrationTest("RoutesService.updateRoute marks dirty flag", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -686,7 +687,7 @@ Deno.test("RoutesService.updateRoute marks dirty flag", async () => {
 
 // ============== removeRouteById Tests ==============
 
-Deno.test("RoutesService.removeRouteById removes by ID", async () => {
+integrationTest("RoutesService.removeRouteById removes by ID", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute({
@@ -706,7 +707,7 @@ Deno.test("RoutesService.removeRouteById removes by ID", async () => {
   }
 });
 
-Deno.test("RoutesService.removeRouteById is no-op for non-existent ID", async () => {
+integrationTest("RoutesService.removeRouteById is no-op for non-existent ID", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     let rebuildCount = 0;

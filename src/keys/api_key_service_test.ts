@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import {
   validateKeyGroup,
@@ -10,7 +11,7 @@ import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 // Validation tests (pure functions, no database needed)
 // =====================
 
-Deno.test("validateKeyGroup accepts valid groups", () => {
+integrationTest("validateKeyGroup accepts valid groups", () => {
   expect(validateKeyGroup("management")).toBe(true);
   expect(validateKeyGroup("email-service")).toBe(true);
   expect(validateKeyGroup("test_key")).toBe(true);
@@ -18,7 +19,7 @@ Deno.test("validateKeyGroup accepts valid groups", () => {
   expect(validateKeyGroup("a")).toBe(true);
 });
 
-Deno.test("validateKeyGroup rejects invalid groups", () => {
+integrationTest("validateKeyGroup rejects invalid groups", () => {
   expect(validateKeyGroup("")).toBe(false);
   expect(validateKeyGroup("UPPERCASE")).toBe(false);
   expect(validateKeyGroup("has space")).toBe(false);
@@ -26,7 +27,7 @@ Deno.test("validateKeyGroup rejects invalid groups", () => {
   expect(validateKeyGroup("has@special")).toBe(false);
 });
 
-Deno.test("validateKeyName accepts valid names", () => {
+integrationTest("validateKeyName accepts valid names", () => {
   expect(validateKeyName("my-key")).toBe(true);
   expect(validateKeyName("admin-key")).toBe(true);
   expect(validateKeyName("test_key")).toBe(true);
@@ -34,7 +35,7 @@ Deno.test("validateKeyName accepts valid names", () => {
   expect(validateKeyName("a")).toBe(true);
 });
 
-Deno.test("validateKeyName rejects invalid names", () => {
+integrationTest("validateKeyName rejects invalid names", () => {
   expect(validateKeyName("")).toBe(false);
   expect(validateKeyName("UPPERCASE")).toBe(false);
   expect(validateKeyName("has space")).toBe(false);
@@ -42,14 +43,14 @@ Deno.test("validateKeyName rejects invalid names", () => {
   expect(validateKeyName("has@special")).toBe(false);
 });
 
-Deno.test("validateKeyValue accepts valid values", () => {
+integrationTest("validateKeyValue accepts valid values", () => {
   expect(validateKeyValue("abc123")).toBe(true);
   expect(validateKeyValue("ABC123")).toBe(true);
   expect(validateKeyValue("key-with-dashes")).toBe(true);
   expect(validateKeyValue("key_with_underscores")).toBe(true);
 });
 
-Deno.test("validateKeyValue rejects invalid values", () => {
+integrationTest("validateKeyValue rejects invalid values", () => {
   expect(validateKeyValue("")).toBe(false);
   expect(validateKeyValue("has space")).toBe(false);
   expect(validateKeyValue("has.dot")).toBe(false);
@@ -61,7 +62,7 @@ Deno.test("validateKeyValue rejects invalid values", () => {
 // ApiKeyService tests
 // =====================
 
-Deno.test("ApiKeyService returns empty map when no keys", async () => {
+integrationTest("ApiKeyService returns empty map when no keys", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -72,7 +73,7 @@ Deno.test("ApiKeyService returns empty map when no keys", async () => {
   }
 });
 
-Deno.test("ApiKeyService.addKey adds key to database", async () => {
+integrationTest("ApiKeyService.addKey adds key to database", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -94,7 +95,7 @@ Deno.test("ApiKeyService.addKey adds key to database", async () => {
   }
 });
 
-Deno.test("ApiKeyService.addKey silently ignores duplicates", async () => {
+integrationTest("ApiKeyService.addKey silently ignores duplicates", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -109,7 +110,7 @@ Deno.test("ApiKeyService.addKey silently ignores duplicates", async () => {
   }
 });
 
-Deno.test("ApiKeyService.getAll returns grouped keys", async () => {
+integrationTest("ApiKeyService.getAll returns grouped keys", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -127,7 +128,7 @@ Deno.test("ApiKeyService.getAll returns grouped keys", async () => {
   }
 });
 
-Deno.test("ApiKeyService.getKeys normalizes group to lowercase", async () => {
+integrationTest("ApiKeyService.getKeys normalizes group to lowercase", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -145,7 +146,7 @@ Deno.test("ApiKeyService.getKeys normalizes group to lowercase", async () => {
   }
 });
 
-Deno.test("ApiKeyService.getKeys returns null for nonexistent group", async () => {
+integrationTest("ApiKeyService.getKeys returns null for nonexistent group", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -156,7 +157,7 @@ Deno.test("ApiKeyService.getKeys returns null for nonexistent group", async () =
   }
 });
 
-Deno.test("ApiKeyService.hasKey returns true for existing key", async () => {
+integrationTest("ApiKeyService.hasKey returns true for existing key", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -170,7 +171,7 @@ Deno.test("ApiKeyService.hasKey returns true for existing key", async () => {
   }
 });
 
-Deno.test("ApiKeyService.removeKey removes specific key", async () => {
+integrationTest("ApiKeyService.removeKey removes specific key", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -186,7 +187,7 @@ Deno.test("ApiKeyService.removeKey removes specific key", async () => {
   }
 });
 
-Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
+integrationTest("ApiKeyService.removeKeyById removes key by ID", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -211,7 +212,7 @@ Deno.test("ApiKeyService.removeKeyById removes key by ID", async () => {
 // Group CRUD tests
 // =====================
 
-Deno.test("ApiKeyService.getGroups returns groups from database", async () => {
+integrationTest("ApiKeyService.getGroups returns groups from database", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group", "Test group description")
     .build();
@@ -227,7 +228,7 @@ Deno.test("ApiKeyService.getGroups returns groups from database", async () => {
   }
 });
 
-Deno.test("ApiKeyService.createGroup creates a new group", async () => {
+integrationTest("ApiKeyService.createGroup creates a new group", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -249,7 +250,7 @@ Deno.test("ApiKeyService.createGroup creates a new group", async () => {
   }
 });
 
-Deno.test("ApiKeyService.getGroupByName returns group by name", async () => {
+integrationTest("ApiKeyService.getGroupByName returns group by name", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -264,7 +265,7 @@ Deno.test("ApiKeyService.getGroupByName returns group by name", async () => {
   }
 });
 
-Deno.test("ApiKeyService.getGroupByName returns null for nonexistent group", async () => {
+integrationTest("ApiKeyService.getGroupByName returns null for nonexistent group", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -275,7 +276,7 @@ Deno.test("ApiKeyService.getGroupByName returns null for nonexistent group", asy
   }
 });
 
-Deno.test("ApiKeyService.getGroupById returns group by ID", async () => {
+integrationTest("ApiKeyService.getGroupById returns group by ID", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -290,7 +291,7 @@ Deno.test("ApiKeyService.getGroupById returns group by ID", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateGroup updates group description", async () => {
+integrationTest("ApiKeyService.updateGroup updates group description", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -304,7 +305,7 @@ Deno.test("ApiKeyService.updateGroup updates group description", async () => {
   }
 });
 
-Deno.test("ApiKeyService.deleteGroup removes group", async () => {
+integrationTest("ApiKeyService.deleteGroup removes group", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -318,7 +319,7 @@ Deno.test("ApiKeyService.deleteGroup removes group", async () => {
   }
 });
 
-Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
+integrationTest("ApiKeyService.deleteGroup cascades to keys", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -336,7 +337,7 @@ Deno.test("ApiKeyService.deleteGroup cascades to keys", async () => {
   }
 });
 
-Deno.test("ApiKeyService.getOrCreateGroup creates group if not exists", async () => {
+integrationTest("ApiKeyService.getOrCreateGroup creates group if not exists", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -351,7 +352,7 @@ Deno.test("ApiKeyService.getOrCreateGroup creates group if not exists", async ()
   }
 });
 
-Deno.test("ApiKeyService.addKey creates group if needed", async () => {
+integrationTest("ApiKeyService.addKey creates group if needed", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -370,7 +371,7 @@ Deno.test("ApiKeyService.addKey creates group if needed", async () => {
 // Encryption tests
 // =====================
 
-Deno.test("ApiKeyService - Encryption at rest", async (t) => {
+integrationTest("ApiKeyService - Encryption at rest", async (t) => {
   await t.step("stores keys encrypted in database", async () => {
     const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
@@ -445,7 +446,7 @@ Deno.test("ApiKeyService - Encryption at rest", async (t) => {
 // Hash-based lookup tests
 // =====================
 
-Deno.test("ApiKeyService - Hash stored on addKey", async () => {
+integrationTest("ApiKeyService - Hash stored on addKey", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -463,7 +464,7 @@ Deno.test("ApiKeyService - Hash stored on addKey", async () => {
   }
 });
 
-Deno.test("ApiKeyService - Different keys produce different hashes", async () => {
+integrationTest("ApiKeyService - Different keys produce different hashes", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -483,7 +484,7 @@ Deno.test("ApiKeyService - Different keys produce different hashes", async () =>
   }
 });
 
-Deno.test("ApiKeyService - Performance with many keys", async () => {
+integrationTest("ApiKeyService - Performance with many keys", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -506,7 +507,7 @@ Deno.test("ApiKeyService - Performance with many keys", async () => {
   }
 });
 
-Deno.test("ApiKeyService - O(1) scaling verification", async () => {
+integrationTest("ApiKeyService - O(1) scaling verification", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -540,7 +541,7 @@ Deno.test("ApiKeyService - O(1) scaling verification", async () => {
   }
 });
 
-Deno.test("ApiKeyService - getKeyByValue uses hash lookup", async () => {
+integrationTest("ApiKeyService - getKeyByValue uses hash lookup", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -556,7 +557,7 @@ Deno.test("ApiKeyService - getKeyByValue uses hash lookup", async () => {
   }
 });
 
-Deno.test("ApiKeyService - removeKey uses hash lookup", async () => {
+integrationTest("ApiKeyService - removeKey uses hash lookup", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -576,7 +577,7 @@ Deno.test("ApiKeyService - removeKey uses hash lookup", async () => {
 // getKeyCountForGroup tests
 // =====================
 
-Deno.test("ApiKeyService.getKeyCountForGroup returns 0 for empty group", async () => {
+integrationTest("ApiKeyService.getKeyCountForGroup returns 0 for empty group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .build();
@@ -590,7 +591,7 @@ Deno.test("ApiKeyService.getKeyCountForGroup returns 0 for empty group", async (
   }
 });
 
-Deno.test("ApiKeyService.getKeyCountForGroup returns correct count", async () => {
+integrationTest("ApiKeyService.getKeyCountForGroup returns correct count", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "key1", "key-1")
@@ -606,7 +607,7 @@ Deno.test("ApiKeyService.getKeyCountForGroup returns correct count", async () =>
   }
 });
 
-Deno.test("ApiKeyService.getKeyCountForGroup returns 0 for non-existent group id", async () => {
+integrationTest("ApiKeyService.getKeyCountForGroup returns 0 for non-existent group id", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -621,7 +622,7 @@ Deno.test("ApiKeyService.getKeyCountForGroup returns 0 for non-existent group id
 // updateKey tests
 // =====================
 
-Deno.test("ApiKeyService.updateKey updates name successfully", async () => {
+integrationTest("ApiKeyService.updateKey updates name successfully", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "original-value", "original-name")
@@ -641,7 +642,7 @@ Deno.test("ApiKeyService.updateKey updates name successfully", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateKey updates value and hash", async () => {
+integrationTest("ApiKeyService.updateKey updates value and hash", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "original-value", "test-key")
@@ -665,7 +666,7 @@ Deno.test("ApiKeyService.updateKey updates value and hash", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateKey updates description", async () => {
+integrationTest("ApiKeyService.updateKey updates description", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key", "Old description")
@@ -684,7 +685,7 @@ Deno.test("ApiKeyService.updateKey updates description", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateKey can clear description", async () => {
+integrationTest("ApiKeyService.updateKey can clear description", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key", "Has description")
@@ -703,7 +704,7 @@ Deno.test("ApiKeyService.updateKey can clear description", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateKey throws for non-existent key", async () => {
+integrationTest("ApiKeyService.updateKey throws for non-existent key", async () => {
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
@@ -715,7 +716,7 @@ Deno.test("ApiKeyService.updateKey throws for non-existent key", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateKey throws for duplicate name in group", async () => {
+integrationTest("ApiKeyService.updateKey throws for duplicate name in group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "key-one")
@@ -735,7 +736,7 @@ Deno.test("ApiKeyService.updateKey throws for duplicate name in group", async ()
   }
 });
 
-Deno.test("ApiKeyService.updateKey allows same name on same key", async () => {
+integrationTest("ApiKeyService.updateKey allows same name on same key", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key")
@@ -756,7 +757,7 @@ Deno.test("ApiKeyService.updateKey allows same name on same key", async () => {
   }
 });
 
-Deno.test("ApiKeyService.updateKey with empty updates does nothing", async () => {
+integrationTest("ApiKeyService.updateKey with empty updates does nothing", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key", "Original desc")
@@ -778,7 +779,7 @@ Deno.test("ApiKeyService.updateKey with empty updates does nothing", async () =>
   }
 });
 
-Deno.test("ApiKeyService.updateKey throws for invalid name format", async () => {
+integrationTest("ApiKeyService.updateKey throws for invalid name format", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "value1", "test-key")
@@ -796,7 +797,7 @@ Deno.test("ApiKeyService.updateKey throws for invalid name format", async () => 
   }
 });
 
-Deno.test("ApiKeyService.updateKey can update multiple fields", async () => {
+integrationTest("ApiKeyService.updateKey can update multiple fields", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "old-value", "old-name", "Old desc")

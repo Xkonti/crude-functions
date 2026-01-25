@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { createSourceRoutes, createSourceWebhookRoute } from "./source_routes.ts";
 
 /**
@@ -28,7 +29,7 @@ async function createTestApp() {
 // CRUD Operations - List and Get
 // =============================================================================
 
-Deno.test("GET /api/sources returns empty array initially", async () => {
+integrationTest("GET /api/sources returns empty array initially", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources");
@@ -41,7 +42,7 @@ Deno.test("GET /api/sources returns empty array initially", async () => {
   }
 });
 
-Deno.test("GET /api/sources/:id returns 404 for non-existent source", async () => {
+integrationTest("GET /api/sources/:id returns 404 for non-existent source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources/999");
@@ -54,7 +55,7 @@ Deno.test("GET /api/sources/:id returns 404 for non-existent source", async () =
   }
 });
 
-Deno.test("GET /api/sources/:id returns 400 for invalid ID", async () => {
+integrationTest("GET /api/sources/:id returns 400 for invalid ID", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources/invalid");
@@ -71,7 +72,7 @@ Deno.test("GET /api/sources/:id returns 400 for invalid ID", async () => {
 // CRUD Operations - Create
 // =============================================================================
 
-Deno.test("POST /api/sources creates manual source", async () => {
+integrationTest("POST /api/sources creates manual source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources", {
@@ -95,7 +96,7 @@ Deno.test("POST /api/sources creates manual source", async () => {
   }
 });
 
-Deno.test("POST /api/sources creates git source", async () => {
+integrationTest("POST /api/sources creates git source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources", {
@@ -125,7 +126,7 @@ Deno.test("POST /api/sources creates git source", async () => {
   }
 });
 
-Deno.test("POST /api/sources redacts authToken in response", async () => {
+integrationTest("POST /api/sources redacts authToken in response", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources", {
@@ -151,7 +152,7 @@ Deno.test("POST /api/sources redacts authToken in response", async () => {
   }
 });
 
-Deno.test("POST /api/sources returns 400 for missing name", async () => {
+integrationTest("POST /api/sources returns 400 for missing name", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources", {
@@ -171,7 +172,7 @@ Deno.test("POST /api/sources returns 400 for missing name", async () => {
   }
 });
 
-Deno.test("POST /api/sources returns 400 for missing type", async () => {
+integrationTest("POST /api/sources returns 400 for missing type", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources", {
@@ -191,7 +192,7 @@ Deno.test("POST /api/sources returns 400 for missing type", async () => {
   }
 });
 
-Deno.test("POST /api/sources returns 400 for invalid type", async () => {
+integrationTest("POST /api/sources returns 400 for invalid type", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources", {
@@ -212,7 +213,7 @@ Deno.test("POST /api/sources returns 400 for invalid type", async () => {
   }
 });
 
-Deno.test("POST /api/sources returns 409 for duplicate name", async () => {
+integrationTest("POST /api/sources returns 409 for duplicate name", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create first source
@@ -248,7 +249,7 @@ Deno.test("POST /api/sources returns 409 for duplicate name", async () => {
 // CRUD Operations - Update
 // =============================================================================
 
-Deno.test("PUT /api/sources/:id updates source settings", async () => {
+integrationTest("PUT /api/sources/:id updates source settings", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create source
@@ -282,7 +283,7 @@ Deno.test("PUT /api/sources/:id updates source settings", async () => {
   }
 });
 
-Deno.test("PUT /api/sources/:id returns 404 for non-existent source", async () => {
+integrationTest("PUT /api/sources/:id returns 404 for non-existent source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources/999", {
@@ -301,7 +302,7 @@ Deno.test("PUT /api/sources/:id returns 404 for non-existent source", async () =
 // CRUD Operations - Delete
 // =============================================================================
 
-Deno.test("DELETE /api/sources/:id deletes source", async () => {
+integrationTest("DELETE /api/sources/:id deletes source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create source
@@ -330,7 +331,7 @@ Deno.test("DELETE /api/sources/:id deletes source", async () => {
   }
 });
 
-Deno.test("DELETE /api/sources/:id returns 404 for non-existent source", async () => {
+integrationTest("DELETE /api/sources/:id returns 404 for non-existent source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources/999", {
@@ -347,7 +348,7 @@ Deno.test("DELETE /api/sources/:id returns 404 for non-existent source", async (
 // Sync Operations
 // =============================================================================
 
-Deno.test("POST /api/sources/:id/sync returns 400 for manual source", async () => {
+integrationTest("POST /api/sources/:id/sync returns 400 for manual source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create manual source
@@ -375,7 +376,7 @@ Deno.test("POST /api/sources/:id/sync returns 400 for manual source", async () =
   }
 });
 
-Deno.test("POST /api/sources/:id/sync returns 404 for non-existent source", async () => {
+integrationTest("POST /api/sources/:id/sync returns 404 for non-existent source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources/999/sync", {
@@ -392,7 +393,7 @@ Deno.test("POST /api/sources/:id/sync returns 404 for non-existent source", asyn
 // Status Operations
 // =============================================================================
 
-Deno.test("GET /api/sources/:id/status returns source status", async () => {
+integrationTest("GET /api/sources/:id/status returns source status", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create source
@@ -420,7 +421,7 @@ Deno.test("GET /api/sources/:id/status returns source status", async () => {
   }
 });
 
-Deno.test("GET /api/sources/:id/status returns correct capabilities for git source", async () => {
+integrationTest("GET /api/sources/:id/status returns correct capabilities for git source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create git source
@@ -455,7 +456,7 @@ Deno.test("GET /api/sources/:id/status returns correct capabilities for git sour
 // Webhook Operations
 // =============================================================================
 
-Deno.test("POST /api/sources/:id/webhook returns 403 for disabled webhooks", async () => {
+integrationTest("POST /api/sources/:id/webhook returns 403 for disabled webhooks", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create git source WITHOUT webhookEnabled
@@ -492,7 +493,7 @@ Deno.test("POST /api/sources/:id/webhook returns 403 for disabled webhooks", asy
   }
 });
 
-Deno.test("POST /api/sources/:id/webhook returns 401 for invalid secret", async () => {
+integrationTest("POST /api/sources/:id/webhook returns 401 for invalid secret", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create git source with webhook enabled and secret required
@@ -529,7 +530,7 @@ Deno.test("POST /api/sources/:id/webhook returns 401 for invalid secret", async 
   }
 });
 
-Deno.test("POST /api/sources/:id/webhook returns 404 for non-existent source", async () => {
+integrationTest("POST /api/sources/:id/webhook returns 404 for non-existent source", async () => {
   const { app, ctx } = await createTestApp();
   try {
     const res = await app.request("/api/sources/999/webhook", {
@@ -547,7 +548,7 @@ Deno.test("POST /api/sources/:id/webhook returns 404 for non-existent source", a
 // Redaction Tests
 // =============================================================================
 
-Deno.test("GET /api/sources/:id redacts sensitive fields", async () => {
+integrationTest("GET /api/sources/:id redacts sensitive fields", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create source with secrets
@@ -581,7 +582,7 @@ Deno.test("GET /api/sources/:id redacts sensitive fields", async () => {
   }
 });
 
-Deno.test("GET /api/sources list redacts sensitive fields", async () => {
+integrationTest("GET /api/sources list redacts sensitive fields", async () => {
   const { app, ctx } = await createTestApp();
   try {
     // Create source with secrets

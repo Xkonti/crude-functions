@@ -1,7 +1,9 @@
 {
   "tasks": {
-    "dev": "deno run --env-file=.env --watch --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run main.ts",
-    "test": "deno test --env-file=.env --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run"
+    "setup": "deno run --allow-read --allow-write --allow-env --allow-run --allow-net scripts/setup-surreal.ts",
+    "dev": "deno task setup && deno run --env-file=.env --watch --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run main.ts",
+    "test": "deno test --env-file=.env --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run",
+    "reset": "rm -rf data && mkdir data"
   },
   "imports": {
     "@hono/hono": "jsr:@hono/hono",
@@ -17,7 +19,8 @@
     "better-auth": "npm:better-auth@^1.4.10",
     "better-auth/plugins": "npm:better-auth@^1.4.10/plugins",
     "better-auth/plugins/access": "npm:better-auth@^1.4.10/plugins/access",
-    "isomorphic-git": "npm:isomorphic-git@^1.27.2"
+    "isomorphic-git": "npm:isomorphic-git@^1.27.2",
+    "surrealdb": "npm:surrealdb@alpha"
   },
   "test": {
     "exclude": [

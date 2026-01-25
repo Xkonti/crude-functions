@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { MetricsAggregationService } from "./metrics_aggregation_service.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
@@ -93,7 +94,7 @@ async function cleanup(setup: TestSetup): Promise<void> {
 // Minute Aggregation Tests
 // =====================
 
-Deno.test("MetricsAggregationService aggregates executions into minute", async () => {
+integrationTest("MetricsAggregationService aggregates executions into minute", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -147,7 +148,7 @@ Deno.test("MetricsAggregationService aggregates executions into minute", async (
   }
 });
 
-Deno.test("MetricsAggregationService handles weighted averages correctly", async () => {
+integrationTest("MetricsAggregationService handles weighted averages correctly", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -187,7 +188,7 @@ Deno.test("MetricsAggregationService handles weighted averages correctly", async
   }
 });
 
-Deno.test("MetricsAggregationService processes multiple routes separately", async () => {
+integrationTest("MetricsAggregationService processes multiple routes separately", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -229,7 +230,7 @@ Deno.test("MetricsAggregationService processes multiple routes separately", asyn
   }
 });
 
-Deno.test("MetricsAggregationService skips empty periods (no zero-value rows)", async () => {
+integrationTest("MetricsAggregationService skips empty periods (no zero-value rows)", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -271,7 +272,7 @@ Deno.test("MetricsAggregationService skips empty periods (no zero-value rows)", 
 // Hour Aggregation Tests
 // =====================
 
-Deno.test("MetricsAggregationService aggregates minutes into hour", async () => {
+integrationTest("MetricsAggregationService aggregates minutes into hour", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -362,7 +363,7 @@ Deno.test("MetricsAggregationService aggregates minutes into hour", async () => 
 // Day Aggregation Tests
 // =====================
 
-Deno.test("MetricsAggregationService aggregates hours into day", async () => {
+integrationTest("MetricsAggregationService aggregates hours into day", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -452,7 +453,7 @@ Deno.test("MetricsAggregationService aggregates hours into day", async () => {
 // Retention Cleanup Tests
 // =====================
 
-Deno.test("MetricsAggregationService cleans up old metrics of all types", async () => {
+integrationTest("MetricsAggregationService cleans up old metrics of all types", async () => {
   const setup = await createTestSetup(60, 30); // 30 days retention
 
   try {
@@ -521,7 +522,7 @@ Deno.test("MetricsAggregationService cleans up old metrics of all types", async 
 // Catch-up Processing Tests
 // =====================
 
-Deno.test("MetricsAggregationService processes multiple minutes in one run", async () => {
+integrationTest("MetricsAggregationService processes multiple minutes in one run", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -565,7 +566,7 @@ Deno.test("MetricsAggregationService processes multiple minutes in one run", asy
   }
 });
 
-Deno.test("MetricsAggregationService does nothing when no data", async () => {
+integrationTest("MetricsAggregationService does nothing when no data", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -584,7 +585,7 @@ Deno.test("MetricsAggregationService does nothing when no data", async () => {
 // Execution Tests
 // =====================
 
-Deno.test("MetricsAggregationService can be run multiple times", async () => {
+integrationTest("MetricsAggregationService can be run multiple times", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -618,7 +619,7 @@ Deno.test("MetricsAggregationService can be run multiple times", async () => {
 // Pending Aggregation Tests (no executions scenario)
 // =====================
 
-Deno.test("MetricsAggregationService processes pending minutes into hours when no executions", async () => {
+integrationTest("MetricsAggregationService processes pending minutes into hours when no executions", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -690,7 +691,7 @@ Deno.test("MetricsAggregationService processes pending minutes into hours when n
   }
 });
 
-Deno.test("MetricsAggregationService processes pending hours into days when no executions", async () => {
+integrationTest("MetricsAggregationService processes pending hours into days when no executions", async () => {
   const setup = await createTestSetup();
 
   try {
@@ -741,7 +742,7 @@ Deno.test("MetricsAggregationService processes pending hours into days when no e
   }
 });
 
-Deno.test("MetricsAggregationService processes both pending minutes and hours in one run", async () => {
+integrationTest("MetricsAggregationService processes both pending minutes and hours in one run", async () => {
   const setup = await createTestSetup();
 
   try {

@@ -4,9 +4,10 @@
 
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "./test_setup_builder.ts";
+import { integrationTest } from "./test_helpers.ts";
 import type { FullTestContext } from "./types.ts";
 
-Deno.test("TestSetupBuilder creates basic context with all services", async () => {
+integrationTest("TestSetupBuilder creates basic context with all services", async () => {
   // Use .withAll() explicitly for type safety - this is now required since
   // the builder returns BaseTestContext by default
   const ctx = await TestSetupBuilder.create().withAll().build();
@@ -45,7 +46,7 @@ Deno.test("TestSetupBuilder creates basic context with all services", async () =
   }
 });
 
-Deno.test("TestSetupBuilder.withApiKeyGroup creates group", async () => {
+integrationTest("TestSetupBuilder.withApiKeyGroup creates group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group", "Test description")
     .build();
@@ -60,7 +61,7 @@ Deno.test("TestSetupBuilder.withApiKeyGroup creates group", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withApiKey creates key in group", async () => {
+integrationTest("TestSetupBuilder.withApiKey creates key in group", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "my-secret-key", "key-name", "Key description")
@@ -75,7 +76,7 @@ Deno.test("TestSetupBuilder.withApiKey creates key in group", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withRoute creates route", async () => {
+integrationTest("TestSetupBuilder.withRoute creates route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts", { methods: ["GET", "POST"] })
     .build();
@@ -92,7 +93,7 @@ Deno.test("TestSetupBuilder.withRoute creates route", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withFile creates file", async () => {
+integrationTest("TestSetupBuilder.withFile creates file", async () => {
   const ctx = await TestSetupBuilder.create()
     .withFile("hello.ts", `export default async (c) => c.json({ ok: true })`)
     .build();
@@ -108,7 +109,7 @@ Deno.test("TestSetupBuilder.withFile creates file", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withSetting sets global setting", async () => {
+integrationTest("TestSetupBuilder.withSetting sets global setting", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSetting("log.level", "debug")
     .build();
@@ -121,7 +122,7 @@ Deno.test("TestSetupBuilder.withSetting sets global setting", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withAdminUser creates user", async () => {
+integrationTest("TestSetupBuilder.withAdminUser creates user", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAdminUser("admin@test.com", "password123")
     .build();
@@ -136,7 +137,7 @@ Deno.test("TestSetupBuilder.withAdminUser creates user", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withConsoleLog seeds log data", async () => {
+integrationTest("TestSetupBuilder.withConsoleLog seeds log data", async () => {
   // First create a route to have a valid routeId
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts")
@@ -158,7 +159,7 @@ Deno.test("TestSetupBuilder.withConsoleLog seeds log data", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withMetric seeds metric data", async () => {
+integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts")
     .withMetric({
@@ -183,7 +184,7 @@ Deno.test("TestSetupBuilder.withMetric seeds metric data", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder full integration", async () => {
+integrationTest("TestSetupBuilder full integration", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAdminUser("admin@example.com", "securepassword", ["userMgmt", "permanent"])
     .withApiKeyGroup("management", "Management keys")
@@ -223,7 +224,7 @@ Deno.test("TestSetupBuilder full integration", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder cleanup removes temp directory", async () => {
+integrationTest("TestSetupBuilder cleanup removes temp directory", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
   const tempDir = ctx.tempDir;
 
@@ -244,7 +245,7 @@ Deno.test("TestSetupBuilder cleanup removes temp directory", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.withSecrets creates secrets service", async () => {
+integrationTest("TestSetupBuilder.withSecrets creates secrets service", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSecrets()
     .build();
@@ -258,7 +259,7 @@ Deno.test("TestSetupBuilder.withSecrets creates secrets service", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder auto-enables dependencies", async () => {
+integrationTest("TestSetupBuilder auto-enables dependencies", async () => {
   // withSettings() should auto-enable encryption + hash
   const ctx = await TestSetupBuilder.create()
     .withSettings()
@@ -274,7 +275,7 @@ Deno.test("TestSetupBuilder auto-enables dependencies", async () => {
   }
 });
 
-Deno.test("TestSetupBuilder.create().build() enables all services by default", async () => {
+integrationTest("TestSetupBuilder.create().build() enables all services by default", async () => {
   // When no with* methods are called, build() enables all services at runtime
   // Cast to FullTestContext to verify runtime behavior
   const ctx = await TestSetupBuilder.create().build() as unknown as FullTestContext;
@@ -295,7 +296,7 @@ Deno.test("TestSetupBuilder.create().build() enables all services by default", a
   }
 });
 
-Deno.test("TestSetupBuilder.withMetrics creates minimal context without unrelated services", async () => {
+integrationTest("TestSetupBuilder.withMetrics creates minimal context without unrelated services", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
     .build();

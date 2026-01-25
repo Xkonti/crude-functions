@@ -1,10 +1,11 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { MetricsStateKey } from "./types.ts";
 
 // ============== Group 1: Basic Read/Write ==============
 
-Deno.test("MetricsStateService.getMarker returns null for non-existent key", async () => {
+integrationTest("MetricsStateService.getMarker returns null for non-existent key", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const value = await ctx.metricsStateService.getMarker("lastProcessedMinute");
@@ -14,7 +15,7 @@ Deno.test("MetricsStateService.getMarker returns null for non-existent key", asy
   }
 });
 
-Deno.test("MetricsStateService.setMarker creates new marker", async () => {
+integrationTest("MetricsStateService.setMarker creates new marker", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const testDate = new Date("2024-01-15T10:30:00.000Z");
@@ -28,7 +29,7 @@ Deno.test("MetricsStateService.setMarker creates new marker", async () => {
   }
 });
 
-Deno.test("MetricsStateService.getMarker returns stored Date object", async () => {
+integrationTest("MetricsStateService.getMarker returns stored Date object", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const testDate = new Date("2024-06-20T14:45:30.000Z");
@@ -44,7 +45,7 @@ Deno.test("MetricsStateService.getMarker returns stored Date object", async () =
 
 // ============== Group 2: Upsert Behavior ==============
 
-Deno.test("MetricsStateService.setMarker updates existing marker", async () => {
+integrationTest("MetricsStateService.setMarker updates existing marker", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const firstDate = new Date("2024-01-01T00:00:00.000Z");
@@ -60,7 +61,7 @@ Deno.test("MetricsStateService.setMarker updates existing marker", async () => {
   }
 });
 
-Deno.test("MetricsStateService.setMarker multiple sets produce single record", async () => {
+integrationTest("MetricsStateService.setMarker multiple sets produce single record", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     await ctx.metricsStateService.setMarker(
@@ -88,7 +89,7 @@ Deno.test("MetricsStateService.setMarker multiple sets produce single record", a
 
 // ============== Group 3: Bootstrap Pattern ==============
 
-Deno.test("MetricsStateService.getOrBootstrapMarker creates marker if not exists", async () => {
+integrationTest("MetricsStateService.getOrBootstrapMarker creates marker if not exists", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const defaultDate = new Date("2024-01-01T00:00:00.000Z");
@@ -108,7 +109,7 @@ Deno.test("MetricsStateService.getOrBootstrapMarker creates marker if not exists
   }
 });
 
-Deno.test("MetricsStateService.getOrBootstrapMarker returns existing marker without overwriting", async () => {
+integrationTest("MetricsStateService.getOrBootstrapMarker returns existing marker without overwriting", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const existingDate = new Date("2024-06-15T12:00:00.000Z");
@@ -129,7 +130,7 @@ Deno.test("MetricsStateService.getOrBootstrapMarker returns existing marker with
   }
 });
 
-Deno.test("MetricsStateService.getOrBootstrapMarker is idempotent", async () => {
+integrationTest("MetricsStateService.getOrBootstrapMarker is idempotent", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const defaultDate = new Date("2024-03-15T08:00:00.000Z");
@@ -159,7 +160,7 @@ Deno.test("MetricsStateService.getOrBootstrapMarker is idempotent", async () => 
 
 // ============== Group 4: Key Independence ==============
 
-Deno.test("MetricsStateService different keys are independent", async () => {
+integrationTest("MetricsStateService different keys are independent", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const minuteDate = new Date("2024-01-01T00:01:00.000Z");
@@ -182,7 +183,7 @@ Deno.test("MetricsStateService different keys are independent", async () => {
   }
 });
 
-Deno.test("MetricsStateService all MetricsStateKey values work correctly", async () => {
+integrationTest("MetricsStateService all MetricsStateKey values work correctly", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const keys: MetricsStateKey[] = [
@@ -206,7 +207,7 @@ Deno.test("MetricsStateService all MetricsStateKey values work correctly", async
 
 // ============== Group 5: Date Handling Edge Cases ==============
 
-Deno.test("MetricsStateService stores and retrieves UTC dates correctly", async () => {
+integrationTest("MetricsStateService stores and retrieves UTC dates correctly", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     // Use a date with specific UTC time
@@ -220,7 +221,7 @@ Deno.test("MetricsStateService stores and retrieves UTC dates correctly", async 
   }
 });
 
-Deno.test("MetricsStateService handles epoch date", async () => {
+integrationTest("MetricsStateService handles epoch date", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const epochDate = new Date(0); // 1970-01-01T00:00:00.000Z
@@ -234,7 +235,7 @@ Deno.test("MetricsStateService handles epoch date", async () => {
   }
 });
 
-Deno.test("MetricsStateService handles future dates", async () => {
+integrationTest("MetricsStateService handles future dates", async () => {
   const ctx = await TestSetupBuilder.create().withMetricsStateService().build();
   try {
     const futureDate = new Date("2099-12-31T23:59:59.999Z");
