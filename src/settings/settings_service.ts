@@ -9,6 +9,7 @@ import { RecordId } from "surrealdb";
 
 /** SurrealDB setting record shape */
 interface Setting {
+  id: RecordId;
   name: string;
   value: string;
   isEncrypted: boolean;
@@ -52,25 +53,25 @@ export class SettingsService {
    * @param name - The setting name
    * @returns The setting value, or null if not found
    */
-  getGlobalSetting(name: SettingName): Promise<string | undefined> {
-    return this.surrealFactory.withSystemConnection({}, async (db) => {
-        const settingId = new RecordId("setting", name);
-        const result = await db.query<[Setting | undefined]>(
-          `RETURN $settingId.*`,
-          { settingId: settingId }
-        );
+  async getGlobalSetting(name: SettingName): Promise<string | undefined> {
+    const settingId = new RecordId("setting", name);
+    const result = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // return db.select<Setting>(settingId);
+      return await db.query<[Setting | undefined]>(
+        `RETURN $settingId.*`,
+        { settingId: settingId }
+      );
+    });
 
-        const setting = result[0];
-        if (!setting) return undefined;
+    const setting = result[0];
+    if (!setting) return undefined;
 
-        // Decrypt if needed
-        if (setting.isEncrypted && this.encryptionService) {
-          return await this.encryptionService.decrypt(setting.value);
-        }
+    // Decrypt if needed
+    if (setting.isEncrypted && this.encryptionService) {
+      return await this.encryptionService.decrypt(setting.value);
+    }
 
-        return setting.value;
-      }
-    );
+    return setting.value;
   }
 
   // ============== Write Operations ==============
@@ -121,18 +122,17 @@ export class SettingsService {
     using _lock = await this.writeMutex.acquire();
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
-        for (const [name, value] of settings) {
-          const settingId = new RecordId("setting", name);
-          await db.query(
-            `UPSERT $settingId SET
-              name = $name,
-              value = $newValue,
-              isEncrypted = false`,
-            { settingId, name, newValue: value }
-          );
-        }
+      for (const [name, value] of settings) {
+        const settingId = new RecordId("setting", name);
+        await db.query(
+          `UPSERT $settingId SET
+            name = $name,
+            value = $newValue,
+            isEncrypted = false`,
+          { settingId, name, newValue: value }
+        );
       }
-    );
+    });
   }
 
   // ============== Batch Read Operations ==============
@@ -141,27 +141,26 @@ export class SettingsService {
    * Get all global settings as a Map.
    * @returns Map of setting names to values
    */
-  getAllGlobalSettings(): Promise<Map<SettingName, string>> {
-    return this.surrealFactory.withSystemConnection({}, async (db) => {
-        // Table scan - acceptable for settings UI (low frequency)
-        const result = await db.query<[Setting[]]>("SELECT * FROM setting");
-        const settings = result?.[0] ?? [];
-        const resultMap = new Map<SettingName, string>();
+  async getAllGlobalSettings(): Promise<Map<SettingName, string>> {
+    const result = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      return await db.query<[Setting[]]>("SELECT * FROM setting");
+    });
 
-        for (const setting of settings) {
-          if (!setting.value) continue;
+    const settings = result?.[0] ?? [];
+    const resultMap = new Map<SettingName, string>();
 
-          // Decrypt if needed
-          const value = setting.isEncrypted && this.encryptionService
-            ? await this.encryptionService.decrypt(setting.value)
-            : setting.value;
+    for (const setting of settings) {
+      if (!setting.value) continue;
 
-          resultMap.set(setting.name as SettingName, value);
-        }
+      // Decrypt if needed
+      const value = setting.isEncrypted && this.encryptionService
+        ? await this.encryptionService.decrypt(setting.value)
+        : setting.value;
 
-        return resultMap;
-      }
-    );
+      resultMap.set(setting.name as SettingName, value);
+    }
+
+    return resultMap;
   }
 
   // ============== Reset Operations ==============
@@ -175,19 +174,18 @@ export class SettingsService {
     using _lock = await this.writeMutex.acquire();
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
-        for (const name of names) {
-          const settingId = new RecordId("setting", name);
-          const defaultValue = GlobalSettingDefaults[name];
-          await db.query(
-            `UPSERT $settingId SET
-              name = $name,
-              value = $newValue,
-              isEncrypted = false`,
-            { settingId, name, newValue: defaultValue }
-          );
-        }
+      for (const name of names) {
+        const settingId = new RecordId("setting", name);
+        const defaultValue = GlobalSettingDefaults[name];
+        await db.query(
+          `UPSERT $settingId SET
+            name = $name,
+            value = $newValue,
+            isEncrypted = false`,
+          { settingId, name, newValue: defaultValue }
+        );
       }
-    );
+    });
   }
 
   // ============== Bootstrap Operations ==============
@@ -202,21 +200,20 @@ export class SettingsService {
     using _lock = await this.writeMutex.acquire();
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
-        for (const [name, defaultValue] of Object.entries(GlobalSettingDefaults)) {
-          const settingId = new RecordId("setting", name);
+      for (const [name, defaultValue] of Object.entries(GlobalSettingDefaults)) {
+        const settingId = new RecordId("setting", name);
 
-          // INSERT IGNORE skips if record already exists, preserving existing values
-          await db.query(
-            `INSERT IGNORE INTO setting {
-              id: $settingId,
-              name: $name,
-              value: $newValue,
-              isEncrypted: false
-            }`,
-            { settingId, name, newValue: defaultValue }
-          );
-        }
+        // INSERT IGNORE skips if record already exists, preserving existing values
+        await db.query(
+          `INSERT IGNORE INTO setting {
+            id: $settingId,
+            name: $name,
+            value: $newValue,
+            isEncrypted: false
+          }`,
+          { settingId, name, newValue: defaultValue }
+        );
       }
-    );
+    });
   }
 }
