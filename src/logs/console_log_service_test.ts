@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { BaseTestContext, LogsContext, RoutesContext } from "../test/types.ts";
@@ -26,7 +27,7 @@ async function cleanup(ctx: LogsTestContext): Promise<void> {
 // ConsoleLogService tests
 // =====================
 
-Deno.test("ConsoleLogService stores log entry", async () => {
+integrationTest("ConsoleLogService stores log entry", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -51,7 +52,7 @@ Deno.test("ConsoleLogService stores log entry", async () => {
   }
 });
 
-Deno.test("ConsoleLogService stores log with args", async () => {
+integrationTest("ConsoleLogService stores log with args", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -72,7 +73,7 @@ Deno.test("ConsoleLogService stores log with args", async () => {
   }
 });
 
-Deno.test("ConsoleLogService retrieves logs by requestId", async () => {
+integrationTest("ConsoleLogService retrieves logs by requestId", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -106,7 +107,7 @@ Deno.test("ConsoleLogService retrieves logs by requestId", async () => {
   }
 });
 
-Deno.test("ConsoleLogService retrieves logs by routeId", async () => {
+integrationTest("ConsoleLogService retrieves logs by routeId", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -141,7 +142,7 @@ Deno.test("ConsoleLogService retrieves logs by routeId", async () => {
   }
 });
 
-Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => {
+integrationTest("ConsoleLogService retrieves logs by routeId with limit", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -166,7 +167,7 @@ Deno.test("ConsoleLogService retrieves logs by routeId with limit", async () => 
   }
 });
 
-Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
+integrationTest("ConsoleLogService getRecent returns most recent logs", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -192,7 +193,7 @@ Deno.test("ConsoleLogService getRecent returns most recent logs", async () => {
   }
 });
 
-Deno.test("ConsoleLogService deletes logs older than date", async () => {
+integrationTest("ConsoleLogService deletes logs older than date", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -219,7 +220,7 @@ Deno.test("ConsoleLogService deletes logs older than date", async () => {
   }
 });
 
-Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async () => {
+integrationTest("ConsoleLogService deletes logs with mixed timestamp formats", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -260,7 +261,7 @@ Deno.test("ConsoleLogService deletes logs with mixed timestamp formats", async (
   }
 });
 
-Deno.test("ConsoleLogService deletes logs by routeId", async () => {
+integrationTest("ConsoleLogService deletes logs by routeId", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -293,7 +294,7 @@ Deno.test("ConsoleLogService deletes logs by routeId", async () => {
   }
 });
 
-Deno.test("ConsoleLogService stores all log levels", async () => {
+integrationTest("ConsoleLogService stores all log levels", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -325,7 +326,7 @@ Deno.test("ConsoleLogService stores all log levels", async () => {
 // trimToLimit tests
 // =====================
 
-Deno.test("ConsoleLogService trimToLimit keeps newest logs when over limit", async () => {
+integrationTest("ConsoleLogService trimToLimit keeps newest logs when over limit", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -356,7 +357,7 @@ Deno.test("ConsoleLogService trimToLimit keeps newest logs when over limit", asy
   }
 });
 
-Deno.test("ConsoleLogService trimToLimit returns 0 when under limit", async () => {
+integrationTest("ConsoleLogService trimToLimit returns 0 when under limit", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -384,7 +385,7 @@ Deno.test("ConsoleLogService trimToLimit returns 0 when under limit", async () =
   }
 });
 
-Deno.test("ConsoleLogService trimToLimit only affects specified route", async () => {
+integrationTest("ConsoleLogService trimToLimit only affects specified route", async () => {
   const ctx = await createTestSetup();
 
   try {
@@ -426,7 +427,7 @@ Deno.test("ConsoleLogService trimToLimit only affects specified route", async ()
 // getPaginated tests
 // =====================
 
-Deno.test("ConsoleLogService - getPaginated returns logs across all routes", async () => {
+integrationTest("ConsoleLogService - getPaginated returns logs across all routes", async () => {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
     .withRoute("/test-route-1", "test1.ts")
@@ -470,7 +471,7 @@ Deno.test("ConsoleLogService - getPaginated returns logs across all routes", asy
   }
 });
 
-Deno.test("ConsoleLogService - getPaginated filters by routeId", async () => {
+integrationTest("ConsoleLogService - getPaginated filters by routeId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
     .withRoute("/test-route-1", "test1.ts")
@@ -503,7 +504,7 @@ Deno.test("ConsoleLogService - getPaginated filters by routeId", async () => {
   }
 });
 
-Deno.test("ConsoleLogService - getPaginated uses cursor for next page", async () => {
+integrationTest("ConsoleLogService - getPaginated uses cursor for next page", async () => {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
     .withRoute("/test-route-1", "test1.ts")
@@ -542,7 +543,7 @@ Deno.test("ConsoleLogService - getPaginated uses cursor for next page", async ()
   }
 });
 
-Deno.test("ConsoleLogService - getPaginated handles same timestamp with different IDs", async () => {
+integrationTest("ConsoleLogService - getPaginated handles same timestamp with different IDs", async () => {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
     .withRoute("/test-route-1", "test1.ts")

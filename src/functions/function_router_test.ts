@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
@@ -75,7 +76,7 @@ export default "not a function";
 // Router building tests
 // =====================
 
-Deno.test("FunctionRouter returns 404 for empty routes", async () => {
+integrationTest("FunctionRouter returns 404 for empty routes", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
 
   try {
@@ -90,7 +91,7 @@ Deno.test("FunctionRouter returns 404 for empty routes", async () => {
   }
 });
 
-Deno.test("FunctionRouter executes handler for matching route", async () => {
+integrationTest("FunctionRouter executes handler for matching route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -110,7 +111,7 @@ Deno.test("FunctionRouter executes handler for matching route", async () => {
   }
 });
 
-Deno.test("FunctionRouter handles POST request with body", async () => {
+integrationTest("FunctionRouter handles POST request with body", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/echo", "echo.ts", { methods: ["POST"] })
@@ -134,7 +135,7 @@ Deno.test("FunctionRouter handles POST request with body", async () => {
   }
 });
 
-Deno.test("FunctionRouter handles multiple methods per route", async () => {
+integrationTest("FunctionRouter handles multiple methods per route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/multi", "multi.ts", { methods: ["GET", "POST", "PUT"] })
@@ -164,7 +165,7 @@ Deno.test("FunctionRouter handles multiple methods per route", async () => {
   }
 });
 
-Deno.test("FunctionRouter returns 404 for wrong method", async () => {
+integrationTest("FunctionRouter returns 404 for wrong method", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -184,7 +185,7 @@ Deno.test("FunctionRouter returns 404 for wrong method", async () => {
 // Path parameters tests
 // ======================
 
-Deno.test("FunctionRouter handles path parameters", async () => {
+integrationTest("FunctionRouter handles path parameters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/users/:id", "user.ts", { name: "get-user", methods: ["GET"] })
@@ -204,7 +205,7 @@ Deno.test("FunctionRouter handles path parameters", async () => {
   }
 });
 
-Deno.test("FunctionRouter handles nested path parameters", async () => {
+integrationTest("FunctionRouter handles nested path parameters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/users/:userId/posts/:postId", "post.ts", { name: "get-post", methods: ["GET"] })
@@ -224,7 +225,7 @@ Deno.test("FunctionRouter handles nested path parameters", async () => {
   }
 });
 
-Deno.test("FunctionRouter handles query parameters", async () => {
+integrationTest("FunctionRouter handles query parameters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/search", "search.ts", { methods: ["GET"] })
@@ -244,7 +245,7 @@ Deno.test("FunctionRouter handles query parameters", async () => {
   }
 });
 
-Deno.test("FunctionRouter handles root route", async () => {
+integrationTest("FunctionRouter handles root route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/", "root.ts", { name: "root", methods: ["GET"] })
@@ -267,7 +268,7 @@ Deno.test("FunctionRouter handles root route", async () => {
 // API key validation tests
 // =======================
 
-Deno.test("FunctionRouter allows request without key when route has no keys", async () => {
+integrationTest("FunctionRouter allows request without key when route has no keys", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/public", "public.ts", { methods: ["GET"] })
@@ -283,7 +284,7 @@ Deno.test("FunctionRouter allows request without key when route has no keys", as
   }
 });
 
-Deno.test("FunctionRouter returns 401 when key is required but missing", async () => {
+integrationTest("FunctionRouter returns 401 when key is required but missing", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -305,7 +306,7 @@ Deno.test("FunctionRouter returns 401 when key is required but missing", async (
   }
 });
 
-Deno.test("FunctionRouter returns 401 when key is invalid", async () => {
+integrationTest("FunctionRouter returns 401 when key is invalid", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -329,7 +330,7 @@ Deno.test("FunctionRouter returns 401 when key is invalid", async () => {
   }
 });
 
-Deno.test("FunctionRouter allows request with valid key", async () => {
+integrationTest("FunctionRouter allows request with valid key", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -352,7 +353,7 @@ Deno.test("FunctionRouter allows request with valid key", async () => {
   }
 });
 
-Deno.test("FunctionRouter accepts key from any allowed key name", async () => {
+integrationTest("FunctionRouter accepts key from any allowed key name", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("admin", "Admin keys")
@@ -382,7 +383,7 @@ Deno.test("FunctionRouter accepts key from any allowed key name", async () => {
   }
 });
 
-Deno.test("FunctionRouter accepts Authorization Bearer token", async () => {
+integrationTest("FunctionRouter accepts Authorization Bearer token", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -402,7 +403,7 @@ Deno.test("FunctionRouter accepts Authorization Bearer token", async () => {
   }
 });
 
-Deno.test("FunctionRouter accepts Authorization plain value", async () => {
+integrationTest("FunctionRouter accepts Authorization plain value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -422,7 +423,7 @@ Deno.test("FunctionRouter accepts Authorization plain value", async () => {
   }
 });
 
-Deno.test("FunctionRouter accepts Authorization Basic (key as password)", async () => {
+integrationTest("FunctionRouter accepts Authorization Basic (key as password)", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -444,7 +445,7 @@ Deno.test("FunctionRouter accepts Authorization Basic (key as password)", async 
   }
 });
 
-Deno.test("FunctionRouter accepts X-Auth-Token header", async () => {
+integrationTest("FunctionRouter accepts X-Auth-Token header", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -464,7 +465,7 @@ Deno.test("FunctionRouter accepts X-Auth-Token header", async () => {
   }
 });
 
-Deno.test("FunctionRouter accepts api_key query parameter", async () => {
+integrationTest("FunctionRouter accepts api_key query parameter", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -482,7 +483,7 @@ Deno.test("FunctionRouter accepts api_key query parameter", async () => {
   }
 });
 
-Deno.test("FunctionRouter accepts apiKey query parameter", async () => {
+integrationTest("FunctionRouter accepts apiKey query parameter", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -500,7 +501,7 @@ Deno.test("FunctionRouter accepts apiKey query parameter", async () => {
   }
 });
 
-Deno.test("FunctionRouter prioritizes Authorization over X-API-Key", async () => {
+integrationTest("FunctionRouter prioritizes Authorization over X-API-Key", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withApiKeyGroup("api", "Test API group")
@@ -540,7 +541,7 @@ Deno.test("FunctionRouter prioritizes Authorization over X-API-Key", async () =>
 // Error handling tests
 // ====================
 
-Deno.test("FunctionRouter returns 404 when handler file not found", async () => {
+integrationTest("FunctionRouter returns 404 when handler file not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/missing", "nonexistent.ts", { name: "missing", methods: ["GET"] })
@@ -560,7 +561,7 @@ Deno.test("FunctionRouter returns 404 when handler file not found", async () => 
   }
 });
 
-Deno.test("FunctionRouter returns 500 when handler has no default export", async () => {
+integrationTest("FunctionRouter returns 500 when handler has no default export", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/noexport", "noexport.ts", { name: "no-export", methods: ["GET"] })
@@ -580,7 +581,7 @@ Deno.test("FunctionRouter returns 500 when handler has no default export", async
   }
 });
 
-Deno.test("FunctionRouter returns 500 when default export is not a function", async () => {
+integrationTest("FunctionRouter returns 500 when default export is not a function", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/notfunc", "notfunc.ts", { name: "not-func", methods: ["GET"] })
@@ -600,7 +601,7 @@ Deno.test("FunctionRouter returns 500 when default export is not a function", as
   }
 });
 
-Deno.test("FunctionRouter returns 500 when handler throws error", async () => {
+integrationTest("FunctionRouter returns 500 when handler throws error", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/error", "error.ts", { name: "error", methods: ["GET"] })
@@ -624,7 +625,7 @@ Deno.test("FunctionRouter returns 500 when handler throws error", async () => {
 // Route hot-reload tests
 // ========================
 
-Deno.test("FunctionRouter rebuilds router when routes are added", async () => {
+integrationTest("FunctionRouter rebuilds router when routes are added", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -662,7 +663,7 @@ Deno.test("FunctionRouter rebuilds router when routes are added", async () => {
   }
 });
 
-Deno.test("FunctionRouter handles route removal", async () => {
+integrationTest("FunctionRouter handles route removal", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -695,7 +696,7 @@ Deno.test("FunctionRouter handles route removal", async () => {
 // Multiple routes tests
 // ========================
 
-Deno.test("FunctionRouter handles multiple routes", async () => {
+integrationTest("FunctionRouter handles multiple routes", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/hello", "hello.ts", { methods: ["GET"] })
@@ -739,7 +740,7 @@ Deno.test("FunctionRouter handles multiple routes", async () => {
 // Cascade deletion tests
 // ========================
 
-Deno.test("FunctionRouter - route deletion cascades to logs and secrets but orphans metrics", async () => {
+integrationTest("FunctionRouter - route deletion cascades to logs and secrets but orphans metrics", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
     .withRoute("/test", "test.ts", { name: "test-route", methods: ["GET"] })

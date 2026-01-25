@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { Hono, type Context } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { createSettingsRoutes, type SettingInfo } from "./settings_routes.ts";
 import { SettingNames } from "./types.ts";
 
@@ -35,7 +36,7 @@ function createTestAppWithSession(
 
 // ============== GET /api/settings ==============
 
-Deno.test("GET /api/settings returns all global settings", async () => {
+integrationTest("GET /api/settings returns all global settings", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const app = createTestApp(ctx);
@@ -57,7 +58,7 @@ Deno.test("GET /api/settings returns all global settings", async () => {
   }
 });
 
-Deno.test("GET /api/settings with session includes user settings", async () => {
+integrationTest("GET /api/settings with session includes user settings", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -89,7 +90,7 @@ Deno.test("GET /api/settings with session includes user settings", async () => {
   }
 });
 
-Deno.test("GET /api/settings with ?userId includes that user's settings", async () => {
+integrationTest("GET /api/settings with ?userId includes that user's settings", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -122,7 +123,7 @@ Deno.test("GET /api/settings with ?userId includes that user's settings", async 
 
 // ============== PUT /api/settings ==============
 
-Deno.test("PUT /api/settings updates global settings", async () => {
+integrationTest("PUT /api/settings updates global settings", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const app = createTestApp(ctx);
@@ -150,7 +151,7 @@ Deno.test("PUT /api/settings updates global settings", async () => {
   }
 });
 
-Deno.test("PUT /api/settings rejects invalid JSON", async () => {
+integrationTest("PUT /api/settings rejects invalid JSON", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const app = createTestApp(ctx);
@@ -168,7 +169,7 @@ Deno.test("PUT /api/settings rejects invalid JSON", async () => {
   }
 });
 
-Deno.test("PUT /api/settings rejects missing settings field", async () => {
+integrationTest("PUT /api/settings rejects missing settings field", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const app = createTestApp(ctx);
@@ -186,7 +187,7 @@ Deno.test("PUT /api/settings rejects missing settings field", async () => {
   }
 });
 
-Deno.test("PUT /api/settings validates setting values", async () => {
+integrationTest("PUT /api/settings validates setting values", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const app = createTestApp(ctx);
@@ -210,7 +211,7 @@ Deno.test("PUT /api/settings validates setting values", async () => {
   }
 });
 
-Deno.test("PUT /api/settings rejects user settings without user context", async () => {
+integrationTest("PUT /api/settings rejects user settings without user context", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const app = createTestApp(ctx);
@@ -234,7 +235,7 @@ Deno.test("PUT /api/settings rejects user settings without user context", async 
   }
 });
 
-Deno.test("PUT /api/settings accepts user settings with ?userId", async () => {
+integrationTest("PUT /api/settings accepts user settings with ?userId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")

@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { SecretsService } from "./secrets_service.ts";
 import { SecretScope } from "./types.ts";
 
@@ -22,7 +23,7 @@ function createSecretsService(ctx: {
 // Name Validation Tests (tested via create methods that call validateSecretName)
 // =====================
 
-Deno.test("SecretsService.createGlobalSecret rejects empty name", async () => {
+integrationTest("SecretsService.createGlobalSecret rejects empty name", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -35,7 +36,7 @@ Deno.test("SecretsService.createGlobalSecret rejects empty name", async () => {
   }
 });
 
-Deno.test("SecretsService.createGlobalSecret rejects whitespace-only name", async () => {
+integrationTest("SecretsService.createGlobalSecret rejects whitespace-only name", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -48,7 +49,7 @@ Deno.test("SecretsService.createGlobalSecret rejects whitespace-only name", asyn
   }
 });
 
-Deno.test("SecretsService.createGlobalSecret rejects names with spaces", async () => {
+integrationTest("SecretsService.createGlobalSecret rejects names with spaces", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -61,7 +62,7 @@ Deno.test("SecretsService.createGlobalSecret rejects names with spaces", async (
   }
 });
 
-Deno.test("SecretsService.createGlobalSecret rejects names with special chars", async () => {
+integrationTest("SecretsService.createGlobalSecret rejects names with special chars", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -80,7 +81,7 @@ Deno.test("SecretsService.createGlobalSecret rejects names with special chars", 
   }
 });
 
-Deno.test("SecretsService.createGlobalSecret accepts valid names", async () => {
+integrationTest("SecretsService.createGlobalSecret accepts valid names", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -104,7 +105,7 @@ Deno.test("SecretsService.createGlobalSecret accepts valid names", async () => {
 // Global Secrets CRUD Tests
 // =====================
 
-Deno.test("SecretsService.getGlobalSecrets returns empty array initially", async () => {
+integrationTest("SecretsService.getGlobalSecrets returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -116,7 +117,7 @@ Deno.test("SecretsService.getGlobalSecrets returns empty array initially", async
   }
 });
 
-Deno.test("SecretsService.createGlobalSecret creates secret and returns in list", async () => {
+integrationTest("SecretsService.createGlobalSecret creates secret and returns in list", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -134,7 +135,7 @@ Deno.test("SecretsService.createGlobalSecret creates secret and returns in list"
   }
 });
 
-Deno.test("SecretsService.getGlobalSecretById returns secret with decrypted value", async () => {
+integrationTest("SecretsService.getGlobalSecretById returns secret with decrypted value", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -157,7 +158,7 @@ Deno.test("SecretsService.getGlobalSecretById returns secret with decrypted valu
   }
 });
 
-Deno.test("SecretsService.getGlobalSecretById returns null for nonexistent ID", async () => {
+integrationTest("SecretsService.getGlobalSecretById returns null for nonexistent ID", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -169,7 +170,7 @@ Deno.test("SecretsService.getGlobalSecretById returns null for nonexistent ID", 
   }
 });
 
-Deno.test("SecretsService.getGlobalSecretsWithValues returns all secrets with decrypted values", async () => {
+integrationTest("SecretsService.getGlobalSecretsWithValues returns all secrets with decrypted values", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -190,7 +191,7 @@ Deno.test("SecretsService.getGlobalSecretsWithValues returns all secrets with de
   }
 });
 
-Deno.test("SecretsService.createGlobalSecret rejects duplicate names", async () => {
+integrationTest("SecretsService.createGlobalSecret rejects duplicate names", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -205,7 +206,7 @@ Deno.test("SecretsService.createGlobalSecret rejects duplicate names", async () 
   }
 });
 
-Deno.test("SecretsService.updateGlobalSecret updates value and comment", async () => {
+integrationTest("SecretsService.updateGlobalSecret updates value and comment", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -223,7 +224,7 @@ Deno.test("SecretsService.updateGlobalSecret updates value and comment", async (
   }
 });
 
-Deno.test("SecretsService.updateGlobalSecret throws for nonexistent ID", async () => {
+integrationTest("SecretsService.updateGlobalSecret throws for nonexistent ID", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -236,7 +237,7 @@ Deno.test("SecretsService.updateGlobalSecret throws for nonexistent ID", async (
   }
 });
 
-Deno.test("SecretsService.deleteGlobalSecret removes secret", async () => {
+integrationTest("SecretsService.deleteGlobalSecret removes secret", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -255,7 +256,7 @@ Deno.test("SecretsService.deleteGlobalSecret removes secret", async () => {
   }
 });
 
-Deno.test("SecretsService.deleteGlobalSecret throws for nonexistent ID", async () => {
+integrationTest("SecretsService.deleteGlobalSecret throws for nonexistent ID", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -272,7 +273,7 @@ Deno.test("SecretsService.deleteGlobalSecret throws for nonexistent ID", async (
 // Function Secrets CRUD Tests
 // =====================
 
-Deno.test("SecretsService.getFunctionSecrets returns empty array initially", async () => {
+integrationTest("SecretsService.getFunctionSecrets returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -288,7 +289,7 @@ Deno.test("SecretsService.getFunctionSecrets returns empty array initially", asy
   }
 });
 
-Deno.test("SecretsService.createFunctionSecret creates function-scoped secret", async () => {
+integrationTest("SecretsService.createFunctionSecret creates function-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -312,7 +313,7 @@ Deno.test("SecretsService.createFunctionSecret creates function-scoped secret", 
   }
 });
 
-Deno.test("SecretsService.createFunctionSecret allows same name in different functions", async () => {
+integrationTest("SecretsService.createFunctionSecret allows same name in different functions", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/func1", "func1.ts")
@@ -337,7 +338,7 @@ Deno.test("SecretsService.createFunctionSecret allows same name in different fun
   }
 });
 
-Deno.test("SecretsService.createFunctionSecret rejects duplicate names in same function", async () => {
+integrationTest("SecretsService.createFunctionSecret rejects duplicate names in same function", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -358,7 +359,7 @@ Deno.test("SecretsService.createFunctionSecret rejects duplicate names in same f
   }
 });
 
-Deno.test("SecretsService.getFunctionSecretById returns correct secret", async () => {
+integrationTest("SecretsService.getFunctionSecretById returns correct secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -380,7 +381,7 @@ Deno.test("SecretsService.getFunctionSecretById returns correct secret", async (
   }
 });
 
-Deno.test("SecretsService.updateFunctionSecret updates value", async () => {
+integrationTest("SecretsService.updateFunctionSecret updates value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -404,7 +405,7 @@ Deno.test("SecretsService.updateFunctionSecret updates value", async () => {
   }
 });
 
-Deno.test("SecretsService.deleteFunctionSecret removes secret", async () => {
+integrationTest("SecretsService.deleteFunctionSecret removes secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -431,7 +432,7 @@ Deno.test("SecretsService.deleteFunctionSecret removes secret", async () => {
 // Group Secrets CRUD Tests
 // =====================
 
-Deno.test("SecretsService.getGroupSecrets returns empty array initially", async () => {
+integrationTest("SecretsService.getGroupSecrets returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .build();
@@ -446,7 +447,7 @@ Deno.test("SecretsService.getGroupSecrets returns empty array initially", async 
   }
 });
 
-Deno.test("SecretsService.createGroupSecret creates group-scoped secret", async () => {
+integrationTest("SecretsService.createGroupSecret creates group-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .build();
@@ -468,7 +469,7 @@ Deno.test("SecretsService.createGroupSecret creates group-scoped secret", async 
   }
 });
 
-Deno.test("SecretsService.createGroupSecret allows same name in different groups", async () => {
+integrationTest("SecretsService.createGroupSecret allows same name in different groups", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("group1")
     .withApiKeyGroup("group2")
@@ -492,7 +493,7 @@ Deno.test("SecretsService.createGroupSecret allows same name in different groups
   }
 });
 
-Deno.test("SecretsService.updateGroupSecret updates value", async () => {
+integrationTest("SecretsService.updateGroupSecret updates value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .build();
@@ -513,7 +514,7 @@ Deno.test("SecretsService.updateGroupSecret updates value", async () => {
   }
 });
 
-Deno.test("SecretsService.deleteGroupSecret removes secret", async () => {
+integrationTest("SecretsService.deleteGroupSecret removes secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .build();
@@ -538,7 +539,7 @@ Deno.test("SecretsService.deleteGroupSecret removes secret", async () => {
 // Key Secrets CRUD Tests
 // =====================
 
-Deno.test("SecretsService.getKeySecrets returns empty array initially", async () => {
+integrationTest("SecretsService.getKeySecrets returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "test-key-value")
@@ -554,7 +555,7 @@ Deno.test("SecretsService.getKeySecrets returns empty array initially", async ()
   }
 });
 
-Deno.test("SecretsService.createKeySecret creates key-scoped secret", async () => {
+integrationTest("SecretsService.createKeySecret creates key-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "test-key-value")
@@ -578,7 +579,7 @@ Deno.test("SecretsService.createKeySecret creates key-scoped secret", async () =
   }
 });
 
-Deno.test("SecretsService.createKeySecret allows same name on different keys", async () => {
+integrationTest("SecretsService.createKeySecret allows same name on different keys", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "key1")
@@ -602,7 +603,7 @@ Deno.test("SecretsService.createKeySecret allows same name on different keys", a
   }
 });
 
-Deno.test("SecretsService.updateKeySecret updates value", async () => {
+integrationTest("SecretsService.updateKeySecret updates value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "test-key")
@@ -625,7 +626,7 @@ Deno.test("SecretsService.updateKeySecret updates value", async () => {
   }
 });
 
-Deno.test("SecretsService.deleteKeySecret removes secret", async () => {
+integrationTest("SecretsService.deleteKeySecret removes secret", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeyGroup("test-group")
     .withApiKey("test-group", "test-key")
@@ -652,7 +653,7 @@ Deno.test("SecretsService.deleteKeySecret removes secret", async () => {
 // Hierarchical Resolution Tests
 // =====================
 
-Deno.test("SecretsService.getSecretByNameAndScope returns correct scope", async () => {
+integrationTest("SecretsService.getSecretByNameAndScope returns correct scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -690,7 +691,7 @@ Deno.test("SecretsService.getSecretByNameAndScope returns correct scope", async 
   }
 });
 
-Deno.test("SecretsService.getSecretHierarchical returns most specific value (key > group > function > global)", async () => {
+integrationTest("SecretsService.getSecretHierarchical returns most specific value (key > group > function > global)", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -724,7 +725,7 @@ Deno.test("SecretsService.getSecretHierarchical returns most specific value (key
   }
 });
 
-Deno.test("SecretsService.getSecretHierarchical falls back through hierarchy", async () => {
+integrationTest("SecretsService.getSecretHierarchical falls back through hierarchy", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -756,7 +757,7 @@ Deno.test("SecretsService.getSecretHierarchical falls back through hierarchy", a
   }
 });
 
-Deno.test("SecretsService.getSecretHierarchical returns global as fallback", async () => {
+integrationTest("SecretsService.getSecretHierarchical returns global as fallback", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -776,7 +777,7 @@ Deno.test("SecretsService.getSecretHierarchical returns global as fallback", asy
   }
 });
 
-Deno.test("SecretsService.getSecretHierarchical returns undefined when not found", async () => {
+integrationTest("SecretsService.getSecretHierarchical returns undefined when not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -793,7 +794,7 @@ Deno.test("SecretsService.getSecretHierarchical returns undefined when not found
   }
 });
 
-Deno.test("SecretsService.getCompleteSecret returns all scopes", async () => {
+integrationTest("SecretsService.getCompleteSecret returns all scopes", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -831,7 +832,7 @@ Deno.test("SecretsService.getCompleteSecret returns all scopes", async () => {
   }
 });
 
-Deno.test("SecretsService.getCompleteSecret returns undefined when secret doesn't exist", async () => {
+integrationTest("SecretsService.getCompleteSecret returns undefined when secret doesn't exist", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -852,7 +853,7 @@ Deno.test("SecretsService.getCompleteSecret returns undefined when secret doesn'
 // Preview Tests
 // =====================
 
-Deno.test("SecretsService.getSecretsPreviewForFunction returns aggregated secrets", async () => {
+integrationTest("SecretsService.getSecretsPreviewForFunction returns aggregated secrets", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -894,7 +895,7 @@ Deno.test("SecretsService.getSecretsPreviewForFunction returns aggregated secret
   }
 });
 
-Deno.test("SecretsService.getSecretsPreviewForFunction respects accepted groups", async () => {
+integrationTest("SecretsService.getSecretsPreviewForFunction respects accepted groups", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -926,7 +927,7 @@ Deno.test("SecretsService.getSecretsPreviewForFunction respects accepted groups"
 // Encryption at Rest Tests
 // =====================
 
-Deno.test("SecretsService stores values encrypted in database", async () => {
+integrationTest("SecretsService stores values encrypted in database", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -947,7 +948,7 @@ Deno.test("SecretsService stores values encrypted in database", async () => {
   }
 });
 
-Deno.test("SecretsService decrypts values correctly", async () => {
+integrationTest("SecretsService decrypts values correctly", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -962,7 +963,7 @@ Deno.test("SecretsService decrypts values correctly", async () => {
   }
 });
 
-Deno.test("SecretsService handles unicode and emoji correctly", async () => {
+integrationTest("SecretsService handles unicode and emoji correctly", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -978,7 +979,7 @@ Deno.test("SecretsService handles unicode and emoji correctly", async () => {
   }
 });
 
-Deno.test("SecretsService handles long values correctly", async () => {
+integrationTest("SecretsService handles long values correctly", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {

@@ -8,11 +8,12 @@
 
 import { DatabaseService } from "../database/database_service.ts";
 import { MigrationService } from "../database/migration_service.ts";
-import { SurrealProcessManager } from "../database/surreal_process_manager.ts";
 import { SurrealDatabaseService } from "../database/surreal_database_service.ts";
-import { SurrealHealthMonitor } from "../database/surreal_health_monitor.ts";
-import { SurrealSupervisor } from "../database/surreal_supervisor.ts";
 import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
+import {
+  SharedSurrealManager,
+  type SharedSurrealTestContext,
+} from "./shared_surreal_manager.ts";
 import { KeyStorageService } from "../encryption/key_storage_service.ts";
 import { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import { HashService } from "../encryption/hash_service.ts";
@@ -56,33 +57,79 @@ export interface FactoryContext {
 // =============================================================================
 
 /**
- * Creates the base infrastructure: temp directory, code directory, database, and migrations.
- * This is always called first and is required for all test contexts.
+ * Options for creating core infrastructure.
  */
-export async function createCoreInfrastructure(migrationsDir: string): Promise<{
+export interface CoreInfrastructureOptions {
+  /** Whether to run SQLite migrations (default: true) */
+  runSQLiteMigrations?: boolean;
+  /** Whether to run SurrealDB migrations (default: true) */
+  runSurrealMigrations?: boolean;
+}
+
+/**
+ * Creates the base infrastructure: temp directory, code directory, SQLite database,
+ * and shared SurrealDB connection with isolated namespace.
+ *
+ * SurrealDB is shared across all tests - each test gets a unique namespace for isolation.
+ * This dramatically improves test performance by avoiding process startup overhead per test.
+ *
+ * @param migrationsDir - Directory containing migration files
+ * @param options - Configuration options
+ * @throws Error if SurrealDB binary is not available
+ */
+export async function createCoreInfrastructure(
+  migrationsDir: string,
+  options: CoreInfrastructureOptions = {}
+): Promise<{
   tempDir: string;
   codeDir: string;
   databasePath: string;
   db: DatabaseService;
+  surrealTestContext: SharedSurrealTestContext;
+  surrealDb: SurrealDatabaseService;
 }> {
+  const { runSQLiteMigrations = true, runSurrealMigrations = true } = options;
+
   // Create temp directory for test isolation
   const tempDir = await Deno.makeTempDir();
   const codeDir = `${tempDir}/code`;
   await Deno.mkdir(codeDir, { recursive: true });
 
-  // Open database
+  // Open SQLite database
   const databasePath = `${tempDir}/database.db`;
   const db = new DatabaseService({ databasePath });
   await db.open();
 
-  // Run real migrations
-  const migrationService = new MigrationService({
-    db,
-    migrationsDir,
-  });
-  await migrationService.migrate();
+  // Run SQLite migrations if requested
+  if (runSQLiteMigrations) {
+    const migrationService = new MigrationService({
+      db,
+      migrationsDir,
+    });
+    await migrationService.migrate();
+  }
 
-  return { tempDir, codeDir, databasePath, db };
+  // Get shared SurrealDB context with unique namespace
+  const manager = SharedSurrealManager.getInstance();
+  const surrealTestContext = await manager.createTestContext();
+
+  // Run SurrealDB migrations in this namespace if requested
+  if (runSurrealMigrations) {
+    const surrealMigrationService = new SurrealMigrationService({
+      db: surrealTestContext.surrealDb,
+      migrationsDir,
+    });
+    await surrealMigrationService.migrate();
+  }
+
+  return {
+    tempDir,
+    codeDir,
+    databasePath,
+    db,
+    surrealTestContext,
+    surrealDb: surrealTestContext.surrealDb,
+  };
 }
 
 // =============================================================================
@@ -390,122 +437,22 @@ export function createCodeSourceService(
 }
 
 // =============================================================================
-// SurrealDB Factories
-// =============================================================================
-
-/**
- * Checks if the SurrealDB binary is available in PATH.
- * Caches the result after first check.
- */
-let _surrealAvailable: boolean | null = null;
-
-export async function isSurrealAvailable(): Promise<boolean> {
-  if (_surrealAvailable !== null) {
-    return _surrealAvailable;
-  }
-
-  try {
-    const command = new Deno.Command("which", { args: ["surreal"] });
-    const { success } = await command.output();
-    _surrealAvailable = success;
-    return success;
-  } catch {
-    _surrealAvailable = false;
-    return false;
-  }
-}
-
-/**
- * Creates the SurrealDB infrastructure: process manager, database service, and supervisor.
- * Starts the process, opens the connection, and runs migrations.
- *
- * @param tempDir - Temp directory for SurrealDB storage
- * @param migrationsDir - Path to migrations directory
- * @returns Object with surrealProcessManager, surrealDb, and surrealSupervisor
- * @throws Error if SurrealDB binary is not available
- */
-export async function createSurrealInfrastructure(
-  tempDir: string,
-  migrationsDir: string
-): Promise<{
-  surrealProcessManager: SurrealProcessManager;
-  surrealDb: SurrealDatabaseService;
-  surrealSupervisor: SurrealSupervisor;
-}> {
-  // Check if surreal binary is available
-  if (!(await isSurrealAvailable())) {
-    throw new Error(
-      "SurrealDB binary not found in PATH. Install SurrealDB to run these tests."
-    );
-  }
-
-  const storageDir = `${tempDir}/surreal`;
-  await Deno.mkdir(storageDir, { recursive: true });
-
-  // Use a random port in the ephemeral range to avoid conflicts
-  const port = 49152 + Math.floor(Math.random() * 16383);
-
-  // Create process manager
-  const surrealProcessManager = new SurrealProcessManager({
-    binaryPath: "surreal",
-    port,
-    storagePath: storageDir,
-    username: "root",
-    password: "root",
-    readinessTimeoutMs: 30000,
-  });
-
-  // Create database service
-  const surrealDb = new SurrealDatabaseService({
-    connectionUrl: surrealProcessManager.connectionUrl,
-    username: "root",
-    password: "root",
-    namespace: "test",
-    database: "test",
-  });
-
-  // Create health monitor
-  const surrealHealthMonitor = new SurrealHealthMonitor({
-    processManager: surrealProcessManager,
-    checkIntervalMs: 5000,
-    failureThreshold: 3,
-  });
-
-  // Create supervisor
-  const surrealSupervisor = new SurrealSupervisor({
-    processManager: surrealProcessManager,
-    databaseService: surrealDb,
-    healthMonitor: surrealHealthMonitor,
-    maxRestartAttempts: 3,
-    restartCooldownMs: 5000,
-  });
-
-  // Start supervisor (starts process, connects DB, starts monitoring)
-  await surrealSupervisor.start();
-
-  // Run SurrealDB migrations
-  const surrealMigrationService = new SurrealMigrationService({
-    db: surrealDb,
-    migrationsDir,
-  });
-  await surrealMigrationService.migrate();
-
-  return { surrealProcessManager, surrealDb, surrealSupervisor };
-}
-
-// =============================================================================
 // Cleanup Factory
 // =============================================================================
 
 /**
  * Creates a cleanup function for the test context.
- * Handles proper teardown order.
+ * Handles proper teardown order: namespace deletion before SQLite closes,
+ * both before temp dir removal.
+ *
+ * Note: SurrealDB process is shared and managed by SharedSurrealManager.
+ * We only clean up the namespace here, not the process.
  */
 export function createCleanupFunction(
   db: DatabaseService,
   tempDir: string,
-  consoleLogService?: ConsoleLogService,
-  surrealSupervisor?: SurrealSupervisor
+  surrealTestContext: SharedSurrealTestContext,
+  consoleLogService?: ConsoleLogService
 ): () => Promise<void> {
   return async () => {
     // 1. Shutdown console log service if present (flush pending logs)
@@ -513,10 +460,12 @@ export function createCleanupFunction(
       await consoleLogService.shutdown();
     }
 
-    // 2. Stop SurrealDB supervisor if present
-    if (surrealSupervisor) {
-      await surrealSupervisor.stop();
-    }
+    // 2. Delete SurrealDB namespace (fast cleanup, shared process stays running)
+    const manager = SharedSurrealManager.getInstance();
+    await manager.deleteTestContext(
+      surrealTestContext.namespace,
+      surrealTestContext.surrealDb
+    );
 
     // 3. Close SQLite database
     await db.close();

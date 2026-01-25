@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { SourceFileService } from "./source_file_service.ts";
@@ -41,7 +42,7 @@ function createMockGitProvider(): CodeSourceProvider {
 // Source Validation Tests - Read Operations
 // ============================================================================
 
-Deno.test("SourceFileService.listFiles throws SourceNotFoundError for non-existent source", async () => {
+integrationTest("SourceFileService.listFiles throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -60,7 +61,7 @@ Deno.test("SourceFileService.listFiles throws SourceNotFoundError for non-existe
   }
 });
 
-Deno.test("SourceFileService.getFile throws SourceNotFoundError for non-existent source", async () => {
+integrationTest("SourceFileService.getFile throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -83,7 +84,7 @@ Deno.test("SourceFileService.getFile throws SourceNotFoundError for non-existent
 // Source Validation Tests - Write Operations
 // ============================================================================
 
-Deno.test("SourceFileService.writeFile throws SourceNotFoundError for non-existent source", async () => {
+integrationTest("SourceFileService.writeFile throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -102,7 +103,7 @@ Deno.test("SourceFileService.writeFile throws SourceNotFoundError for non-existe
   }
 });
 
-Deno.test("SourceFileService.writeFile throws SourceNotEditableError for git source", async () => {
+integrationTest("SourceFileService.writeFile throws SourceNotEditableError for git source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockGitProvider());
@@ -127,7 +128,7 @@ Deno.test("SourceFileService.writeFile throws SourceNotEditableError for git sou
   }
 });
 
-Deno.test("SourceFileService.deleteFile throws SourceNotEditableError for non-editable source", async () => {
+integrationTest("SourceFileService.deleteFile throws SourceNotEditableError for non-editable source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockGitProvider());
@@ -155,7 +156,7 @@ Deno.test("SourceFileService.deleteFile throws SourceNotEditableError for non-ed
 // Successful Operations with Manual Source
 // ============================================================================
 
-Deno.test("SourceFileService.writeFile succeeds for manual source", async () => {
+integrationTest("SourceFileService.writeFile succeeds for manual source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -179,7 +180,7 @@ Deno.test("SourceFileService.writeFile succeeds for manual source", async () => 
   }
 });
 
-Deno.test("SourceFileService.writeFile updates existing file", async () => {
+integrationTest("SourceFileService.writeFile updates existing file", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -207,7 +208,7 @@ Deno.test("SourceFileService.writeFile updates existing file", async () => {
   }
 });
 
-Deno.test("SourceFileService.listFiles returns files for manual source", async () => {
+integrationTest("SourceFileService.listFiles returns files for manual source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -234,7 +235,7 @@ Deno.test("SourceFileService.listFiles returns files for manual source", async (
   }
 });
 
-Deno.test("SourceFileService.listFilesWithMetadata returns metadata", async () => {
+integrationTest("SourceFileService.listFilesWithMetadata returns metadata", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -260,7 +261,7 @@ Deno.test("SourceFileService.listFilesWithMetadata returns metadata", async () =
   }
 });
 
-Deno.test("SourceFileService.getFile returns null for non-existent file", async () => {
+integrationTest("SourceFileService.getFile returns null for non-existent file", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -281,7 +282,7 @@ Deno.test("SourceFileService.getFile returns null for non-existent file", async 
   }
 });
 
-Deno.test("SourceFileService.fileExists returns correct values", async () => {
+integrationTest("SourceFileService.fileExists returns correct values", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -304,7 +305,7 @@ Deno.test("SourceFileService.fileExists returns correct values", async () => {
   }
 });
 
-Deno.test("SourceFileService.deleteFile removes file", async () => {
+integrationTest("SourceFileService.deleteFile removes file", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -332,7 +333,7 @@ Deno.test("SourceFileService.deleteFile removes file", async () => {
 // Binary Content Tests
 // ============================================================================
 
-Deno.test("SourceFileService.writeFileBytes handles binary content", async () => {
+integrationTest("SourceFileService.writeFileBytes handles binary content", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });
@@ -360,7 +361,7 @@ Deno.test("SourceFileService.writeFileBytes handles binary content", async () =>
 // Source Isolation Tests
 // ============================================================================
 
-Deno.test("SourceFileService isolates files between sources", async () => {
+integrationTest("SourceFileService isolates files between sources", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = new ManualCodeSourceProvider({ codeDirectory: ctx.codeDir });

@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import { InvalidKeyError, DecryptionError, OversizedPlaintextError } from "./errors.ts";
@@ -91,7 +92,7 @@ class TestHelpers {
 // Constructor validation tests
 // =====================
 
-Deno.test("VersionedEncryptionService - Constructor validation", async (t) => {
+integrationTest("VersionedEncryptionService - Constructor validation", async (t) => {
   await t.step("accepts valid 256-bit base64 key", () => {
     const service = EncryptionServiceBuilder.create().build();
     expect(service.version).toBe("A");
@@ -200,7 +201,7 @@ Deno.test("VersionedEncryptionService - Constructor validation", async (t) => {
 // Encryption tests
 // =====================
 
-Deno.test("VersionedEncryptionService - Encryption", async (t) => {
+integrationTest("VersionedEncryptionService - Encryption", async (t) => {
   await t.step("encrypts plaintext with version prefix", async () => {
     const service = EncryptionServiceBuilder.create().build();
     const encrypted = await service.encrypt("hello world");
@@ -232,7 +233,7 @@ Deno.test("VersionedEncryptionService - Encryption", async (t) => {
 // Size validation tests
 // =====================
 
-Deno.test("VersionedEncryptionService - Size validation", async (t) => {
+integrationTest("VersionedEncryptionService - Size validation", async (t) => {
   const service = EncryptionServiceBuilder.create().build();
 
   await t.step("accepts plaintext at exactly 16KB", async () => {
@@ -279,7 +280,7 @@ Deno.test("VersionedEncryptionService - Size validation", async (t) => {
 // Decryption tests
 // =====================
 
-Deno.test("VersionedEncryptionService - Decryption", async (t) => {
+integrationTest("VersionedEncryptionService - Decryption", async (t) => {
   await t.step("decrypts encrypted data back to original", async () => {
     const service = EncryptionServiceBuilder.create().build();
     await TestHelpers.expectRoundTrip(service, "hello world");
@@ -360,7 +361,7 @@ Deno.test("VersionedEncryptionService - Decryption", async (t) => {
 // updateKeys tests
 // =====================
 
-Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
+integrationTest("VersionedEncryptionService - updateKeys", async (t) => {
   await t.step("updates to new key and version", async () => {
     const service = EncryptionServiceBuilder.create().build();
     expect(service.version).toBe("A");
@@ -449,7 +450,7 @@ Deno.test("VersionedEncryptionService - updateKeys", async (t) => {
 // isEncryptedWithPhasedOutKey tests
 // =====================
 
-Deno.test("VersionedEncryptionService - isEncryptedWithPhasedOutKey", async (t) => {
+integrationTest("VersionedEncryptionService - isEncryptedWithPhasedOutKey", async (t) => {
   await t.step("returns false when no phased out key", async () => {
     const service = EncryptionServiceBuilder.create().build();
     const encrypted = await service.encrypt("test");
@@ -492,7 +493,7 @@ Deno.test("VersionedEncryptionService - isEncryptedWithPhasedOutKey", async (t) 
 // Rotation lock tests
 // =====================
 
-Deno.test("VersionedEncryptionService - acquireRotationLock", async (t) => {
+integrationTest("VersionedEncryptionService - acquireRotationLock", async (t) => {
   await t.step("returns a disposable lock", async () => {
     const service = EncryptionServiceBuilder.create().build();
     const lock = await service.acquireRotationLock();
@@ -534,7 +535,7 @@ Deno.test("VersionedEncryptionService - acquireRotationLock", async (t) => {
 // Getters tests
 // =====================
 
-Deno.test("VersionedEncryptionService - version getter", () => {
+integrationTest("VersionedEncryptionService - version getter", () => {
   const service = EncryptionServiceBuilder.create()
     .withCurrentKey(TEST_KEY_A, "Z")
     .build();
@@ -542,7 +543,7 @@ Deno.test("VersionedEncryptionService - version getter", () => {
   expect(service.version).toBe("Z");
 });
 
-Deno.test("VersionedEncryptionService - isRotating getter", async (t) => {
+integrationTest("VersionedEncryptionService - isRotating getter", async (t) => {
   await t.step("returns false when no phased out key", () => {
     const service = EncryptionServiceBuilder.create().build();
     expect(service.isRotating).toBe(false);
@@ -558,7 +559,7 @@ Deno.test("VersionedEncryptionService - isRotating getter", async (t) => {
   });
 });
 
-Deno.test("VersionedEncryptionService - phasedOutVersionChar getter", async (t) => {
+integrationTest("VersionedEncryptionService - phasedOutVersionChar getter", async (t) => {
   await t.step("returns null when no phased out key", () => {
     const service = EncryptionServiceBuilder.create().build();
     expect(service.phasedOutVersionChar).toBe(null);
@@ -578,7 +579,7 @@ Deno.test("VersionedEncryptionService - phasedOutVersionChar getter", async (t) 
 // Round-trip tests
 // =====================
 
-Deno.test("VersionedEncryptionService - Round-trip tests", async (t) => {
+integrationTest("VersionedEncryptionService - Round-trip tests", async (t) => {
   const service = EncryptionServiceBuilder.create().build();
 
   await t.step("empty string", async () => {

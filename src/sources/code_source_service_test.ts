@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import type {
   CodeSourceProvider,
   CodeSource,
@@ -79,7 +80,7 @@ function createMockProvider(
 // Validation Tests (Pure Functions - No DB Needed)
 // ============================================================================
 
-Deno.test("CodeSourceService.isValidSourceName accepts valid names", async () => {
+integrationTest("CodeSourceService.isValidSourceName accepts valid names", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     // Lowercase
@@ -100,7 +101,7 @@ Deno.test("CodeSourceService.isValidSourceName accepts valid names", async () =>
   }
 });
 
-Deno.test("CodeSourceService.isValidSourceName rejects invalid names", async () => {
+integrationTest("CodeSourceService.isValidSourceName rejects invalid names", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     // Empty/whitespace
@@ -129,7 +130,7 @@ Deno.test("CodeSourceService.isValidSourceName rejects invalid names", async () 
 // Provider Registration Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.registerProvider registers provider", async () => {
+integrationTest("CodeSourceService.registerProvider registers provider", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = createMockProvider("manual");
@@ -141,7 +142,7 @@ Deno.test("CodeSourceService.registerProvider registers provider", async () => {
   }
 });
 
-Deno.test("CodeSourceService.getProvider returns registered provider", async () => {
+integrationTest("CodeSourceService.getProvider returns registered provider", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const provider = createMockProvider("manual");
@@ -154,7 +155,7 @@ Deno.test("CodeSourceService.getProvider returns registered provider", async () 
   }
 });
 
-Deno.test("CodeSourceService.getProvider throws for unregistered type", async () => {
+integrationTest("CodeSourceService.getProvider throws for unregistered type", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     // Use a type that isn't registered (manual and git are registered by default)
@@ -167,7 +168,7 @@ Deno.test("CodeSourceService.getProvider throws for unregistered type", async ()
   }
 });
 
-Deno.test("CodeSourceService.hasProvider returns false for unregistered type", async () => {
+integrationTest("CodeSourceService.hasProvider returns false for unregistered type", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     // Use a type that isn't registered (manual and git are registered by default)
@@ -182,7 +183,7 @@ Deno.test("CodeSourceService.hasProvider returns false for unregistered type", a
 // CRUD Tests - Create
 // ============================================================================
 
-Deno.test("CodeSourceService.create creates source with minimal config", async () => {
+integrationTest("CodeSourceService.create creates source with minimal config", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -203,7 +204,7 @@ Deno.test("CodeSourceService.create creates source with minimal config", async (
   }
 });
 
-Deno.test("CodeSourceService.create creates source with all fields", async () => {
+integrationTest("CodeSourceService.create creates source with all fields", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -238,7 +239,7 @@ Deno.test("CodeSourceService.create creates source with all fields", async () =>
   }
 });
 
-Deno.test("CodeSourceService.create throws on duplicate name", async () => {
+integrationTest("CodeSourceService.create throws on duplicate name", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -253,7 +254,7 @@ Deno.test("CodeSourceService.create throws on duplicate name", async () => {
   }
 });
 
-Deno.test("CodeSourceService.create throws on invalid name", async () => {
+integrationTest("CodeSourceService.create throws on invalid name", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -270,7 +271,7 @@ Deno.test("CodeSourceService.create throws on invalid name", async () => {
   }
 });
 
-Deno.test("CodeSourceService.create throws on unregistered provider", async () => {
+integrationTest("CodeSourceService.create throws on unregistered provider", async () => {
   // Get a context with code sources to access dependencies, but create a fresh
   // CodeSourceService without registering any providers
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
@@ -294,7 +295,7 @@ Deno.test("CodeSourceService.create throws on unregistered provider", async () =
   }
 });
 
-Deno.test("CodeSourceService.create validates git type settings", async () => {
+integrationTest("CodeSourceService.create validates git type settings", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -338,7 +339,7 @@ Deno.test("CodeSourceService.create validates git type settings", async () => {
 // CRUD Tests - Read
 // ============================================================================
 
-Deno.test("CodeSourceService.getAll returns empty array initially", async () => {
+integrationTest("CodeSourceService.getAll returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const sources = await ctx.codeSourceService.getAll();
@@ -348,7 +349,7 @@ Deno.test("CodeSourceService.getAll returns empty array initially", async () => 
   }
 });
 
-Deno.test("CodeSourceService.getAll returns all sources", async () => {
+integrationTest("CodeSourceService.getAll returns all sources", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -364,7 +365,7 @@ Deno.test("CodeSourceService.getAll returns all sources", async () => {
   }
 });
 
-Deno.test("CodeSourceService.getAllEnabled returns only enabled sources", async () => {
+integrationTest("CodeSourceService.getAllEnabled returns only enabled sources", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -381,7 +382,7 @@ Deno.test("CodeSourceService.getAllEnabled returns only enabled sources", async 
   }
 });
 
-Deno.test("CodeSourceService.getById returns source or null", async () => {
+integrationTest("CodeSourceService.getById returns source or null", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -398,7 +399,7 @@ Deno.test("CodeSourceService.getById returns source or null", async () => {
   }
 });
 
-Deno.test("CodeSourceService.getByName returns source or null", async () => {
+integrationTest("CodeSourceService.getByName returns source or null", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -415,7 +416,7 @@ Deno.test("CodeSourceService.getByName returns source or null", async () => {
   }
 });
 
-Deno.test("CodeSourceService.exists returns true/false correctly", async () => {
+integrationTest("CodeSourceService.exists returns true/false correctly", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -429,7 +430,7 @@ Deno.test("CodeSourceService.exists returns true/false correctly", async () => {
   }
 });
 
-Deno.test("CodeSourceService.nameExists returns true/false correctly", async () => {
+integrationTest("CodeSourceService.nameExists returns true/false correctly", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -447,7 +448,7 @@ Deno.test("CodeSourceService.nameExists returns true/false correctly", async () 
 // CRUD Tests - Update
 // ============================================================================
 
-Deno.test("CodeSourceService.update updates typeSettings", async () => {
+integrationTest("CodeSourceService.update updates typeSettings", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -471,7 +472,7 @@ Deno.test("CodeSourceService.update updates typeSettings", async () => {
   }
 });
 
-Deno.test("CodeSourceService.update updates syncSettings", async () => {
+integrationTest("CodeSourceService.update updates syncSettings", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -495,7 +496,7 @@ Deno.test("CodeSourceService.update updates syncSettings", async () => {
   }
 });
 
-Deno.test("CodeSourceService.update updates enabled status", async () => {
+integrationTest("CodeSourceService.update updates enabled status", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -516,7 +517,7 @@ Deno.test("CodeSourceService.update updates enabled status", async () => {
   }
 });
 
-Deno.test("CodeSourceService.update throws for non-existent source", async () => {
+integrationTest("CodeSourceService.update throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     await expect(
@@ -527,7 +528,7 @@ Deno.test("CodeSourceService.update throws for non-existent source", async () =>
   }
 });
 
-Deno.test("CodeSourceService.setEnabled updates enabled status", async () => {
+integrationTest("CodeSourceService.setEnabled updates enabled status", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -552,7 +553,7 @@ Deno.test("CodeSourceService.setEnabled updates enabled status", async () => {
 // CRUD Tests - Delete
 // ============================================================================
 
-Deno.test("CodeSourceService.delete removes source", async () => {
+integrationTest("CodeSourceService.delete removes source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -567,7 +568,7 @@ Deno.test("CodeSourceService.delete removes source", async () => {
   }
 });
 
-Deno.test("CodeSourceService.delete throws for non-existent source", async () => {
+integrationTest("CodeSourceService.delete throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     await expect(ctx.codeSourceService.delete(99999)).rejects.toThrow(
@@ -582,7 +583,7 @@ Deno.test("CodeSourceService.delete throws for non-existent source", async () =>
 // Encryption Tests
 // ============================================================================
 
-Deno.test("CodeSourceService encrypts and decrypts typeSettings correctly", async () => {
+integrationTest("CodeSourceService encrypts and decrypts typeSettings correctly", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -614,7 +615,7 @@ Deno.test("CodeSourceService encrypts and decrypts typeSettings correctly", asyn
   }
 });
 
-Deno.test("CodeSourceService encrypts and decrypts syncSettings correctly", async () => {
+integrationTest("CodeSourceService encrypts and decrypts syncSettings correctly", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -649,7 +650,7 @@ Deno.test("CodeSourceService encrypts and decrypts syncSettings correctly", asyn
 // Capability Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.isEditable returns correct value", async () => {
+integrationTest("CodeSourceService.isEditable returns correct value", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -670,7 +671,7 @@ Deno.test("CodeSourceService.isEditable returns correct value", async () => {
   }
 });
 
-Deno.test("CodeSourceService.isSyncable returns correct value", async () => {
+integrationTest("CodeSourceService.isSyncable returns correct value", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -695,7 +696,7 @@ Deno.test("CodeSourceService.isSyncable returns correct value", async () => {
 // Sync Status Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.markSyncStarted sets lastSyncStartedAt", async () => {
+integrationTest("CodeSourceService.markSyncStarted sets lastSyncStartedAt", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -713,7 +714,7 @@ Deno.test("CodeSourceService.markSyncStarted sets lastSyncStartedAt", async () =
   }
 });
 
-Deno.test("CodeSourceService.markSyncCompleted sets lastSyncAt and clears error", async () => {
+integrationTest("CodeSourceService.markSyncCompleted sets lastSyncAt and clears error", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -736,7 +737,7 @@ Deno.test("CodeSourceService.markSyncCompleted sets lastSyncAt and clears error"
   }
 });
 
-Deno.test("CodeSourceService.markSyncFailed sets error and clears startedAt", async () => {
+integrationTest("CodeSourceService.markSyncFailed sets error and clears startedAt", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -758,7 +759,7 @@ Deno.test("CodeSourceService.markSyncFailed sets error and clears startedAt", as
 // Manual Sync Trigger Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.triggerManualSync throws for non-existent source", async () => {
+integrationTest("CodeSourceService.triggerManualSync throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     await expect(
@@ -769,7 +770,7 @@ Deno.test("CodeSourceService.triggerManualSync throws for non-existent source", 
   }
 });
 
-Deno.test("CodeSourceService.triggerManualSync throws for non-syncable source", async () => {
+integrationTest("CodeSourceService.triggerManualSync throws for non-syncable source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -784,7 +785,7 @@ Deno.test("CodeSourceService.triggerManualSync throws for non-syncable source", 
   }
 });
 
-Deno.test("CodeSourceService.triggerManualSync enqueues job for syncable source", async () => {
+integrationTest("CodeSourceService.triggerManualSync enqueues job for syncable source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -809,7 +810,7 @@ Deno.test("CodeSourceService.triggerManualSync enqueues job for syncable source"
 // Webhook Sync Trigger Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.triggerWebhookSync throws for non-existent source", async () => {
+integrationTest("CodeSourceService.triggerWebhookSync throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     await expect(
@@ -820,7 +821,7 @@ Deno.test("CodeSourceService.triggerWebhookSync throws for non-existent source",
   }
 });
 
-Deno.test("CodeSourceService.triggerWebhookSync throws for disabled webhooks", async () => {
+integrationTest("CodeSourceService.triggerWebhookSync throws for disabled webhooks", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -840,7 +841,7 @@ Deno.test("CodeSourceService.triggerWebhookSync throws for disabled webhooks", a
   }
 });
 
-Deno.test("CodeSourceService.triggerWebhookSync throws for invalid secret", async () => {
+integrationTest("CodeSourceService.triggerWebhookSync throws for invalid secret", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -860,7 +861,7 @@ Deno.test("CodeSourceService.triggerWebhookSync throws for invalid secret", asyn
   }
 });
 
-Deno.test("CodeSourceService.triggerWebhookSync enqueues job with valid secret", async () => {
+integrationTest("CodeSourceService.triggerWebhookSync enqueues job with valid secret", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -885,7 +886,7 @@ Deno.test("CodeSourceService.triggerWebhookSync enqueues job with valid secret",
   }
 });
 
-Deno.test("CodeSourceService.triggerWebhookSync enqueues job without secret when none required", async () => {
+integrationTest("CodeSourceService.triggerWebhookSync enqueues job without secret when none required", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -909,7 +910,7 @@ Deno.test("CodeSourceService.triggerWebhookSync enqueues job without secret when
   }
 });
 
-Deno.test("CodeSourceService.triggerWebhookSync returns null for disabled source", async () => {
+integrationTest("CodeSourceService.triggerWebhookSync returns null for disabled source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -933,7 +934,7 @@ Deno.test("CodeSourceService.triggerWebhookSync returns null for disabled source
 // Schedule Lifecycle Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.pauseSchedule throws SourceNotFoundError for non-existent source", async () => {
+integrationTest("CodeSourceService.pauseSchedule throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     await expect(
@@ -944,7 +945,7 @@ Deno.test("CodeSourceService.pauseSchedule throws SourceNotFoundError for non-ex
   }
 });
 
-Deno.test("CodeSourceService.resumeSchedule throws SourceNotFoundError for non-existent source", async () => {
+integrationTest("CodeSourceService.resumeSchedule throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     await expect(
@@ -955,7 +956,7 @@ Deno.test("CodeSourceService.resumeSchedule throws SourceNotFoundError for non-e
   }
 });
 
-Deno.test("CodeSourceService.pauseSchedule does not throw for source without schedule", async () => {
+integrationTest("CodeSourceService.pauseSchedule does not throw for source without schedule", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -976,7 +977,7 @@ Deno.test("CodeSourceService.pauseSchedule does not throw for source without sch
   }
 });
 
-Deno.test("CodeSourceService.resumeSchedule does not throw for source without schedule", async () => {
+integrationTest("CodeSourceService.resumeSchedule does not throw for source without schedule", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("manual"));
@@ -997,7 +998,7 @@ Deno.test("CodeSourceService.resumeSchedule does not throw for source without sc
   }
 });
 
-Deno.test("CodeSourceService.pauseSchedule leaves source enabled", async () => {
+integrationTest("CodeSourceService.pauseSchedule leaves source enabled", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -1021,7 +1022,7 @@ Deno.test("CodeSourceService.pauseSchedule leaves source enabled", async () => {
   }
 });
 
-Deno.test("CodeSourceService.setEnabled with false also pauses schedule (internal call)", async () => {
+integrationTest("CodeSourceService.setEnabled with false also pauses schedule (internal call)", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     ctx.codeSourceService.registerProvider(createMockProvider("git"));
@@ -1050,7 +1051,7 @@ Deno.test("CodeSourceService.setEnabled with false also pauses schedule (interna
 // Source Directory Tests
 // ============================================================================
 
-Deno.test("CodeSourceService.getSourceDirectory returns correct path", async () => {
+integrationTest("CodeSourceService.getSourceDirectory returns correct path", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
     const path = ctx.codeSourceService.getSourceDirectory("my-project");

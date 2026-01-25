@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { SurrealMigrationService } from "./surreal_migration_service.ts";
@@ -19,13 +20,15 @@ async function writeMigration(
 // getCurrentVersion tests
 // =====================
 
-Deno.test("getCurrentVersion returns null when schema_version table does not exist", async () => {
+integrationTest("getCurrentVersion returns null when schema_version table does not exist", async () => {
   // Create temp migrations dir (empty - no migrations)
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {
@@ -41,12 +44,14 @@ Deno.test("getCurrentVersion returns null when schema_version table does not exi
   }
 });
 
-Deno.test("getCurrentVersion returns version when schema_version exists", async () => {
+integrationTest("getCurrentVersion returns version when schema_version exists", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {
@@ -73,12 +78,14 @@ Deno.test("getCurrentVersion returns version when schema_version exists", async 
 // getAvailableMigrations tests
 // =====================
 
-Deno.test("getAvailableMigrations returns empty array for empty directory", async () => {
+integrationTest("getAvailableMigrations returns empty array for empty directory", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {
@@ -94,7 +101,7 @@ Deno.test("getAvailableMigrations returns empty array for empty directory", asyn
   }
 });
 
-Deno.test("getAvailableMigrations parses migration files correctly", async () => {
+integrationTest("getAvailableMigrations parses migration files correctly", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   try {
@@ -104,7 +111,9 @@ Deno.test("getAvailableMigrations parses migration files correctly", async () =>
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withSurrealDB()
+      .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
       .build();
 
     try {
@@ -129,7 +138,7 @@ Deno.test("getAvailableMigrations parses migration files correctly", async () =>
   }
 });
 
-Deno.test("getAvailableMigrations ignores non-matching files", async () => {
+integrationTest("getAvailableMigrations ignores non-matching files", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   try {
@@ -142,7 +151,9 @@ Deno.test("getAvailableMigrations ignores non-matching files", async () => {
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withSurrealDB()
+      .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
       .build();
 
     try {
@@ -162,7 +173,7 @@ Deno.test("getAvailableMigrations ignores non-matching files", async () => {
   }
 });
 
-Deno.test("getAvailableMigrations returns migrations sorted by version", async () => {
+integrationTest("getAvailableMigrations returns migrations sorted by version", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   try {
@@ -173,7 +184,9 @@ Deno.test("getAvailableMigrations returns migrations sorted by version", async (
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withSurrealDB()
+      .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
       .build();
 
     try {
@@ -199,7 +212,7 @@ Deno.test("getAvailableMigrations returns migrations sorted by version", async (
 // migrate tests
 // =====================
 
-Deno.test("migrate applies all migrations on fresh database", async () => {
+integrationTest("migrate applies all migrations on fresh database", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   try {
@@ -223,7 +236,9 @@ Deno.test("migrate applies all migrations on fresh database", async () => {
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withSurrealDB()
+      .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
       .build();
 
     try {
@@ -253,12 +268,14 @@ Deno.test("migrate applies all migrations on fresh database", async () => {
   }
 });
 
-Deno.test("migrate only applies new migrations on partially migrated database", async () => {
+integrationTest("migrate only applies new migrations on partially migrated database", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {
@@ -318,12 +335,14 @@ Deno.test("migrate only applies new migrations on partially migrated database", 
   }
 });
 
-Deno.test("migrate returns zero applied when no pending migrations", async () => {
+integrationTest("migrate returns zero applied when no pending migrations", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {
@@ -353,7 +372,7 @@ Deno.test("migrate returns zero applied when no pending migrations", async () =>
   }
 });
 
-Deno.test("migrate handles version gaps correctly", async () => {
+integrationTest("migrate handles version gaps correctly", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   try {
@@ -385,7 +404,9 @@ Deno.test("migrate handles version gaps correctly", async () => {
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withSurrealDB()
+      .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
       .build();
 
     try {
@@ -410,7 +431,7 @@ Deno.test("migrate handles version gaps correctly", async () => {
   }
 });
 
-Deno.test("migrate throws SurrealMigrationExecutionError on SurrealQL failure", async () => {
+integrationTest("migrate throws SurrealMigrationExecutionError on SurrealQL failure", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   try {
@@ -431,7 +452,9 @@ Deno.test("migrate throws SurrealMigrationExecutionError on SurrealQL failure", 
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withSurrealDB()
+      .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
       .build();
 
     try {
@@ -455,12 +478,14 @@ Deno.test("migrate throws SurrealMigrationExecutionError on SurrealQL failure", 
   }
 });
 
-Deno.test("migrate returns correct result when no migrations exist", async () => {
+integrationTest("migrate returns correct result when no migrations exist", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {
@@ -484,7 +509,7 @@ Deno.test("migrate returns correct result when no migrations exist", async () =>
 // Error type tests (don't need SurrealDB)
 // =====================
 
-Deno.test("SurrealMigrationFileError contains file path", () => {
+integrationTest("SurrealMigrationFileError contains file path", () => {
   const error = new SurrealMigrationFileError("/path/to/migration.surql", new Error("ENOENT"));
 
   expect(error.name).toBe("SurrealMigrationFileError");
@@ -493,7 +518,7 @@ Deno.test("SurrealMigrationFileError contains file path", () => {
   expect(error.originalError).toBeInstanceOf(Error);
 });
 
-Deno.test("SurrealMigrationExecutionError contains version and filename", () => {
+integrationTest("SurrealMigrationExecutionError contains version and filename", () => {
   const error = new SurrealMigrationExecutionError(
     5,
     "005-add-users.surql",
@@ -508,12 +533,14 @@ Deno.test("SurrealMigrationExecutionError contains version and filename", () => 
   expect(error.originalError).toBeInstanceOf(Error);
 });
 
-Deno.test("getAvailableMigrations throws SurrealMigrationError when directory read fails", async () => {
+integrationTest("getAvailableMigrations throws SurrealMigrationError when directory read fails", async () => {
   const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withSurrealDB()
+    .withoutSQLiteMigrations()
+      .withoutSurrealMigrations()
+      .withBaseOnly()
     .build();
 
   try {

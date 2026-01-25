@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { JobProcessorService } from "../jobs/job_processor_service.ts";
 import {
   ScheduleNotFoundError,
@@ -12,7 +13,7 @@ import {
 // Schedule Registration - One-off
 // =============================================================================
 
-Deno.test("SchedulingService.registerSchedule creates one-off schedule", async () => {
+integrationTest("SchedulingService.registerSchedule creates one-off schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -40,7 +41,7 @@ Deno.test("SchedulingService.registerSchedule creates one-off schedule", async (
   }
 });
 
-Deno.test("SchedulingService.registerSchedule creates one-off with custom options", async () => {
+integrationTest("SchedulingService.registerSchedule creates one-off with custom options", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -73,7 +74,7 @@ Deno.test("SchedulingService.registerSchedule creates one-off with custom option
 // Schedule Registration - Interval
 // =============================================================================
 
-Deno.test("SchedulingService.registerSchedule creates sequential interval schedule", async () => {
+integrationTest("SchedulingService.registerSchedule creates sequential interval schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -98,7 +99,7 @@ Deno.test("SchedulingService.registerSchedule creates sequential interval schedu
   }
 });
 
-Deno.test("SchedulingService.registerSchedule creates concurrent interval schedule", async () => {
+integrationTest("SchedulingService.registerSchedule creates concurrent interval schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -122,7 +123,7 @@ Deno.test("SchedulingService.registerSchedule creates concurrent interval schedu
 // Schedule Registration - Dynamic
 // =============================================================================
 
-Deno.test("SchedulingService.registerSchedule creates dynamic schedule", async () => {
+integrationTest("SchedulingService.registerSchedule creates dynamic schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -148,7 +149,7 @@ Deno.test("SchedulingService.registerSchedule creates dynamic schedule", async (
 // Schedule Registration - Validation
 // =============================================================================
 
-Deno.test("SchedulingService.registerSchedule throws on duplicate name", async () => {
+integrationTest("SchedulingService.registerSchedule throws on duplicate name", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -173,7 +174,7 @@ Deno.test("SchedulingService.registerSchedule throws on duplicate name", async (
   }
 });
 
-Deno.test("SchedulingService.registerSchedule validates one_off requires nextRunAt", async () => {
+integrationTest("SchedulingService.registerSchedule validates one_off requires nextRunAt", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -191,7 +192,7 @@ Deno.test("SchedulingService.registerSchedule validates one_off requires nextRun
   }
 });
 
-Deno.test("SchedulingService.registerSchedule validates dynamic requires nextRunAt", async () => {
+integrationTest("SchedulingService.registerSchedule validates dynamic requires nextRunAt", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -209,7 +210,7 @@ Deno.test("SchedulingService.registerSchedule validates dynamic requires nextRun
   }
 });
 
-Deno.test("SchedulingService.registerSchedule validates interval requires intervalMs", async () => {
+integrationTest("SchedulingService.registerSchedule validates interval requires intervalMs", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -227,7 +228,7 @@ Deno.test("SchedulingService.registerSchedule validates interval requires interv
   }
 });
 
-Deno.test("SchedulingService.registerSchedule validates empty name", async () => {
+integrationTest("SchedulingService.registerSchedule validates empty name", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -245,7 +246,7 @@ Deno.test("SchedulingService.registerSchedule validates empty name", async () =>
   }
 });
 
-Deno.test("SchedulingService.registerSchedule validates empty jobType", async () => {
+integrationTest("SchedulingService.registerSchedule validates empty jobType", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -267,7 +268,7 @@ Deno.test("SchedulingService.registerSchedule validates empty jobType", async ()
 // Schedule Lifecycle - Cancel/Pause/Resume
 // =============================================================================
 
-Deno.test("SchedulingService.cancelSchedule marks schedule as completed", async () => {
+integrationTest("SchedulingService.cancelSchedule marks schedule as completed", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -288,7 +289,7 @@ Deno.test("SchedulingService.cancelSchedule marks schedule as completed", async 
   }
 });
 
-Deno.test("SchedulingService.cancelSchedule throws for non-existent schedule", async () => {
+integrationTest("SchedulingService.cancelSchedule throws for non-existent schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -301,7 +302,7 @@ Deno.test("SchedulingService.cancelSchedule throws for non-existent schedule", a
   }
 });
 
-Deno.test("SchedulingService.pauseSchedule pauses active schedule", async () => {
+integrationTest("SchedulingService.pauseSchedule pauses active schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -321,7 +322,7 @@ Deno.test("SchedulingService.pauseSchedule pauses active schedule", async () => 
   }
 });
 
-Deno.test("SchedulingService.pauseSchedule throws for non-active schedule", async () => {
+integrationTest("SchedulingService.pauseSchedule throws for non-active schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -344,7 +345,7 @@ Deno.test("SchedulingService.pauseSchedule throws for non-active schedule", asyn
   }
 });
 
-Deno.test("SchedulingService.resumeSchedule resumes paused schedule", async () => {
+integrationTest("SchedulingService.resumeSchedule resumes paused schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -366,7 +367,7 @@ Deno.test("SchedulingService.resumeSchedule resumes paused schedule", async () =
   }
 });
 
-Deno.test("SchedulingService.resumeSchedule throws for non-paused schedule", async () => {
+integrationTest("SchedulingService.resumeSchedule throws for non-paused schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -391,7 +392,7 @@ Deno.test("SchedulingService.resumeSchedule throws for non-paused schedule", asy
 // Schedule Queries
 // =============================================================================
 
-Deno.test("SchedulingService.getSchedule returns schedule by name", async () => {
+integrationTest("SchedulingService.getSchedule returns schedule by name", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -412,7 +413,7 @@ Deno.test("SchedulingService.getSchedule returns schedule by name", async () => 
   }
 });
 
-Deno.test("SchedulingService.getSchedule returns null for non-existent", async () => {
+integrationTest("SchedulingService.getSchedule returns null for non-existent", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -424,7 +425,7 @@ Deno.test("SchedulingService.getSchedule returns null for non-existent", async (
   }
 });
 
-Deno.test("SchedulingService.getSchedules returns all schedules", async () => {
+integrationTest("SchedulingService.getSchedules returns all schedules", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -453,7 +454,7 @@ Deno.test("SchedulingService.getSchedules returns all schedules", async () => {
   }
 });
 
-Deno.test("SchedulingService.getSchedules filters by status", async () => {
+integrationTest("SchedulingService.getSchedules filters by status", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -489,7 +490,7 @@ Deno.test("SchedulingService.getSchedules filters by status", async () => {
 // Delete Schedule
 // =============================================================================
 
-Deno.test("SchedulingService.deleteSchedule removes schedule", async () => {
+integrationTest("SchedulingService.deleteSchedule removes schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -510,7 +511,7 @@ Deno.test("SchedulingService.deleteSchedule removes schedule", async () => {
   }
 });
 
-Deno.test("SchedulingService.deleteSchedule throws for non-existent", async () => {
+integrationTest("SchedulingService.deleteSchedule throws for non-existent", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -527,7 +528,7 @@ Deno.test("SchedulingService.deleteSchedule throws for non-existent", async () =
 // Manual Trigger
 // =============================================================================
 
-Deno.test("SchedulingService.triggerNow creates job immediately", async () => {
+integrationTest("SchedulingService.triggerNow creates job immediately", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -551,7 +552,7 @@ Deno.test("SchedulingService.triggerNow creates job immediately", async () => {
   }
 });
 
-Deno.test("SchedulingService.triggerNow works for paused schedules", async () => {
+integrationTest("SchedulingService.triggerNow works for paused schedules", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -573,7 +574,7 @@ Deno.test("SchedulingService.triggerNow works for paused schedules", async () =>
   }
 });
 
-Deno.test("SchedulingService.triggerNow throws for completed schedule", async () => {
+integrationTest("SchedulingService.triggerNow throws for completed schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -599,7 +600,7 @@ Deno.test("SchedulingService.triggerNow throws for completed schedule", async ()
 // Schedule Execution - One-off
 // =============================================================================
 
-Deno.test("SchedulingService triggers one-off schedule at scheduled time", async () => {
+integrationTest("SchedulingService triggers one-off schedule at scheduled time", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -636,7 +637,7 @@ Deno.test("SchedulingService triggers one-off schedule at scheduled time", async
 // Transient Schedules
 // =============================================================================
 
-Deno.test("SchedulingService clears transient schedules on startup", async () => {
+integrationTest("SchedulingService clears transient schedules on startup", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -679,7 +680,7 @@ Deno.test("SchedulingService clears transient schedules on startup", async () =>
 // Sequential Interval - Completion Handling
 // =============================================================================
 
-Deno.test("SchedulingService sequential_interval waits for job completion", async () => {
+integrationTest("SchedulingService sequential_interval waits for job completion", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   const processor = new JobProcessorService({
@@ -734,7 +735,7 @@ Deno.test("SchedulingService sequential_interval waits for job completion", asyn
 // Dynamic Schedules
 // =============================================================================
 
-Deno.test("SchedulingService dynamic schedule uses handler result for next time", async () => {
+integrationTest("SchedulingService dynamic schedule uses handler result for next time", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   const processor = new JobProcessorService({
@@ -781,7 +782,7 @@ Deno.test("SchedulingService dynamic schedule uses handler result for next time"
   }
 });
 
-Deno.test("SchedulingService dynamic schedule completes when handler returns no next time", async () => {
+integrationTest("SchedulingService dynamic schedule completes when handler returns no next time", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   const processor = new JobProcessorService({
@@ -825,7 +826,7 @@ Deno.test("SchedulingService dynamic schedule completes when handler returns no 
 // Service Lifecycle
 // =============================================================================
 
-Deno.test("SchedulingService.isRunning returns correct state", async () => {
+integrationTest("SchedulingService.isRunning returns correct state", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -842,7 +843,7 @@ Deno.test("SchedulingService.isRunning returns correct state", async () => {
   }
 });
 
-Deno.test("SchedulingService.start is idempotent", async () => {
+integrationTest("SchedulingService.start is idempotent", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -860,7 +861,7 @@ Deno.test("SchedulingService.start is idempotent", async () => {
 // Update Schedule
 // =============================================================================
 
-Deno.test("SchedulingService.updateSchedule updates intervalMs and recalculates nextRunAt", async () => {
+integrationTest("SchedulingService.updateSchedule updates intervalMs and recalculates nextRunAt", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -893,7 +894,7 @@ Deno.test("SchedulingService.updateSchedule updates intervalMs and recalculates 
   }
 });
 
-Deno.test("SchedulingService.updateSchedule preserves nextRunAt with preserve option", async () => {
+integrationTest("SchedulingService.updateSchedule preserves nextRunAt with preserve option", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -921,7 +922,7 @@ Deno.test("SchedulingService.updateSchedule preserves nextRunAt with preserve op
   }
 });
 
-Deno.test("SchedulingService.updateSchedule allows explicit nextRunAt override", async () => {
+integrationTest("SchedulingService.updateSchedule allows explicit nextRunAt override", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -947,7 +948,7 @@ Deno.test("SchedulingService.updateSchedule allows explicit nextRunAt override",
   }
 });
 
-Deno.test("SchedulingService.updateSchedule updates jobPayload", async () => {
+integrationTest("SchedulingService.updateSchedule updates jobPayload", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -970,7 +971,7 @@ Deno.test("SchedulingService.updateSchedule updates jobPayload", async () => {
   }
 });
 
-Deno.test("SchedulingService.updateSchedule updates description", async () => {
+integrationTest("SchedulingService.updateSchedule updates description", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -993,7 +994,7 @@ Deno.test("SchedulingService.updateSchedule updates description", async () => {
   }
 });
 
-Deno.test("SchedulingService.updateSchedule can set description to null", async () => {
+integrationTest("SchedulingService.updateSchedule can set description to null", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1016,7 +1017,7 @@ Deno.test("SchedulingService.updateSchedule can set description to null", async 
   }
 });
 
-Deno.test("SchedulingService.updateSchedule throws for non-existent schedule", async () => {
+integrationTest("SchedulingService.updateSchedule throws for non-existent schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1029,7 +1030,7 @@ Deno.test("SchedulingService.updateSchedule throws for non-existent schedule", a
   }
 });
 
-Deno.test("SchedulingService.updateSchedule throws for completed schedule", async () => {
+integrationTest("SchedulingService.updateSchedule throws for completed schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1051,7 +1052,7 @@ Deno.test("SchedulingService.updateSchedule throws for completed schedule", asyn
   }
 });
 
-Deno.test("SchedulingService.updateSchedule throws for intervalMs on one_off schedule", async () => {
+integrationTest("SchedulingService.updateSchedule throws for intervalMs on one_off schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1071,7 +1072,7 @@ Deno.test("SchedulingService.updateSchedule throws for intervalMs on one_off sch
   }
 });
 
-Deno.test("SchedulingService.updateSchedule throws for intervalMs on dynamic schedule", async () => {
+integrationTest("SchedulingService.updateSchedule throws for intervalMs on dynamic schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1091,7 +1092,7 @@ Deno.test("SchedulingService.updateSchedule throws for intervalMs on dynamic sch
   }
 });
 
-Deno.test("SchedulingService.updateSchedule throws for invalid intervalMs", async () => {
+integrationTest("SchedulingService.updateSchedule throws for invalid intervalMs", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1115,7 +1116,7 @@ Deno.test("SchedulingService.updateSchedule throws for invalid intervalMs", asyn
   }
 });
 
-Deno.test("SchedulingService.updateSchedule works on paused schedule", async () => {
+integrationTest("SchedulingService.updateSchedule works on paused schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1142,7 +1143,7 @@ Deno.test("SchedulingService.updateSchedule works on paused schedule", async () 
   }
 });
 
-Deno.test("SchedulingService.updateSchedule updates multiple fields atomically", async () => {
+integrationTest("SchedulingService.updateSchedule updates multiple fields atomically", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1177,7 +1178,7 @@ Deno.test("SchedulingService.updateSchedule updates multiple fields atomically",
   }
 });
 
-Deno.test("SchedulingService.updateSchedule triggers reschedule when running", async () => {
+integrationTest("SchedulingService.updateSchedule triggers reschedule when running", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1212,7 +1213,7 @@ Deno.test("SchedulingService.updateSchedule triggers reschedule when running", a
   }
 });
 
-Deno.test("SchedulingService.updateSchedule does not change nextRunAt when job is running", async () => {
+integrationTest("SchedulingService.updateSchedule does not change nextRunAt when job is running", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {
@@ -1244,7 +1245,7 @@ Deno.test("SchedulingService.updateSchedule does not change nextRunAt when job i
   }
 });
 
-Deno.test("SchedulingService.updateSchedule can update nextRunAt on one_off schedule", async () => {
+integrationTest("SchedulingService.updateSchedule can update nextRunAt on one_off schedule", async () => {
   const ctx = await TestSetupBuilder.create().withScheduling().build();
 
   try {

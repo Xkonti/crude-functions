@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import type { DatabaseService } from "../database/database_service.ts";
 
 /**
@@ -60,7 +61,7 @@ async function insertUserDirectly(
 // Read Operations Tests
 // =====================
 
-Deno.test("UserService.getAll returns empty array when no users", async () => {
+integrationTest("UserService.getAll returns empty array when no users", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -73,7 +74,7 @@ Deno.test("UserService.getAll returns empty array when no users", async () => {
   }
 });
 
-Deno.test("UserService.getAll returns all users ordered by createdAt DESC", async () => {
+integrationTest("UserService.getAll returns all users ordered by createdAt DESC", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -113,7 +114,7 @@ Deno.test("UserService.getAll returns all users ordered by createdAt DESC", asyn
   }
 });
 
-Deno.test("UserService.getAll correctly parses user roles", async () => {
+integrationTest("UserService.getAll correctly parses user roles", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("no-role@test.com", "password123", [])
@@ -136,7 +137,7 @@ Deno.test("UserService.getAll correctly parses user roles", async () => {
   }
 });
 
-Deno.test("UserService.getById returns user when found", async () => {
+integrationTest("UserService.getById returns user when found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("test@example.com", "password123", ["userMgmt"])
@@ -160,7 +161,7 @@ Deno.test("UserService.getById returns user when found", async () => {
   }
 });
 
-Deno.test("UserService.getById returns null when user not found", async () => {
+integrationTest("UserService.getById returns null when user not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -173,7 +174,7 @@ Deno.test("UserService.getById returns null when user not found", async () => {
   }
 });
 
-Deno.test("UserService.getByEmail returns user when found (case-insensitive)", async () => {
+integrationTest("UserService.getByEmail returns user when found (case-insensitive)", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -205,7 +206,7 @@ Deno.test("UserService.getByEmail returns user when found (case-insensitive)", a
   }
 });
 
-Deno.test("UserService.getByEmail returns null when user not found", async () => {
+integrationTest("UserService.getByEmail returns null when user not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -218,7 +219,7 @@ Deno.test("UserService.getByEmail returns null when user not found", async () =>
   }
 });
 
-Deno.test("UserService.getUsersByRole filters users by role correctly", async () => {
+integrationTest("UserService.getUsersByRole filters users by role correctly", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("admin1@test.com", "password123", ["permanent", "userMgmt"])
@@ -252,7 +253,7 @@ Deno.test("UserService.getUsersByRole filters users by role correctly", async ()
 // Existence Checks Tests
 // =====================
 
-Deno.test("UserService.hasUsers returns false when no users", async () => {
+integrationTest("UserService.hasUsers returns false when no users", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -265,7 +266,7 @@ Deno.test("UserService.hasUsers returns false when no users", async () => {
   }
 });
 
-Deno.test("UserService.hasUsers returns true when users exist", async () => {
+integrationTest("UserService.hasUsers returns true when users exist", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("test@example.com", "password123", [])
@@ -279,7 +280,7 @@ Deno.test("UserService.hasUsers returns true when users exist", async () => {
   }
 });
 
-Deno.test("UserService.getUserCount returns correct count", async () => {
+integrationTest("UserService.getUserCount returns correct count", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -300,7 +301,7 @@ Deno.test("UserService.getUserCount returns correct count", async () => {
   }
 });
 
-Deno.test("UserService.userExists returns correct boolean", async () => {
+integrationTest("UserService.userExists returns correct boolean", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("test@example.com", "password123", [])
@@ -317,7 +318,7 @@ Deno.test("UserService.userExists returns correct boolean", async () => {
   }
 });
 
-Deno.test("UserService.userExistsByEmail returns correct boolean (case-insensitive)", async () => {
+integrationTest("UserService.userExistsByEmail returns correct boolean (case-insensitive)", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -343,7 +344,7 @@ Deno.test("UserService.userExistsByEmail returns correct boolean (case-insensiti
 // Write Operations Tests (Better Auth Integration)
 // =====================
 
-Deno.test("UserService.createUser validates email format", async () => {
+integrationTest("UserService.createUser validates email format", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -377,7 +378,7 @@ Deno.test("UserService.createUser validates email format", async () => {
   }
 });
 
-Deno.test("UserService.createUser validates password length", async () => {
+integrationTest("UserService.createUser validates password length", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -411,7 +412,7 @@ Deno.test("UserService.createUser validates password length", async () => {
   }
 });
 
-Deno.test("UserService.updatePassword validates password length", async () => {
+integrationTest("UserService.updatePassword validates password length", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("test@example.com", "password123", [])
@@ -442,7 +443,7 @@ Deno.test("UserService.updatePassword validates password length", async () => {
   }
 });
 
-Deno.test("UserService.deleteUser prevents deleting permanent users", async () => {
+integrationTest("UserService.deleteUser prevents deleting permanent users", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("admin@example.com", "password123", ["permanent", "userMgmt"])
@@ -467,7 +468,7 @@ Deno.test("UserService.deleteUser prevents deleting permanent users", async () =
   }
 });
 
-Deno.test("UserService.deleteUser allows deleting non-permanent users", async () => {
+integrationTest("UserService.deleteUser allows deleting non-permanent users", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("user@example.com", "password123", ["userRead"])
@@ -487,7 +488,7 @@ Deno.test("UserService.deleteUser allows deleting non-permanent users", async ()
   }
 });
 
-Deno.test("UserService.deleteUser throws when user not found", async () => {
+integrationTest("UserService.deleteUser throws when user not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -510,7 +511,7 @@ Deno.test("UserService.deleteUser throws when user not found", async () => {
 // Role Management Tests
 // =====================
 
-Deno.test("UserService.hasRole checks role correctly", async () => {
+integrationTest("UserService.hasRole checks role correctly", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("admin@example.com", "password123", ["permanent", "userMgmt"])
@@ -529,7 +530,7 @@ Deno.test("UserService.hasRole checks role correctly", async () => {
   }
 });
 
-Deno.test("UserService.hasRole returns false for non-existent user", async () => {
+integrationTest("UserService.hasRole returns false for non-existent user", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -541,7 +542,7 @@ Deno.test("UserService.hasRole returns false for non-existent user", async () =>
   }
 });
 
-Deno.test("UserService.addRole is idempotent", async () => {
+integrationTest("UserService.addRole is idempotent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("user@example.com", "password123", ["userRead"])
@@ -570,7 +571,7 @@ Deno.test("UserService.addRole is idempotent", async () => {
   }
 });
 
-Deno.test("UserService.addRole throws when user not found", async () => {
+integrationTest("UserService.addRole throws when user not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -589,7 +590,7 @@ Deno.test("UserService.addRole throws when user not found", async () => {
   }
 });
 
-Deno.test("UserService.removeRole is idempotent", async () => {
+integrationTest("UserService.removeRole is idempotent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("user@example.com", "password123", ["userRead", "userMgmt"])
@@ -613,7 +614,7 @@ Deno.test("UserService.removeRole is idempotent", async () => {
   }
 });
 
-Deno.test("UserService.removeRole prevents removing permanent role", async () => {
+integrationTest("UserService.removeRole prevents removing permanent role", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("admin@example.com", "password123", ["permanent", "userMgmt"])
@@ -639,7 +640,7 @@ Deno.test("UserService.removeRole prevents removing permanent role", async () =>
   }
 });
 
-Deno.test("UserService.removeRole throws when user not found", async () => {
+integrationTest("UserService.removeRole throws when user not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -662,7 +663,7 @@ Deno.test("UserService.removeRole throws when user not found", async () => {
 // Session/Auth Tests
 // =====================
 
-Deno.test("UserService.getSession returns null when no session", async () => {
+integrationTest("UserService.getSession returns null when no session", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -686,7 +687,7 @@ Deno.test("UserService.getSession returns null when no session", async () => {
 // Edge Cases and Data Integrity Tests
 // =====================
 
-Deno.test("UserService.getAll handles users with null names gracefully", async () => {
+integrationTest("UserService.getAll handles users with null names gracefully", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -708,7 +709,7 @@ Deno.test("UserService.getAll handles users with null names gracefully", async (
   }
 });
 
-Deno.test("UserService correctly parses roles with whitespace", async () => {
+integrationTest("UserService correctly parses roles with whitespace", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -731,7 +732,7 @@ Deno.test("UserService correctly parses roles with whitespace", async () => {
   }
 });
 
-Deno.test("UserService.getAll handles banned users correctly", async () => {
+integrationTest("UserService.getAll handles banned users correctly", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -758,7 +759,7 @@ Deno.test("UserService.getAll handles banned users correctly", async () => {
   }
 });
 
-Deno.test("UserService.getAll handles date parsing correctly", async () => {
+integrationTest("UserService.getAll handles date parsing correctly", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .build();
@@ -790,7 +791,7 @@ Deno.test("UserService.getAll handles date parsing correctly", async () => {
   }
 });
 
-Deno.test("UserService.getUsersByRole doesn't match partial role names", async () => {
+integrationTest("UserService.getUsersByRole doesn't match partial role names", async () => {
   const ctx = await TestSetupBuilder.create()
     .withUsers()
     .withAdminUser("user1@test.com", "password123", ["userMgmt"])

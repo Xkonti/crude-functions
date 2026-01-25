@@ -19,6 +19,21 @@ jobs:
         with:
           deno-version: v2.x
 
+      - name: Get SurrealDB version
+        id: surreal-version
+        run: echo "version=$(cat .surrealdb-version)" >> $GITHUB_OUTPUT
+
+      - name: Cache SurrealDB binary
+        id: cache-surreal
+        uses: actions/cache@v4
+        with:
+          path: .bin/surreal
+          key: surreal-${{ runner.os }}-${{ steps.surreal-version.outputs.version }}
+
+      - name: Setup SurrealDB
+        if: steps.cache-surreal.outputs.cache-hit != 'true'
+        run: deno task setup
+
       - name: Run tests
         run: deno task test
 

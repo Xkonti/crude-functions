@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
@@ -79,7 +80,7 @@ async function insertLogs(
 
 // GET /api/logs - Basic Queries
 
-Deno.test("GET /api/logs returns empty array when no logs exist", async () => {
+integrationTest("GET /api/logs returns empty array when no logs exist", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs");
@@ -93,7 +94,7 @@ Deno.test("GET /api/logs returns empty array when no logs exist", async () => {
   }
 });
 
-Deno.test("GET /api/logs returns all logs across functions when no filters", async () => {
+integrationTest("GET /api/logs returns all logs across functions when no filters", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 5);
@@ -110,7 +111,7 @@ Deno.test("GET /api/logs returns all logs across functions when no filters", asy
   }
 });
 
-Deno.test("GET /api/logs filters by functionId correctly", async () => {
+integrationTest("GET /api/logs filters by functionId correctly", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 5);
@@ -129,7 +130,7 @@ Deno.test("GET /api/logs filters by functionId correctly", async () => {
   }
 });
 
-Deno.test("GET /api/logs filters by single level", async () => {
+integrationTest("GET /api/logs filters by single level", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 3, "error");
@@ -147,7 +148,7 @@ Deno.test("GET /api/logs filters by single level", async () => {
   }
 });
 
-Deno.test("GET /api/logs filters by multiple levels", async () => {
+integrationTest("GET /api/logs filters by multiple levels", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 3, "error");
@@ -169,7 +170,7 @@ Deno.test("GET /api/logs filters by multiple levels", async () => {
   }
 });
 
-Deno.test("GET /api/logs combines functionId and level filters", async () => {
+integrationTest("GET /api/logs combines functionId and level filters", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 3, "error");
@@ -191,7 +192,7 @@ Deno.test("GET /api/logs combines functionId and level filters", async () => {
   }
 });
 
-Deno.test("GET /api/logs respects default limit of 50", async () => {
+integrationTest("GET /api/logs respects default limit of 50", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -208,7 +209,7 @@ Deno.test("GET /api/logs respects default limit of 50", async () => {
   }
 });
 
-Deno.test("GET /api/logs respects custom limit", async () => {
+integrationTest("GET /api/logs respects custom limit", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 20);
@@ -225,7 +226,7 @@ Deno.test("GET /api/logs respects custom limit", async () => {
   }
 });
 
-Deno.test("GET /api/logs returns logs ordered newest to oldest", async () => {
+integrationTest("GET /api/logs returns logs ordered newest to oldest", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 5);
@@ -249,7 +250,7 @@ Deno.test("GET /api/logs returns logs ordered newest to oldest", async () => {
 
 // GET /api/logs - Validation
 
-Deno.test("GET /api/logs returns 400 for invalid functionId format", async () => {
+integrationTest("GET /api/logs returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs?functionId=invalid");
@@ -262,7 +263,7 @@ Deno.test("GET /api/logs returns 400 for invalid functionId format", async () =>
   }
 });
 
-Deno.test("GET /api/logs returns 404 for non-existent functionId", async () => {
+integrationTest("GET /api/logs returns 404 for non-existent functionId", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs?functionId=999999");
@@ -275,7 +276,7 @@ Deno.test("GET /api/logs returns 404 for non-existent functionId", async () => {
   }
 });
 
-Deno.test("GET /api/logs returns 400 for invalid level value", async () => {
+integrationTest("GET /api/logs returns 400 for invalid level value", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs?level=invalid");
@@ -288,7 +289,7 @@ Deno.test("GET /api/logs returns 400 for invalid level value", async () => {
   }
 });
 
-Deno.test("GET /api/logs returns 400 for limit < 1", async () => {
+integrationTest("GET /api/logs returns 400 for limit < 1", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs?limit=0");
@@ -301,7 +302,7 @@ Deno.test("GET /api/logs returns 400 for limit < 1", async () => {
   }
 });
 
-Deno.test("GET /api/logs returns 400 for limit > 1000", async () => {
+integrationTest("GET /api/logs returns 400 for limit > 1000", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs?limit=1001");
@@ -314,7 +315,7 @@ Deno.test("GET /api/logs returns 400 for limit > 1000", async () => {
   }
 });
 
-Deno.test("GET /api/logs returns 400 for malformed cursor", async () => {
+integrationTest("GET /api/logs returns 400 for malformed cursor", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs?cursor=not-valid-base64!");
@@ -329,7 +330,7 @@ Deno.test("GET /api/logs returns 400 for malformed cursor", async () => {
 
 // GET /api/logs - Pagination
 
-Deno.test("GET /api/logs hasMore=true when more logs exist", async () => {
+integrationTest("GET /api/logs hasMore=true when more logs exist", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -345,7 +346,7 @@ Deno.test("GET /api/logs hasMore=true when more logs exist", async () => {
   }
 });
 
-Deno.test("GET /api/logs hasMore=false when all logs retrieved", async () => {
+integrationTest("GET /api/logs hasMore=false when all logs retrieved", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
@@ -361,7 +362,7 @@ Deno.test("GET /api/logs hasMore=false when all logs retrieved", async () => {
   }
 });
 
-Deno.test("GET /api/logs includes next link when hasMore=true", async () => {
+integrationTest("GET /api/logs includes next link when hasMore=true", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -378,7 +379,7 @@ Deno.test("GET /api/logs includes next link when hasMore=true", async () => {
   }
 });
 
-Deno.test("GET /api/logs does not include next link when hasMore=false", async () => {
+integrationTest("GET /api/logs does not include next link when hasMore=false", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
@@ -393,7 +394,7 @@ Deno.test("GET /api/logs does not include next link when hasMore=false", async (
   }
 });
 
-Deno.test("GET /api/logs includes prev link when cursor provided", async () => {
+integrationTest("GET /api/logs includes prev link when cursor provided", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -414,7 +415,7 @@ Deno.test("GET /api/logs includes prev link when cursor provided", async () => {
   }
 });
 
-Deno.test("GET /api/logs does not include prev link on first page", async () => {
+integrationTest("GET /api/logs does not include prev link on first page", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -429,7 +430,7 @@ Deno.test("GET /api/logs does not include prev link on first page", async () => 
   }
 });
 
-Deno.test("GET /api/logs next cursor retrieves correct second page", async () => {
+integrationTest("GET /api/logs next cursor retrieves correct second page", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 15);
@@ -454,7 +455,7 @@ Deno.test("GET /api/logs next cursor retrieves correct second page", async () =>
   }
 });
 
-Deno.test("GET /api/logs preserves functionId in pagination links", async () => {
+integrationTest("GET /api/logs preserves functionId in pagination links", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -471,7 +472,7 @@ Deno.test("GET /api/logs preserves functionId in pagination links", async () => 
   }
 });
 
-Deno.test("GET /api/logs preserves level filter in pagination links", async () => {
+integrationTest("GET /api/logs preserves level filter in pagination links", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60, "error");
@@ -486,7 +487,7 @@ Deno.test("GET /api/logs preserves level filter in pagination links", async () =
   }
 });
 
-Deno.test("GET /api/logs preserves custom limit in pagination links", async () => {
+integrationTest("GET /api/logs preserves custom limit in pagination links", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
@@ -503,7 +504,7 @@ Deno.test("GET /api/logs preserves custom limit in pagination links", async () =
 
 // GET /api/logs - Edge Cases
 
-Deno.test("GET /api/logs handles logs with identical timestamps", async () => {
+integrationTest("GET /api/logs handles logs with identical timestamps", async () => {
   const ctx = await createTestContext();
   try {
     // Insert logs at the same time - they'll have identical timestamps
@@ -535,7 +536,7 @@ Deno.test("GET /api/logs handles logs with identical timestamps", async () => {
   }
 });
 
-Deno.test("GET /api/logs works with empty result after cursor", async () => {
+integrationTest("GET /api/logs works with empty result after cursor", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
@@ -558,7 +559,7 @@ Deno.test("GET /api/logs works with empty result after cursor", async () => {
   }
 });
 
-Deno.test("GET /api/logs pagination with level filtering works correctly", async () => {
+integrationTest("GET /api/logs pagination with level filtering works correctly", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 30, "error");
@@ -586,7 +587,7 @@ Deno.test("GET /api/logs pagination with level filtering works correctly", async
 
 // DELETE /api/logs/:functionId
 
-Deno.test("DELETE /api/logs/:functionId deletes logs and returns count", async () => {
+integrationTest("DELETE /api/logs/:functionId deletes logs and returns count", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
@@ -612,7 +613,7 @@ Deno.test("DELETE /api/logs/:functionId deletes logs and returns count", async (
   }
 });
 
-Deno.test("DELETE /api/logs/:functionId returns count=0 when no logs exist", async () => {
+integrationTest("DELETE /api/logs/:functionId returns count=0 when no logs exist", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request(
@@ -628,7 +629,7 @@ Deno.test("DELETE /api/logs/:functionId returns count=0 when no logs exist", asy
   }
 });
 
-Deno.test("DELETE /api/logs/:functionId returns 400 for invalid functionId format", async () => {
+integrationTest("DELETE /api/logs/:functionId returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs/invalid", { method: "DELETE" });
@@ -641,7 +642,7 @@ Deno.test("DELETE /api/logs/:functionId returns 400 for invalid functionId forma
   }
 });
 
-Deno.test("DELETE /api/logs/:functionId returns 404 for non-existent functionId", async () => {
+integrationTest("DELETE /api/logs/:functionId returns 404 for non-existent functionId", async () => {
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request("/api/logs/999999", { method: "DELETE" });
@@ -654,7 +655,7 @@ Deno.test("DELETE /api/logs/:functionId returns 404 for non-existent functionId"
   }
 });
 
-Deno.test("DELETE /api/logs/:functionId only deletes specified function's logs", async () => {
+integrationTest("DELETE /api/logs/:functionId only deletes specified function's logs", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
@@ -682,7 +683,7 @@ Deno.test("DELETE /api/logs/:functionId only deletes specified function's logs",
 
 // Response Format
 
-Deno.test("GET /api/logs has correct data wrapper structure", async () => {
+integrationTest("GET /api/logs has correct data wrapper structure", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1);
@@ -699,7 +700,7 @@ Deno.test("GET /api/logs has correct data wrapper structure", async () => {
   }
 });
 
-Deno.test("GET /api/logs pagination object has correct structure", async () => {
+integrationTest("GET /api/logs pagination object has correct structure", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
@@ -717,7 +718,7 @@ Deno.test("GET /api/logs pagination object has correct structure", async () => {
   }
 });
 
-Deno.test("GET /api/logs log objects have all required fields", async () => {
+integrationTest("GET /api/logs log objects have all required fields", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1);
@@ -738,7 +739,7 @@ Deno.test("GET /api/logs log objects have all required fields", async () => {
   }
 });
 
-Deno.test("GET /api/logs timestamps are in ISO format", async () => {
+integrationTest("GET /api/logs timestamps are in ISO format", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1);
@@ -755,7 +756,7 @@ Deno.test("GET /api/logs timestamps are in ISO format", async () => {
   }
 });
 
-Deno.test("GET /api/logs HATEOAS links are relative paths", async () => {
+integrationTest("GET /api/logs HATEOAS links are relative paths", async () => {
   const ctx = await createTestContext();
   try {
     await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);

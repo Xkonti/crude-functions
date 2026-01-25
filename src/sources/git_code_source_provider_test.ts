@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { GitCodeSourceProvider } from "./git_code_source_provider.ts";
 import type { CodeSource, GitTypeSettings } from "./types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
@@ -43,7 +44,7 @@ function createTestSource(
 // Unit Tests
 // =============================================================================
 
-Deno.test("GitCodeSourceProvider.getCapabilities returns correct values", () => {
+integrationTest("GitCodeSourceProvider.getCapabilities returns correct values", () => {
   const provider = new GitCodeSourceProvider({ codeDirectory: "./code" });
   const capabilities = provider.getCapabilities();
 
@@ -51,7 +52,7 @@ Deno.test("GitCodeSourceProvider.getCapabilities returns correct values", () => 
   expect(capabilities.isEditable).toBe(false);
 });
 
-Deno.test("GitCodeSourceProvider.type returns 'git'", () => {
+integrationTest("GitCodeSourceProvider.type returns 'git'", () => {
   const provider = new GitCodeSourceProvider({ codeDirectory: "./code" });
   expect(provider.type).toBe("git");
 });
@@ -60,7 +61,7 @@ Deno.test("GitCodeSourceProvider.type returns 'git'", () => {
 // Directory Operation Tests - Require filesystem access
 // =============================================================================
 
-Deno.test("GitCodeSourceProvider.ensureDirectory creates directory", async () => {
+integrationTest("GitCodeSourceProvider.ensureDirectory creates directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
@@ -73,7 +74,7 @@ Deno.test("GitCodeSourceProvider.ensureDirectory creates directory", async () =>
   }
 });
 
-Deno.test("GitCodeSourceProvider.deleteDirectory removes directory", async () => {
+integrationTest("GitCodeSourceProvider.deleteDirectory removes directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
@@ -97,7 +98,7 @@ Deno.test("GitCodeSourceProvider.deleteDirectory removes directory", async () =>
   }
 });
 
-Deno.test("GitCodeSourceProvider.deleteDirectory silently succeeds if directory doesn't exist", async () => {
+integrationTest("GitCodeSourceProvider.deleteDirectory silently succeeds if directory doesn't exist", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
@@ -109,7 +110,7 @@ Deno.test("GitCodeSourceProvider.deleteDirectory silently succeeds if directory 
   }
 });
 
-Deno.test("GitCodeSourceProvider.directoryExists returns true for existing directory", async () => {
+integrationTest("GitCodeSourceProvider.directoryExists returns true for existing directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
@@ -122,7 +123,7 @@ Deno.test("GitCodeSourceProvider.directoryExists returns true for existing direc
   }
 });
 
-Deno.test("GitCodeSourceProvider.directoryExists returns false for non-existing directory", async () => {
+integrationTest("GitCodeSourceProvider.directoryExists returns false for non-existing directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
@@ -138,7 +139,7 @@ Deno.test("GitCodeSourceProvider.directoryExists returns false for non-existing 
 // Git Integration Tests - Using isomorphic-git (no external git binary needed)
 // =============================================================================
 
-Deno.test({
+integrationTest({
   name: "GitCodeSourceProvider.sync clones public repository",
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
@@ -164,7 +165,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+integrationTest({
   name: "GitCodeSourceProvider.sync handles invalid URL",
   // isomorphic-git's HTTP client may not fully consume error responses
   sanitizeResources: false,
@@ -189,7 +190,7 @@ Deno.test({
   },
 });
 
-Deno.test({
+integrationTest({
   name: "GitCodeSourceProvider.sync respects cancellation token",
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
@@ -219,7 +220,7 @@ Deno.test({
 // Integration with TestSetupBuilder
 // =============================================================================
 
-Deno.test("GitCodeSourceProvider integrates with CodeSourceService", async () => {
+integrationTest("GitCodeSourceProvider integrates with CodeSourceService", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
 
   try {

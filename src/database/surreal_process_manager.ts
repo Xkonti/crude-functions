@@ -19,6 +19,8 @@ export interface SurrealProcessManagerOptions {
   port?: number;
   /** Storage path for SurrealKV (default: "./data/surreal") */
   storagePath?: string;
+  /** Storage mode: "memory" for in-memory (fast, ephemeral), "surrealkv" for persistent (default: "surrealkv") */
+  storageMode?: "memory" | "surrealkv";
   /** Root username (default: "root") */
   username?: string;
   /** Root password (default: "root") */
@@ -57,6 +59,7 @@ export class SurrealProcessManager {
   private readonly binaryPath: string;
   private readonly port: number;
   private readonly storagePath: string;
+  private readonly storageMode: "memory" | "surrealkv";
   private readonly username: string;
   private readonly password: string;
   private readonly readinessTimeoutMs: number;
@@ -71,6 +74,7 @@ export class SurrealProcessManager {
     this.binaryPath = options.binaryPath ?? "/surreal";
     this.port = options.port ?? 5173;
     this.storagePath = options.storagePath ?? "./data/surreal";
+    this.storageMode = options.storageMode ?? "surrealkv";
     this.username = options.username ?? "root";
     this.password = options.password ?? "root";
     this.readinessTimeoutMs = options.readinessTimeoutMs ?? 30000;
@@ -87,8 +91,15 @@ export class SurrealProcessManager {
       return; // Already running
     }
 
-    // Ensure storage directory exists
-    await this.ensureStorageDirectory();
+    // Only ensure storage directory for surrealkv mode
+    if (this.storageMode === "surrealkv") {
+      await this.ensureStorageDirectory();
+    }
+
+    // Build storage URL based on mode
+    const storageUrl = this.storageMode === "memory"
+      ? "memory"
+      : `surrealkv://${this.storagePath}`;
 
     const args = [
       "start",
@@ -100,7 +111,7 @@ export class SurrealProcessManager {
       this.password,
       "--log",
       "info",
-      `surrealkv://${this.storagePath}`,
+      storageUrl,
     ];
 
     try {

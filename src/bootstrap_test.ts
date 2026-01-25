@@ -1,3 +1,4 @@
+import { integrationTest } from "./test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "./test/test_setup_builder.ts";
 import type { ApiKeyService } from "./keys/api_key_service.ts";
@@ -21,7 +22,7 @@ async function bootstrapApiAccess(
 
 // Bootstrap Tests
 
-Deno.test("Bootstrap: management group exists from migrations and bootstrap is idempotent", async () => {
+integrationTest("Bootstrap: management group exists from migrations and bootstrap is idempotent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()
@@ -46,7 +47,7 @@ Deno.test("Bootstrap: management group exists from migrations and bootstrap is i
   }
 });
 
-Deno.test("Bootstrap: management group has no keys by default", async () => {
+integrationTest("Bootstrap: management group has no keys by default", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()
@@ -64,7 +65,7 @@ Deno.test("Bootstrap: management group has no keys by default", async () => {
   }
 });
 
-Deno.test("Bootstrap: sets api.access-groups to management group ID", async () => {
+integrationTest("Bootstrap: sets api.access-groups to management group ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()
@@ -86,7 +87,7 @@ Deno.test("Bootstrap: sets api.access-groups to management group ID", async () =
   }
 });
 
-Deno.test("Bootstrap: does not override existing api.access-groups setting", async () => {
+integrationTest("Bootstrap: does not override existing api.access-groups setting", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()
@@ -112,7 +113,7 @@ Deno.test("Bootstrap: does not override existing api.access-groups setting", asy
   }
 });
 
-Deno.test("Bootstrap: is idempotent (can run multiple times safely)", async () => {
+integrationTest("Bootstrap: is idempotent (can run multiple times safely)", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()
@@ -138,7 +139,7 @@ Deno.test("Bootstrap: is idempotent (can run multiple times safely)", async () =
   }
 });
 
-Deno.test("Bootstrap: management group can receive keys after creation", async () => {
+integrationTest("Bootstrap: management group can receive keys after creation", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()
@@ -162,7 +163,7 @@ Deno.test("Bootstrap: management group can receive keys after creation", async (
   }
 });
 
-Deno.test("Bootstrap: management group in access-groups setting enables API access", async () => {
+integrationTest("Bootstrap: management group in access-groups setting enables API access", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .withSettings()

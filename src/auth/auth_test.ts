@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { getTrustedOrigins, createAuth } from "./auth.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
@@ -6,14 +7,14 @@ import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 // getTrustedOrigins Unit Tests
 // =============================================================================
 
-Deno.test("getTrustedOrigins always includes localhost origins", () => {
+integrationTest("getTrustedOrigins always includes localhost origins", () => {
   const origins = getTrustedOrigins(undefined, undefined);
 
   expect(origins).toContain("http://localhost");
   expect(origins).toContain("http://127.0.0.1");
 });
 
-Deno.test("getTrustedOrigins adds configured baseUrl origin", () => {
+integrationTest("getTrustedOrigins adds configured baseUrl origin", () => {
   const origins = getTrustedOrigins("https://example.com", undefined);
 
   expect(origins).toContain("https://example.com");
@@ -21,7 +22,7 @@ Deno.test("getTrustedOrigins adds configured baseUrl origin", () => {
   expect(origins).toContain("http://127.0.0.1");
 });
 
-Deno.test("getTrustedOrigins handles baseUrl with path", () => {
+integrationTest("getTrustedOrigins handles baseUrl with path", () => {
   const origins = getTrustedOrigins("https://example.com/app/path", undefined);
 
   // Should extract just the origin, not the full URL
@@ -29,13 +30,13 @@ Deno.test("getTrustedOrigins handles baseUrl with path", () => {
   expect(origins).not.toContain("https://example.com/app/path");
 });
 
-Deno.test("getTrustedOrigins handles baseUrl with port", () => {
+integrationTest("getTrustedOrigins handles baseUrl with port", () => {
   const origins = getTrustedOrigins("https://example.com:8443", undefined);
 
   expect(origins).toContain("https://example.com:8443");
 });
 
-Deno.test("getTrustedOrigins returns only localhost for invalid baseUrl", () => {
+integrationTest("getTrustedOrigins returns only localhost for invalid baseUrl", () => {
   // Invalid URL should log a warning and return only localhost
   const origins = getTrustedOrigins("not-a-valid-url", undefined);
 
@@ -44,7 +45,7 @@ Deno.test("getTrustedOrigins returns only localhost for invalid baseUrl", () => 
   expect(origins.length).toBe(2);
 });
 
-Deno.test("getTrustedOrigins extracts origin from request URL", () => {
+integrationTest("getTrustedOrigins extracts origin from request URL", () => {
   const request = new Request("https://myapp.example.com/api/test");
   const origins = getTrustedOrigins(undefined, request);
 
@@ -53,7 +54,7 @@ Deno.test("getTrustedOrigins extracts origin from request URL", () => {
   expect(origins).toContain("http://127.0.0.1");
 });
 
-Deno.test("getTrustedOrigins handles reverse proxy headers", () => {
+integrationTest("getTrustedOrigins handles reverse proxy headers", () => {
   const request = new Request("http://internal-host/api/test", {
     headers: {
       "X-Forwarded-Proto": "https",
@@ -67,7 +68,7 @@ Deno.test("getTrustedOrigins handles reverse proxy headers", () => {
   expect(origins).toContain("http://localhost");
 });
 
-Deno.test("getTrustedOrigins uses Host header when X-Forwarded-Host missing", () => {
+integrationTest("getTrustedOrigins uses Host header when X-Forwarded-Host missing", () => {
   const request = new Request("http://internal-host/api/test", {
     headers: {
       "X-Forwarded-Proto": "https",
@@ -79,7 +80,7 @@ Deno.test("getTrustedOrigins uses Host header when X-Forwarded-Host missing", ()
   expect(origins).toContain("https://fallback.example.com");
 });
 
-Deno.test("getTrustedOrigins ignores partial proxy headers", () => {
+integrationTest("getTrustedOrigins ignores partial proxy headers", () => {
   // Only X-Forwarded-Proto without Host should not create invalid origin
   const request = new Request("http://internal-host/api/test", {
     headers: {
@@ -94,7 +95,7 @@ Deno.test("getTrustedOrigins ignores partial proxy headers", () => {
   expect(origins).toContain("http://localhost");
 });
 
-Deno.test("getTrustedOrigins baseUrl takes precedence over request", () => {
+integrationTest("getTrustedOrigins baseUrl takes precedence over request", () => {
   const request = new Request("https://request-origin.example.com/api/test");
   const origins = getTrustedOrigins("https://configured.example.com", request);
 
@@ -104,7 +105,7 @@ Deno.test("getTrustedOrigins baseUrl takes precedence over request", () => {
   expect(origins).not.toContain("https://request-origin.example.com");
 });
 
-Deno.test("getTrustedOrigins deduplicates origins", () => {
+integrationTest("getTrustedOrigins deduplicates origins", () => {
   // Request URL already is localhost
   const request = new Request("http://localhost:3000/api/test");
   const origins = getTrustedOrigins(undefined, request);
@@ -118,7 +119,7 @@ Deno.test("getTrustedOrigins deduplicates origins", () => {
 // createAuth Integration Tests
 // =============================================================================
 
-Deno.test("createAuth returns valid auth instance with api property", async () => {
+integrationTest("createAuth returns valid auth instance with api property", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAuth()
     .build();
@@ -133,7 +134,7 @@ Deno.test("createAuth returns valid auth instance with api property", async () =
   }
 });
 
-Deno.test("createAuth configures session-based authentication", async () => {
+integrationTest("createAuth configures session-based authentication", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAuth()
     .build();
@@ -151,7 +152,7 @@ Deno.test("createAuth configures session-based authentication", async () => {
   }
 });
 
-Deno.test("createAuth with hasUsers=false allows sign-up", async () => {
+integrationTest("createAuth with hasUsers=false allows sign-up", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAuth()
     .build();
@@ -171,7 +172,7 @@ Deno.test("createAuth with hasUsers=false allows sign-up", async () => {
   }
 });
 
-Deno.test("createAuth trusted origins integration", async () => {
+integrationTest("createAuth trusted origins integration", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAuth()
     .build();
@@ -193,7 +194,7 @@ Deno.test("createAuth trusted origins integration", async () => {
   }
 });
 
-Deno.test("createAuth with admin user works correctly", async () => {
+integrationTest("createAuth with admin user works correctly", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAdminUser("admin@test.com", "password123")
     .build();
@@ -211,7 +212,7 @@ Deno.test("createAuth with admin user works correctly", async () => {
   }
 });
 
-Deno.test("createAuth with multiple admin users", async () => {
+integrationTest("createAuth with multiple admin users", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAdminUser("admin1@test.com", "password1")
     .withAdminUser("admin2@test.com", "password2", ["userRead"])

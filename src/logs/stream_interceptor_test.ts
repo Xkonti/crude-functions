@@ -1,3 +1,4 @@
+import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import process from "node:process";
 import { ConsoleLogService } from "./console_log_service.ts";
@@ -38,7 +39,7 @@ async function createStreamTestContext(): Promise<StreamTestContext> {
 // StreamInterceptor tests
 // =====================
 
-Deno.test("StreamInterceptor captures console.log within request context", async () => {
+integrationTest("StreamInterceptor captures console.log within request context", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -64,7 +65,7 @@ Deno.test("StreamInterceptor captures console.log within request context", async
   }
 });
 
-Deno.test("StreamInterceptor captures all console methods with correct levels", async () => {
+integrationTest("StreamInterceptor captures all console methods with correct levels", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -98,7 +99,7 @@ Deno.test("StreamInterceptor captures all console methods with correct levels", 
   }
 });
 
-Deno.test("StreamInterceptor captures process.stdout.write with stdout level", async () => {
+integrationTest("StreamInterceptor captures process.stdout.write with stdout level", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -123,7 +124,7 @@ Deno.test("StreamInterceptor captures process.stdout.write with stdout level", a
   }
 });
 
-Deno.test("StreamInterceptor captures process.stderr.write with stderr level", async () => {
+integrationTest("StreamInterceptor captures process.stderr.write with stderr level", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -148,7 +149,7 @@ Deno.test("StreamInterceptor captures process.stderr.write with stderr level", a
   }
 });
 
-Deno.test("StreamInterceptor does not capture logs outside request context", async () => {
+integrationTest("StreamInterceptor does not capture logs outside request context", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -167,7 +168,7 @@ Deno.test("StreamInterceptor does not capture logs outside request context", asy
   }
 });
 
-Deno.test("StreamInterceptor can be uninstalled", async () => {
+integrationTest("StreamInterceptor can be uninstalled", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -205,7 +206,7 @@ Deno.test("StreamInterceptor can be uninstalled", async () => {
   }
 });
 
-Deno.test("StreamInterceptor preserves originalConsole functions", () => {
+integrationTest("StreamInterceptor preserves originalConsole functions", () => {
   expect(typeof originalConsole.log).toBe("function");
   expect(typeof originalConsole.debug).toBe("function");
   expect(typeof originalConsole.info).toBe("function");
@@ -214,12 +215,12 @@ Deno.test("StreamInterceptor preserves originalConsole functions", () => {
   expect(typeof originalConsole.trace).toBe("function");
 });
 
-Deno.test("StreamInterceptor preserves originalStreams functions", () => {
+integrationTest("StreamInterceptor preserves originalStreams functions", () => {
   expect(typeof originalStreams.stdout).toBe("function");
   expect(typeof originalStreams.stderr).toBe("function");
 });
 
-Deno.test("StreamInterceptor install is idempotent", async () => {
+integrationTest("StreamInterceptor install is idempotent", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -244,7 +245,7 @@ Deno.test("StreamInterceptor install is idempotent", async () => {
   }
 });
 
-Deno.test("StreamInterceptor installed getter returns correct state", async () => {
+integrationTest("StreamInterceptor installed getter returns correct state", async () => {
   const { interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -258,7 +259,7 @@ Deno.test("StreamInterceptor installed getter returns correct state", async () =
   }
 });
 
-Deno.test("StreamInterceptor handles Uint8Array input", async () => {
+integrationTest("StreamInterceptor handles Uint8Array input", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -284,7 +285,7 @@ Deno.test("StreamInterceptor handles Uint8Array input", async () => {
   }
 });
 
-Deno.test("StreamInterceptor handles empty messages", async () => {
+integrationTest("StreamInterceptor handles empty messages", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -315,7 +316,7 @@ Deno.test("StreamInterceptor handles empty messages", async () => {
 // Deno native stream tests
 // =====================
 
-Deno.test("StreamInterceptor captures Deno.stdout.writeSync", async () => {
+integrationTest("StreamInterceptor captures Deno.stdout.writeSync", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -341,7 +342,7 @@ Deno.test("StreamInterceptor captures Deno.stdout.writeSync", async () => {
   }
 });
 
-Deno.test("StreamInterceptor captures Deno.stdout.write (async)", async () => {
+integrationTest("StreamInterceptor captures Deno.stdout.write (async)", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -367,7 +368,7 @@ Deno.test("StreamInterceptor captures Deno.stdout.write (async)", async () => {
   }
 });
 
-Deno.test("StreamInterceptor captures Deno.stderr.writeSync", async () => {
+integrationTest("StreamInterceptor captures Deno.stderr.writeSync", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -393,7 +394,7 @@ Deno.test("StreamInterceptor captures Deno.stderr.writeSync", async () => {
   }
 });
 
-Deno.test("StreamInterceptor captures Deno.stderr.write (async)", async () => {
+integrationTest("StreamInterceptor captures Deno.stderr.write (async)", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {
@@ -419,7 +420,7 @@ Deno.test("StreamInterceptor captures Deno.stderr.write (async)", async () => {
   }
 });
 
-Deno.test("StreamInterceptor does not capture Deno streams outside request context", async () => {
+integrationTest("StreamInterceptor does not capture Deno streams outside request context", async () => {
   const { logService, interceptor, cleanup } = await createStreamTestContext();
 
   try {

@@ -1,10 +1,11 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import { GlobalSettingDefaults, type SettingName, SettingNames } from "./types.ts";
 
 // ============== Group 1: Global Settings Read/Write ==============
 
-Deno.test("SettingsService.getGlobalSetting returns null for non-existent setting", async () => {
+integrationTest("SettingsService.getGlobalSetting returns null for non-existent setting", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Use a fake setting name that doesn't exist in GlobalSettingDefaults
@@ -17,7 +18,7 @@ Deno.test("SettingsService.getGlobalSetting returns null for non-existent settin
   }
 });
 
-Deno.test("SettingsService.setGlobalSetting creates new global setting", async () => {
+integrationTest("SettingsService.setGlobalSetting creates new global setting", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Use a custom setting name (not in defaults)
@@ -31,7 +32,7 @@ Deno.test("SettingsService.setGlobalSetting creates new global setting", async (
   }
 });
 
-Deno.test("SettingsService.getGlobalSetting returns stored value", async () => {
+integrationTest("SettingsService.getGlobalSetting returns stored value", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Bootstrapped settings should have default values
@@ -44,7 +45,7 @@ Deno.test("SettingsService.getGlobalSetting returns stored value", async () => {
   }
 });
 
-Deno.test("SettingsService.setGlobalSetting updates existing setting", async () => {
+integrationTest("SettingsService.setGlobalSetting updates existing setting", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Update a bootstrapped setting
@@ -59,7 +60,7 @@ Deno.test("SettingsService.setGlobalSetting updates existing setting", async () 
 
 // ============== Group 2: User Settings Read/Write ==============
 
-Deno.test("SettingsService.getUserSetting returns null for non-existent setting", async () => {
+integrationTest("SettingsService.getUserSetting returns null for non-existent setting", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -77,7 +78,7 @@ Deno.test("SettingsService.getUserSetting returns null for non-existent setting"
   }
 });
 
-Deno.test("SettingsService.setUserSetting creates new user setting", async () => {
+integrationTest("SettingsService.setUserSetting creates new user setting", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -100,7 +101,7 @@ Deno.test("SettingsService.setUserSetting creates new user setting", async () =>
   }
 });
 
-Deno.test("SettingsService.getUserSetting returns stored value", async () => {
+integrationTest("SettingsService.getUserSetting returns stored value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -123,7 +124,7 @@ Deno.test("SettingsService.getUserSetting returns stored value", async () => {
   }
 });
 
-Deno.test("SettingsService.setUserSetting updates existing setting", async () => {
+integrationTest("SettingsService.setUserSetting updates existing setting", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -151,7 +152,7 @@ Deno.test("SettingsService.setUserSetting updates existing setting", async () =>
   }
 });
 
-Deno.test("SettingsService user settings are isolated between users", async () => {
+integrationTest("SettingsService user settings are isolated between users", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("userA@example.com", "password123")
@@ -189,7 +190,7 @@ Deno.test("SettingsService user settings are isolated between users", async () =
   }
 });
 
-Deno.test("SettingsService global and user settings with same name are independent", async () => {
+integrationTest("SettingsService global and user settings with same name are independent", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -220,7 +221,7 @@ Deno.test("SettingsService global and user settings with same name are independe
 
 // ============== Group 3: Encryption ==============
 
-Deno.test("SettingsService.setGlobalSetting with encrypted=true stores encrypted value", async () => {
+integrationTest("SettingsService.setGlobalSetting with encrypted=true stores encrypted value", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const secretValue = "super-secret-api-key";
@@ -244,7 +245,7 @@ Deno.test("SettingsService.setGlobalSetting with encrypted=true stores encrypted
   }
 });
 
-Deno.test("SettingsService.getGlobalSetting decrypts encrypted values", async () => {
+integrationTest("SettingsService.getGlobalSetting decrypts encrypted values", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const secretValue = "my-secret-password-123";
@@ -259,7 +260,7 @@ Deno.test("SettingsService.getGlobalSetting decrypts encrypted values", async ()
   }
 });
 
-Deno.test("SettingsService.setUserSetting with encrypted=true stores encrypted value", async () => {
+integrationTest("SettingsService.setUserSetting with encrypted=true stores encrypted value", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -289,7 +290,7 @@ Deno.test("SettingsService.setUserSetting with encrypted=true stores encrypted v
   }
 });
 
-Deno.test("SettingsService.getUserSetting decrypts encrypted values", async () => {
+integrationTest("SettingsService.getUserSetting decrypts encrypted values", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -316,7 +317,7 @@ Deno.test("SettingsService.getUserSetting decrypts encrypted values", async () =
   }
 });
 
-Deno.test("SettingsService unencrypted values remain plaintext in database", async () => {
+integrationTest("SettingsService unencrypted values remain plaintext in database", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const plainValue = "plain-text-value";
@@ -340,7 +341,7 @@ Deno.test("SettingsService unencrypted values remain plaintext in database", asy
 
 // ============== Group 4: Bootstrap Operations ==============
 
-Deno.test("SettingsService.bootstrapGlobalSettings creates all default settings", async () => {
+integrationTest("SettingsService.bootstrapGlobalSettings creates all default settings", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // TestSetupBuilder already calls bootstrapGlobalSettings, so all settings should exist
@@ -356,7 +357,7 @@ Deno.test("SettingsService.bootstrapGlobalSettings creates all default settings"
   }
 });
 
-Deno.test("SettingsService.bootstrapGlobalSettings is idempotent", async () => {
+integrationTest("SettingsService.bootstrapGlobalSettings is idempotent", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Modify a setting
@@ -373,7 +374,7 @@ Deno.test("SettingsService.bootstrapGlobalSettings is idempotent", async () => {
   }
 });
 
-Deno.test("SettingsService.bootstrapGlobalSettings creates missing settings only", async () => {
+integrationTest("SettingsService.bootstrapGlobalSettings creates missing settings only", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Delete one setting directly from database
@@ -405,7 +406,7 @@ Deno.test("SettingsService.bootstrapGlobalSettings creates missing settings only
   }
 });
 
-Deno.test("SettingsService.bootstrapUserSettings returns without error", async () => {
+integrationTest("SettingsService.bootstrapUserSettings returns without error", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Should complete without throwing
@@ -424,7 +425,7 @@ Deno.test("SettingsService.bootstrapUserSettings returns without error", async (
 
 // ============== Group 5: Edge Cases ==============
 
-Deno.test("SettingsService setting value can be empty string", async () => {
+integrationTest("SettingsService setting value can be empty string", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const customName = "test.empty.string" as SettingName;
@@ -438,7 +439,7 @@ Deno.test("SettingsService setting value can be empty string", async () => {
   }
 });
 
-Deno.test("SettingsService setting value can contain special characters", async () => {
+integrationTest("SettingsService setting value can contain special characters", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const customName = "test.special.chars" as SettingName;
@@ -453,7 +454,7 @@ Deno.test("SettingsService setting value can contain special characters", async 
   }
 });
 
-Deno.test("SettingsService concurrent writes to same setting are serialized", async () => {
+integrationTest("SettingsService concurrent writes to same setting are serialized", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const customName = "test.concurrent.writes" as SettingName;
@@ -482,7 +483,7 @@ Deno.test("SettingsService concurrent writes to same setting are serialized", as
 
 // ============== Group 6: Batch Read Operations ==============
 
-Deno.test("SettingsService.getAllGlobalSettings returns all global settings", async () => {
+integrationTest("SettingsService.getAllGlobalSettings returns all global settings", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const settings = await ctx.settingsService.getAllGlobalSettings();
@@ -498,7 +499,7 @@ Deno.test("SettingsService.getAllGlobalSettings returns all global settings", as
   }
 });
 
-Deno.test("SettingsService.getAllUserSettings returns all user settings", async () => {
+integrationTest("SettingsService.getAllUserSettings returns all user settings", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -520,7 +521,7 @@ Deno.test("SettingsService.getAllUserSettings returns all user settings", async 
   }
 });
 
-Deno.test("SettingsService.getAllUserSettings returns empty map for user with no settings", async () => {
+integrationTest("SettingsService.getAllUserSettings returns empty map for user with no settings", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -537,7 +538,7 @@ Deno.test("SettingsService.getAllUserSettings returns empty map for user with no
 
 // ============== Group 7: Batch Write Operations ==============
 
-Deno.test("SettingsService.setGlobalSettingsBatch sets multiple global settings", async () => {
+integrationTest("SettingsService.setGlobalSettingsBatch sets multiple global settings", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const updates = new Map<SettingName, string>([
@@ -554,7 +555,7 @@ Deno.test("SettingsService.setGlobalSettingsBatch sets multiple global settings"
   }
 });
 
-Deno.test("SettingsService.setGlobalSettingsBatch handles empty map", async () => {
+integrationTest("SettingsService.setGlobalSettingsBatch handles empty map", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const updates = new Map<SettingName, string>();
@@ -568,7 +569,7 @@ Deno.test("SettingsService.setGlobalSettingsBatch handles empty map", async () =
   }
 });
 
-Deno.test("SettingsService.setUserSettingsBatch sets multiple user settings", async () => {
+integrationTest("SettingsService.setUserSettingsBatch sets multiple user settings", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -591,7 +592,7 @@ Deno.test("SettingsService.setUserSettingsBatch sets multiple user settings", as
 
 // ============== Group 8: Reset Operations ==============
 
-Deno.test("SettingsService.resetGlobalSettings resets settings to defaults", async () => {
+integrationTest("SettingsService.resetGlobalSettings resets settings to defaults", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Modify some settings
@@ -614,7 +615,7 @@ Deno.test("SettingsService.resetGlobalSettings resets settings to defaults", asy
   }
 });
 
-Deno.test("SettingsService.resetGlobalSettings handles empty array", async () => {
+integrationTest("SettingsService.resetGlobalSettings handles empty array", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     await ctx.settingsService.resetGlobalSettings([]);
@@ -627,7 +628,7 @@ Deno.test("SettingsService.resetGlobalSettings handles empty array", async () =>
   }
 });
 
-Deno.test("SettingsService.resetUserSettings deletes user settings", async () => {
+integrationTest("SettingsService.resetUserSettings deletes user settings", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -651,7 +652,7 @@ Deno.test("SettingsService.resetUserSettings deletes user settings", async () =>
   }
 });
 
-Deno.test("SettingsService.resetUserSettings handles empty array", async () => {
+integrationTest("SettingsService.resetUserSettings handles empty array", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -668,7 +669,7 @@ Deno.test("SettingsService.resetUserSettings handles empty array", async () => {
 
 // ============== Group 9: Concurrency and Transaction Tests ==============
 
-Deno.test("SettingsService concurrent setGlobalSettingsBatch calls are serialized", async () => {
+integrationTest("SettingsService concurrent setGlobalSettingsBatch calls are serialized", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const batch1 = new Map<SettingName, string>([
@@ -701,7 +702,7 @@ Deno.test("SettingsService concurrent setGlobalSettingsBatch calls are serialize
   }
 });
 
-Deno.test("SettingsService concurrent setUserSettingsBatch calls are serialized", async () => {
+integrationTest("SettingsService concurrent setUserSettingsBatch calls are serialized", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withAdminUser("test@example.com", "password123")
@@ -729,7 +730,7 @@ Deno.test("SettingsService concurrent setUserSettingsBatch calls are serialized"
   }
 });
 
-Deno.test("SettingsService batch operations complete atomically on success", async () => {
+integrationTest("SettingsService batch operations complete atomically on success", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Update multiple settings in one batch
@@ -750,7 +751,7 @@ Deno.test("SettingsService batch operations complete atomically on success", asy
   }
 });
 
-Deno.test("SettingsService concurrent reads during batch write succeed", async () => {
+integrationTest("SettingsService concurrent reads during batch write succeed", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     const updates = new Map<SettingName, string>([
@@ -774,7 +775,7 @@ Deno.test("SettingsService concurrent reads during batch write succeed", async (
   }
 });
 
-Deno.test("SettingsService multiple concurrent batch operations complete correctly", async () => {
+integrationTest("SettingsService multiple concurrent batch operations complete correctly", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Create 10 concurrent batch operations with different settings
@@ -798,7 +799,7 @@ Deno.test("SettingsService multiple concurrent batch operations complete correct
   }
 });
 
-Deno.test("SettingsService reset operations are atomic", async () => {
+integrationTest("SettingsService reset operations are atomic", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Modify several settings
@@ -825,7 +826,7 @@ Deno.test("SettingsService reset operations are atomic", async () => {
   }
 });
 
-Deno.test("SettingsService concurrent resets and updates don't corrupt data", async () => {
+integrationTest("SettingsService concurrent resets and updates don't corrupt data", async () => {
   const ctx = await TestSetupBuilder.create().withSettings().build();
   try {
     // Modify settings

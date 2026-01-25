@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { createFunctionsRoutes } from "./functions_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { integrationTest } from "../test/test_helpers.ts";
 import type { BaseTestContext, RoutesContext } from "../test/types.ts";
 
 interface TestFunction {
@@ -34,7 +35,7 @@ async function buildTestContext(functions: TestFunction[] = []) {
 
 // ============== GET /api/functions ==============
 
-Deno.test("GET /api/functions returns empty array for empty database", async () => {
+integrationTest("GET /api/functions returns empty array for empty database", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -49,7 +50,7 @@ Deno.test("GET /api/functions returns empty array for empty database", async () 
   }
 });
 
-Deno.test("GET /api/functions returns all functions", async () => {
+integrationTest("GET /api/functions returns all functions", async () => {
   const functions = [
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
     { name: "users", handler: "users.ts", route: "/users", methods: ["GET", "POST"] },
@@ -72,7 +73,7 @@ Deno.test("GET /api/functions returns all functions", async () => {
 
 // ============== GET /api/functions/:id ==============
 
-Deno.test("GET /api/functions/:id returns function for existing ID", async () => {
+integrationTest("GET /api/functions/:id returns function for existing ID", async () => {
   const functions = [
     { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"], description: "Greeting" },
   ];
@@ -94,7 +95,7 @@ Deno.test("GET /api/functions/:id returns function for existing ID", async () =>
   }
 });
 
-Deno.test("GET /api/functions/:id returns 404 for non-existent ID", async () => {
+integrationTest("GET /api/functions/:id returns 404 for non-existent ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -109,7 +110,7 @@ Deno.test("GET /api/functions/:id returns 404 for non-existent ID", async () => 
   }
 });
 
-Deno.test("GET /api/functions/:id returns 400 for invalid ID", async () => {
+integrationTest("GET /api/functions/:id returns 400 for invalid ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -126,7 +127,7 @@ Deno.test("GET /api/functions/:id returns 400 for invalid ID", async () => {
 
 // ============== POST /api/functions ==============
 
-Deno.test("POST /api/functions creates function and returns it", async () => {
+integrationTest("POST /api/functions creates function and returns it", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -164,7 +165,7 @@ Deno.test("POST /api/functions creates function and returns it", async () => {
   }
 });
 
-Deno.test("POST /api/functions rejects missing required fields", async () => {
+integrationTest("POST /api/functions rejects missing required fields", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -187,7 +188,7 @@ Deno.test("POST /api/functions rejects missing required fields", async () => {
   }
 });
 
-Deno.test("POST /api/functions rejects invalid route path", async () => {
+integrationTest("POST /api/functions rejects invalid route path", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -212,7 +213,7 @@ Deno.test("POST /api/functions rejects invalid route path", async () => {
   }
 });
 
-Deno.test("POST /api/functions rejects invalid methods", async () => {
+integrationTest("POST /api/functions rejects invalid methods", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -237,7 +238,7 @@ Deno.test("POST /api/functions rejects invalid methods", async () => {
   }
 });
 
-Deno.test("POST /api/functions returns 409 on duplicate name", async () => {
+integrationTest("POST /api/functions returns 409 on duplicate name", async () => {
   const functions = [
     { name: "existing", handler: "existing.ts", route: "/existing", methods: ["GET"] },
   ];
@@ -265,7 +266,7 @@ Deno.test("POST /api/functions returns 409 on duplicate name", async () => {
   }
 });
 
-Deno.test("POST /api/functions returns 409 on duplicate route+method", async () => {
+integrationTest("POST /api/functions returns 409 on duplicate route+method", async () => {
   const functions = [
     { name: "existing", handler: "existing.ts", route: "/users", methods: ["GET", "POST"] },
   ];
@@ -290,7 +291,7 @@ Deno.test("POST /api/functions returns 409 on duplicate route+method", async () 
   }
 });
 
-Deno.test("POST /api/functions rejects invalid JSON", async () => {
+integrationTest("POST /api/functions rejects invalid JSON", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -311,7 +312,7 @@ Deno.test("POST /api/functions rejects invalid JSON", async () => {
 
 // ============== PUT /api/functions/:id ==============
 
-Deno.test("PUT /api/functions/:id updates function and returns it", async () => {
+integrationTest("PUT /api/functions/:id updates function and returns it", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -351,7 +352,7 @@ Deno.test("PUT /api/functions/:id updates function and returns it", async () => 
   }
 });
 
-Deno.test("PUT /api/functions/:id returns 404 for non-existent ID", async () => {
+integrationTest("PUT /api/functions/:id returns 404 for non-existent ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -373,7 +374,7 @@ Deno.test("PUT /api/functions/:id returns 404 for non-existent ID", async () => 
   }
 });
 
-Deno.test("PUT /api/functions/:id returns 409 on duplicate name", async () => {
+integrationTest("PUT /api/functions/:id returns 409 on duplicate name", async () => {
   const functions = [
     { name: "first", handler: "first.ts", route: "/first", methods: ["GET"] },
     { name: "second", handler: "second.ts", route: "/second", methods: ["POST"] },
@@ -401,7 +402,7 @@ Deno.test("PUT /api/functions/:id returns 409 on duplicate name", async () => {
   }
 });
 
-Deno.test("PUT /api/functions/:id returns 400 for invalid ID", async () => {
+integrationTest("PUT /api/functions/:id returns 400 for invalid ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -423,7 +424,7 @@ Deno.test("PUT /api/functions/:id returns 400 for invalid ID", async () => {
   }
 });
 
-Deno.test("PUT /api/functions/:id returns 400 for missing fields", async () => {
+integrationTest("PUT /api/functions/:id returns 400 for missing fields", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -450,7 +451,7 @@ Deno.test("PUT /api/functions/:id returns 400 for missing fields", async () => {
 
 // ============== DELETE /api/functions/:id ==============
 
-Deno.test("DELETE /api/functions/:id removes function and returns 204", async () => {
+integrationTest("DELETE /api/functions/:id removes function and returns 204", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -474,7 +475,7 @@ Deno.test("DELETE /api/functions/:id removes function and returns 204", async ()
   }
 });
 
-Deno.test("DELETE /api/functions/:id returns 404 for non-existent ID", async () => {
+integrationTest("DELETE /api/functions/:id returns 404 for non-existent ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -489,7 +490,7 @@ Deno.test("DELETE /api/functions/:id returns 404 for non-existent ID", async () 
   }
 });
 
-Deno.test("DELETE /api/functions/:id returns 400 for invalid ID", async () => {
+integrationTest("DELETE /api/functions/:id returns 400 for invalid ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -506,7 +507,7 @@ Deno.test("DELETE /api/functions/:id returns 400 for invalid ID", async () => {
 
 // ============== PUT /api/functions/:id/enable ==============
 
-Deno.test("PUT /api/functions/:id/enable enables function and returns it", async () => {
+integrationTest("PUT /api/functions/:id/enable enables function and returns it", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -536,7 +537,7 @@ Deno.test("PUT /api/functions/:id/enable enables function and returns it", async
   }
 });
 
-Deno.test("PUT /api/functions/:id/enable is idempotent", async () => {
+integrationTest("PUT /api/functions/:id/enable is idempotent", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -561,7 +562,7 @@ Deno.test("PUT /api/functions/:id/enable is idempotent", async () => {
   }
 });
 
-Deno.test("PUT /api/functions/:id/enable returns 404 for non-existent function", async () => {
+integrationTest("PUT /api/functions/:id/enable returns 404 for non-existent function", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -576,7 +577,7 @@ Deno.test("PUT /api/functions/:id/enable returns 404 for non-existent function",
   }
 });
 
-Deno.test("PUT /api/functions/:id/enable returns 400 for invalid ID", async () => {
+integrationTest("PUT /api/functions/:id/enable returns 400 for invalid ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -593,7 +594,7 @@ Deno.test("PUT /api/functions/:id/enable returns 400 for invalid ID", async () =
 
 // ============== PUT /api/functions/:id/disable ==============
 
-Deno.test("PUT /api/functions/:id/disable disables function and returns it", async () => {
+integrationTest("PUT /api/functions/:id/disable disables function and returns it", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -621,7 +622,7 @@ Deno.test("PUT /api/functions/:id/disable disables function and returns it", asy
   }
 });
 
-Deno.test("PUT /api/functions/:id/disable is idempotent", async () => {
+integrationTest("PUT /api/functions/:id/disable is idempotent", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
@@ -646,7 +647,7 @@ Deno.test("PUT /api/functions/:id/disable is idempotent", async () => {
   }
 });
 
-Deno.test("PUT /api/functions/:id/disable returns 404 for non-existent function", async () => {
+integrationTest("PUT /api/functions/:id/disable returns 404 for non-existent function", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -661,7 +662,7 @@ Deno.test("PUT /api/functions/:id/disable returns 404 for non-existent function"
   }
 });
 
-Deno.test("PUT /api/functions/:id/disable returns 400 for invalid ID", async () => {
+integrationTest("PUT /api/functions/:id/disable returns 400 for invalid ID", async () => {
   const ctx = await buildTestContext();
   const app = createTestApp(ctx);
 
@@ -678,7 +679,7 @@ Deno.test("PUT /api/functions/:id/disable returns 400 for invalid ID", async () 
 
 // ============== Enable/Disable Toggle Behavior ==============
 
-Deno.test("enable and disable toggle function state correctly", async () => {
+integrationTest("enable and disable toggle function state correctly", async () => {
   const functions = [
     { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
   ];
