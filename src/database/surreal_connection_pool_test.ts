@@ -18,7 +18,7 @@ integrationTest("pool caches connections - multiple calls reuse same connection"
     // Track how many times we call the underlying connect
     let connectCallCount = 0;
     const originalConnect = ctx.surrealFactory.connect.bind(ctx.surrealFactory);
-    ctx.surrealFactory.connect = async (options) => {
+    ctx.surrealFactory.connect = (options) => {
       connectCallCount++;
       return originalConnect(options);
     };
@@ -67,7 +67,7 @@ integrationTest("pool creates separate connections for different namespace/datab
     // Track connect calls
     let connectCallCount = 0;
     const originalConnect = factory.connect.bind(factory);
-    factory.connect = async (options) => {
+    factory.connect = (options) => {
       connectCallCount++;
       return originalConnect(options);
     };
@@ -125,7 +125,7 @@ integrationTest("pool handles concurrent access - multiple callers share one con
     // Track connection count
     let connectCallCount = 0;
     const originalConnect = ctx.surrealFactory.connect.bind(ctx.surrealFactory);
-    ctx.surrealFactory.connect = async (options) => {
+    ctx.surrealFactory.connect = (options) => {
       connectCallCount++;
       return originalConnect(options);
     };
@@ -222,7 +222,7 @@ integrationTest("pool tracks reference count correctly", async () => {
         // Start another operation
         const nested = ctx.surrealFactory.withSystemConnection(
           { namespace: ctx.surrealNamespace, database: ctx.surrealDatabase },
-          async () => {
+          () => {
             // Check refCount is 2
             const stats2 = ctx.surrealFactory.getPoolStats();
             expect(stats2?.totalRefCount).toBe(2);
@@ -408,7 +408,7 @@ integrationTest("withSystemConnection throws when pool not initialized", () => {
   // Don't initialize pool
 
   expect(() => {
-    factory.withSystemConnection({}, async () => {
+    factory.withSystemConnection({}, () => {
       return "should not reach";
     });
   }).toThrow(SurrealPoolNotInitializedError);
@@ -424,7 +424,7 @@ integrationTest("pool handles callback errors without leaking connection", async
     await expect(
       ctx.surrealFactory.withSystemConnection(
         { namespace: ctx.surrealNamespace, database: ctx.surrealDatabase },
-        async () => {
+        () => {
           throw new Error("Intentional test error");
         }
       )
@@ -467,7 +467,7 @@ integrationTest("getPoolStats returns correct information", async () => {
     // During use
     await ctx.surrealFactory.withSystemConnection(
       { namespace: ctx.surrealNamespace, database: ctx.surrealDatabase },
-      async () => {
+      () => {
         stats = ctx.surrealFactory.getPoolStats();
         expect(stats?.activeConnections).toBe(1);
         expect(stats?.totalRefCount).toBe(1);
