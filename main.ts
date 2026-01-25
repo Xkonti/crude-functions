@@ -50,12 +50,11 @@ import { SchedulingService } from "./src/scheduling/scheduling_service.ts";
 import { EventBus } from "./src/events/mod.ts";
 import { createFunctionApp, createManagementApp } from "./src/apps/mod.ts";
 import { CsrfService } from "./src/csrf/mod.ts";
-import { SurrealDatabaseService } from "./src/database/surreal_database_service.ts";
+import { SurrealConnectionFactory } from "./src/database/surreal_connection_factory.ts";
 import { SurrealProcessManager } from "./src/database/surreal_process_manager.ts";
 import { SurrealHealthMonitor } from "./src/database/surreal_health_monitor.ts";
 import { SurrealSupervisor } from "./src/database/surreal_supervisor.ts";
 import { SurrealMigrationService } from "./src/database/surreal_migration_service.ts";
-import { runSurrealExperiment } from "./src/experiments/surreal_experiment.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -167,13 +166,11 @@ const surrealProcessManager = new SurrealProcessManager({
   password: surrealPass,
 });
 
-// Create database service (will be opened by supervisor)
-const surrealDb = new SurrealDatabaseService({
+// Create connection factory (thin wrapper returning raw Surreal connections)
+const surrealFactory = new SurrealConnectionFactory({
   connectionUrl: surrealProcessManager.connectionUrl,
   username: surrealUser,
   password: surrealPass,
-  namespace: "crude",
-  database: "main",
 });
 
 // Create health monitor
@@ -183,10 +180,10 @@ const surrealHealthMonitor = new SurrealHealthMonitor({
   failureThreshold: 3,
 });
 
-// Create supervisor to coordinate process, database, and monitoring
+// Create supervisor to coordinate process lifecycle and monitoring
 const surrealSupervisor = new SurrealSupervisor({
   processManager: surrealProcessManager,
-  databaseService: surrealDb,
+  connectionFactory: surrealFactory,
   healthMonitor: surrealHealthMonitor,
   maxRestartAttempts: 3,
   restartCooldownMs: 5000,
@@ -210,7 +207,7 @@ if (surrealEnabled) {
 
     // Run SurrealDB migrations
     const surrealMigrationService = new SurrealMigrationService({
-      db: surrealDb,
+      connectionFactory: surrealFactory,
       migrationsDir: "./migrations",
     });
     const surrealMigrationResult = await surrealMigrationService.migrate();
@@ -219,12 +216,6 @@ if (surrealEnabled) {
         `Applied ${surrealMigrationResult.appliedCount} SurrealDB migration(s): ` +
         `version ${surrealMigrationResult.fromVersion ?? "none"} → ${surrealMigrationResult.toVersion}`
       );
-    }
-
-    // Run experiment to verify it works (set RUN_SURREAL_EXPERIMENT=true)
-    if (Deno.env.get("RUN_SURREAL_EXPERIMENT") === "true") {
-      const experimentResult = await runSurrealExperiment(surrealDb);
-      console.log("SurrealDB experiment result:", experimentResult);
     }
   } catch (error) {
     console.warn("⚠ SurrealDB initialization failed (non-fatal):", error);
@@ -540,7 +531,7 @@ const managementApp = createManagementApp({
 console.log("✓ Hono apps created");
 
 // Export apps and services for testing
-export { functionApp, managementApp, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService, surrealDb, surrealProcessManager, surrealSupervisor };
+export { functionApp, managementApp, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService, surrealFactory, surrealProcessManager, surrealSupervisor };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {

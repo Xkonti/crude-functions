@@ -721,6 +721,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       db,
       surrealTestContext,
       surrealDb,
+      surrealFactory,
     } = await createCoreInfrastructure(this.migrationsDir, {
       runSQLiteMigrations: this.runSQLiteMigrations,
       runSurrealMigrations: this.runSurrealMigrations,
@@ -734,6 +735,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       databasePath,
       db,
       surrealDb,
+      surrealFactory,
       surrealNamespace: surrealTestContext.namespace,
       surrealDatabase: surrealTestContext.database,
       cleanup: async () => {}, // Placeholder, will be replaced

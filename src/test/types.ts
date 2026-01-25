@@ -27,8 +27,9 @@
  * ```
  */
 
+import type { Surreal } from "surrealdb";
 import type { DatabaseService } from "../database/database_service.ts";
-import type { SurrealDatabaseService } from "../database/surreal_database_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import type { HashService } from "../encryption/hash_service.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
@@ -70,8 +71,10 @@ export interface BaseTestContext {
   databasePath: string;
   /** SQLite database service instance */
   db: DatabaseService;
-  /** SurrealDB database service (connected to isolated namespace) */
-  surrealDb: SurrealDatabaseService;
+  /** Raw Surreal SDK connection (connected to isolated namespace) */
+  surrealDb: Surreal;
+  /** SurrealDB connection factory for this test's namespace */
+  surrealFactory: SurrealConnectionFactory;
   /** SurrealDB namespace for this test (unique per test for isolation) */
   surrealNamespace: string;
   /** SurrealDB database name (same as namespace) */

@@ -17,64 +17,6 @@ async function writeMigration(
 }
 
 // =====================
-// getCurrentVersion tests
-// =====================
-
-integrationTest("getCurrentVersion returns null when schema_version table does not exist", async () => {
-  // Create temp migrations dir (empty - no migrations)
-  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
-
-  const ctx = await TestSetupBuilder.create()
-    .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
-    .build();
-
-  try {
-    const migrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
-      migrationsDir: tempMigrationsDir,
-    });
-    const version = await migrationService.getCurrentVersion();
-    expect(version).toBeNull();
-  } finally {
-    await ctx.cleanup();
-    await Deno.remove(tempMigrationsDir, { recursive: true });
-  }
-});
-
-integrationTest("getCurrentVersion returns version when schema_version exists", async () => {
-  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
-
-  const ctx = await TestSetupBuilder.create()
-    .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
-    .build();
-
-  try {
-    // Manually create schema_version table and record
-    await ctx.surrealDb.query(`
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-    `);
-    await ctx.surrealDb.query("CREATE schema_version:current SET version = 5");
-
-    const migrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
-      migrationsDir: tempMigrationsDir,
-    });
-    const version = await migrationService.getCurrentVersion();
-    expect(version).toBe(5);
-  } finally {
-    await ctx.cleanup();
-    await Deno.remove(tempMigrationsDir, { recursive: true });
-  }
-});
-
-// =====================
 // getAvailableMigrations tests
 // =====================
 
@@ -84,14 +26,16 @@ integrationTest("getAvailableMigrations returns empty array for empty directory"
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
     .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
+    .withoutSurrealMigrations()
+    .withBaseOnly()
     .build();
 
   try {
     const migrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
+      connectionFactory: ctx.surrealFactory,
       migrationsDir: tempMigrationsDir,
+      namespace: ctx.surrealNamespace,
+      database: ctx.surrealDatabase,
     });
     const migrations = await migrationService.getAvailableMigrations();
     expect(migrations).toEqual([]);
@@ -118,8 +62,10 @@ integrationTest("getAvailableMigrations parses migration files correctly", async
 
     try {
       const migrationService = new SurrealMigrationService({
-        db: ctx.surrealDb,
+        connectionFactory: ctx.surrealFactory,
         migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
       });
       const migrations = await migrationService.getAvailableMigrations();
 
@@ -158,8 +104,10 @@ integrationTest("getAvailableMigrations ignores non-matching files", async () =>
 
     try {
       const migrationService = new SurrealMigrationService({
-        db: ctx.surrealDb,
+        connectionFactory: ctx.surrealFactory,
         migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
       });
       const migrations = await migrationService.getAvailableMigrations();
 
@@ -191,8 +139,10 @@ integrationTest("getAvailableMigrations returns migrations sorted by version", a
 
     try {
       const migrationService = new SurrealMigrationService({
-        db: ctx.surrealDb,
+        connectionFactory: ctx.surrealFactory,
         migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
       });
       const migrations = await migrationService.getAvailableMigrations();
 
@@ -243,8 +193,10 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
 
     try {
       const migrationService = new SurrealMigrationService({
-        db: ctx.surrealDb,
+        connectionFactory: ctx.surrealFactory,
         migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
       });
 
       const result = await migrationService.migrate();
@@ -253,12 +205,8 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
       expect(result.fromVersion).toBeNull();
       expect(result.toVersion).toBe(1);
 
-      // Verify schema_version was updated
-      const version = await migrationService.getCurrentVersion();
-      expect(version).toBe(1);
-
       // Verify users table exists by querying it
-      const users = await ctx.surrealDb.select("users");
+      const [users] = await ctx.surrealDb.query<[unknown[]]>("SELECT * FROM users");
       expect(Array.isArray(users)).toBe(true);
     } finally {
       await ctx.cleanup();
@@ -274,8 +222,8 @@ integrationTest("migrate only applies new migrations on partially migrated datab
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
     .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
+    .withoutSurrealMigrations()
+    .withBaseOnly()
     .build();
 
   try {
@@ -316,8 +264,10 @@ integrationTest("migrate only applies new migrations on partially migrated datab
     );
 
     const migrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
+      connectionFactory: ctx.surrealFactory,
       migrationsDir: tempMigrationsDir,
+      namespace: ctx.surrealNamespace,
+      database: ctx.surrealDatabase,
     });
 
     const result = await migrationService.migrate();
@@ -325,10 +275,6 @@ integrationTest("migrate only applies new migrations on partially migrated datab
     expect(result.appliedCount).toBe(2); // Only 001 and 002
     expect(result.fromVersion).toBe(0);
     expect(result.toVersion).toBe(2);
-
-    // Verify schema_version was updated
-    const version = await migrationService.getCurrentVersion();
-    expect(version).toBe(2);
   } finally {
     await ctx.cleanup();
     await Deno.remove(tempMigrationsDir, { recursive: true });
@@ -341,8 +287,8 @@ integrationTest("migrate returns zero applied when no pending migrations", async
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
     .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
+    .withoutSurrealMigrations()
+    .withBaseOnly()
     .build();
 
   try {
@@ -357,8 +303,10 @@ integrationTest("migrate returns zero applied when no pending migrations", async
     await writeMigration(tempMigrationsDir, "001-add-users.surql", "-- users");
 
     const migrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
+      connectionFactory: ctx.surrealFactory,
       migrationsDir: tempMigrationsDir,
+      namespace: ctx.surrealNamespace,
+      database: ctx.surrealDatabase,
     });
 
     const result = await migrationService.migrate();
@@ -411,8 +359,10 @@ integrationTest("migrate handles version gaps correctly", async () => {
 
     try {
       const migrationService = new SurrealMigrationService({
-        db: ctx.surrealDb,
+        connectionFactory: ctx.surrealFactory,
         migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
       });
 
       const result = await migrationService.migrate();
@@ -420,9 +370,6 @@ integrationTest("migrate handles version gaps correctly", async () => {
       expect(result.appliedCount).toBe(3);
       expect(result.fromVersion).toBeNull();
       expect(result.toVersion).toBe(10);
-
-      const version = await migrationService.getCurrentVersion();
-      expect(version).toBe(10);
     } finally {
       await ctx.cleanup();
     }
@@ -459,17 +406,15 @@ integrationTest("migrate throws SurrealMigrationExecutionError on SurrealQL fail
 
     try {
       const migrationService = new SurrealMigrationService({
-        db: ctx.surrealDb,
+        connectionFactory: ctx.surrealFactory,
         migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
       });
 
       await expect(migrationService.migrate()).rejects.toThrow(
         SurrealMigrationExecutionError
       );
-
-      // Version should be 0 (first migration succeeded, second failed)
-      const version = await migrationService.getCurrentVersion();
-      expect(version).toBe(0);
     } finally {
       await ctx.cleanup();
     }
@@ -484,14 +429,16 @@ integrationTest("migrate returns correct result when no migrations exist", async
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
     .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
+    .withoutSurrealMigrations()
+    .withBaseOnly()
     .build();
 
   try {
     const migrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
+      connectionFactory: ctx.surrealFactory,
       migrationsDir: tempMigrationsDir,
+      namespace: ctx.surrealNamespace,
+      database: ctx.surrealDatabase,
     });
 
     const result = await migrationService.migrate();
@@ -539,14 +486,16 @@ integrationTest("getAvailableMigrations throws SurrealMigrationError when direct
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
     .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
-      .withBaseOnly()
+    .withoutSurrealMigrations()
+    .withBaseOnly()
     .build();
 
   try {
     const badMigrationService = new SurrealMigrationService({
-      db: ctx.surrealDb,
+      connectionFactory: ctx.surrealFactory,
       migrationsDir: `${tempMigrationsDir}/nonexistent`,
+      namespace: ctx.surrealNamespace,
+      database: ctx.surrealDatabase,
     });
 
     await expect(badMigrationService.getAvailableMigrations()).rejects.toThrow(

@@ -1,4 +1,5 @@
-import type { SurrealDatabaseService } from "./surreal_database_service.ts";
+import type { Surreal } from "surrealdb";
+import type { SurrealConnectionFactory } from "./surreal_connection_factory.ts";
 import {
   SurrealMigrationError,
   SurrealMigrationFileError,
@@ -9,10 +10,14 @@ import {
  * Configuration options for the SurrealMigrationService
  */
 export interface SurrealMigrationServiceOptions {
-  /** SurrealDB database service instance */
-  db: SurrealDatabaseService;
+  /** Connection factory for creating database connections */
+  connectionFactory: SurrealConnectionFactory;
   /** Path to the migrations directory */
   migrationsDir: string;
+  /** Target namespace (default: "system") */
+  namespace?: string;
+  /** Target database (default: "system") */
+  database?: string;
 }
 
 /**
@@ -50,12 +55,13 @@ const MIGRATION_FILENAME_REGEX = /^(\d{3})-.+\.surql$/;
  * - 001-surreal-users.surql
  * - 005-surreal-indexes.surql (gaps are allowed)
  *
- * The first migration (000) should create the schema_version table.
+ * The first migration (000) should create the schema_version table and
+ * the system namespace/database.
  *
  * @example
  * ```typescript
  * const migrationService = new SurrealMigrationService({
- *   db: surrealDb,
+ *   connectionFactory: surrealFactory,
  *   migrationsDir: "./migrations",
  * });
  *
@@ -64,27 +70,31 @@ const MIGRATION_FILENAME_REGEX = /^(\d{3})-.+\.surql$/;
  * ```
  */
 export class SurrealMigrationService {
-  private readonly db: SurrealDatabaseService;
+  private readonly connectionFactory: SurrealConnectionFactory;
   private readonly migrationsDir: string;
+  private readonly namespace: string;
+  private readonly database: string;
 
   constructor(options: SurrealMigrationServiceOptions) {
-    this.db = options.db;
+    this.connectionFactory = options.connectionFactory;
     this.migrationsDir = options.migrationsDir;
+    this.namespace = options.namespace ?? "system";
+    this.database = options.database ?? "system";
   }
 
   /**
    * Gets the current schema version from the database.
    *
+   * @param db - Open database connection
    * @returns Current version number, or null if no migrations have been applied
    *          (schema_version table doesn't exist or is empty)
    */
-  async getCurrentVersion(): Promise<number | null> {
+  private async getCurrentVersion(db: Surreal): Promise<number | null> {
     try {
-      const result = await this.db.selectOne<{ version: number }>(
-        "schema_version",
-        "current"
+      const result = await db.query<[{ version: number }[]]>(
+        "SELECT version FROM schema_version:current"
       );
-      return result?.version ?? null;
+      return result?.[0]?.[0]?.version ?? null;
     } catch {
       // Table doesn't exist or record doesn't exist - no migrations applied yet
       return null;
@@ -129,39 +139,50 @@ export class SurrealMigrationService {
   /**
    * Applies all pending migrations in order.
    *
+   * Opens a connection, runs all pending migrations, and closes the connection.
+   *
    * @returns SurrealMigrationResult with details about what was applied
    * @throws SurrealMigrationFileError if a migration file cannot be read
    * @throws SurrealMigrationExecutionError if a migration fails to execute
    */
   async migrate(): Promise<SurrealMigrationResult> {
-    const currentVersion = await this.getCurrentVersion();
-    const availableMigrations = await this.getAvailableMigrations();
+    const db = await this.connectionFactory.connect({
+      namespace: this.namespace,
+      database: this.database,
+    });
 
-    // Filter to only migrations newer than current version
-    const pendingMigrations = availableMigrations.filter(
-      (m) => currentVersion === null || m.version > currentVersion
-    );
+    try {
+      const currentVersion = await this.getCurrentVersion(db);
+      const availableMigrations = await this.getAvailableMigrations();
 
-    if (pendingMigrations.length === 0) {
+      // Filter to only migrations newer than current version
+      const pendingMigrations = availableMigrations.filter(
+        (m) => currentVersion === null || m.version > currentVersion
+      );
+
+      if (pendingMigrations.length === 0) {
+        return {
+          appliedCount: 0,
+          fromVersion: currentVersion,
+          toVersion: currentVersion,
+        };
+      }
+
+      // Apply each migration in order
+      for (const migration of pendingMigrations) {
+        await this.applyMigration(db, migration);
+      }
+
+      const finalVersion = pendingMigrations[pendingMigrations.length - 1].version;
+
       return {
-        appliedCount: 0,
+        appliedCount: pendingMigrations.length,
         fromVersion: currentVersion,
-        toVersion: currentVersion,
+        toVersion: finalVersion,
       };
+    } finally {
+      await db.close();
     }
-
-    // Apply each migration in order
-    for (const migration of pendingMigrations) {
-      await this.applyMigration(migration);
-    }
-
-    const finalVersion = pendingMigrations[pendingMigrations.length - 1].version;
-
-    return {
-      appliedCount: pendingMigrations.length,
-      fromVersion: currentVersion,
-      toVersion: finalVersion,
-    };
   }
 
   /**
@@ -171,11 +192,15 @@ export class SurrealMigrationService {
    * so migrations are applied as individual queries. Each query within the
    * migration file is executed sequentially.
    *
+   * @param db - Open database connection
    * @param migration - The migration to apply
    * @throws SurrealMigrationFileError if the migration file cannot be read
    * @throws SurrealMigrationExecutionError if the SurrealQL execution fails
    */
-  private async applyMigration(migration: SurrealMigration): Promise<void> {
+  private async applyMigration(
+    db: Surreal,
+    migration: SurrealMigration
+  ): Promise<void> {
     // Read the migration file
     let surql: string;
     try {
@@ -187,10 +212,10 @@ export class SurrealMigrationService {
     // Execute migration
     try {
       // Execute the migration SurrealQL
-      await this.db.query(surql);
+      await db.query(surql);
 
       // Update the schema version
-      await this.updateVersion(migration.version);
+      await this.updateVersion(db, migration.version);
     } catch (error) {
       // If it's already a SurrealMigrationFileError, re-throw as is
       if (error instanceof SurrealMigrationFileError) {
@@ -209,11 +234,10 @@ export class SurrealMigrationService {
    * Updates the schema version in the database.
    * Uses UPSERT semantics to create or update the version record.
    */
-  private async updateVersion(version: number): Promise<void> {
+  private async updateVersion(db: Surreal, version: number): Promise<void> {
     // Use UPSERT to create or update the version record
-    await this.db.query(
-      "UPSERT schema_version:current SET version = $version",
-      { version }
-    );
+    await db.query("UPSERT schema_version:current SET version = $version", {
+      version,
+    });
   }
 }

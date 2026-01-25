@@ -1,5 +1,5 @@
 import { SurrealProcessManager } from "./surreal_process_manager.ts";
-import { SurrealDatabaseService } from "./surreal_database_service.ts";
+import { SurrealConnectionFactory } from "./surreal_connection_factory.ts";
 import {
   SurrealHealthMonitor,
   type HealthStatus,
@@ -12,8 +12,8 @@ import {
 export interface SurrealSupervisorOptions {
   /** Process manager instance */
   processManager: SurrealProcessManager;
-  /** Database service instance (created but not opened) */
-  databaseService: SurrealDatabaseService;
+  /** Connection factory for verifying database connectivity */
+  connectionFactory: SurrealConnectionFactory;
   /** Health monitor instance (created but not started) */
   healthMonitor: SurrealHealthMonitor;
   /** Maximum restart attempts before giving up (default: 3) */
@@ -37,7 +37,8 @@ export interface RestartResult {
  * Supervisor that coordinates SurrealDB process lifecycle with health monitoring.
  *
  * Responsibilities:
- * - Start/stop the process, database connection, and health monitor together
+ * - Start/stop the process and health monitor together
+ * - Verify database connectivity after process start
  * - Handle automatic restart on failure
  * - Track restart attempts with backoff
  * - Provide unified health status
@@ -46,7 +47,7 @@ export interface RestartResult {
  * ```typescript
  * const supervisor = new SurrealSupervisor({
  *   processManager,
- *   databaseService: surrealDb,
+ *   connectionFactory: surrealFactory,
  *   healthMonitor: new SurrealHealthMonitor({ processManager }),
  * });
  *
@@ -62,7 +63,7 @@ export interface RestartResult {
  */
 export class SurrealSupervisor {
   private readonly processManager: SurrealProcessManager;
-  private readonly databaseService: SurrealDatabaseService;
+  private readonly connectionFactory: SurrealConnectionFactory;
   private readonly healthMonitor: SurrealHealthMonitor;
   private readonly maxRestartAttempts: number;
   private readonly restartCooldownMs: number;
@@ -75,7 +76,7 @@ export class SurrealSupervisor {
 
   constructor(options: SurrealSupervisorOptions) {
     this.processManager = options.processManager;
-    this.databaseService = options.databaseService;
+    this.connectionFactory = options.connectionFactory;
     this.healthMonitor = options.healthMonitor;
     this.maxRestartAttempts = options.maxRestartAttempts ?? 3;
     this.restartCooldownMs = options.restartCooldownMs ?? 5000;
@@ -83,11 +84,11 @@ export class SurrealSupervisor {
   }
 
   /**
-   * Start the supervisor (starts process, connects DB, starts monitoring).
+   * Start the supervisor (starts process, verifies connectivity, starts monitoring).
    *
    * Startup order:
    * 1. Start SurrealDB process
-   * 2. Connect database service
+   * 2. Verify database connectivity via factory health check
    * 3. Start health monitor
    * 4. Register health status listener for auto-restart
    */
@@ -99,13 +100,12 @@ export class SurrealSupervisor {
     // 1. Start the process
     await this.processManager.start();
 
-    // 2. Connect the database service
-    try {
-      await this.databaseService.open();
-    } catch (error) {
-      // If DB connection fails, stop the process
+    // 2. Verify database connectivity
+    const healthy = await this.connectionFactory.healthCheck();
+    if (!healthy) {
+      // If connectivity check fails, stop the process
       await this.processManager.stop();
-      throw error;
+      throw new Error("Failed to verify SurrealDB connectivity after process start");
     }
 
     // 3. Start health monitoring
@@ -123,13 +123,15 @@ export class SurrealSupervisor {
   }
 
   /**
-   * Stop the supervisor (stops monitoring, disconnects DB, stops process).
+   * Stop the supervisor (stops monitoring, stops process).
    *
    * Shutdown order:
    * 1. Unsubscribe from health events (prevent restart during shutdown)
    * 2. Stop health monitor
-   * 3. Close database connection
-   * 4. Stop process
+   * 3. Stop process
+   *
+   * Note: No database connection to close - the factory creates connections
+   * on demand and services manage their own connections.
    */
   async stop(): Promise<void> {
     if (!this.isRunning) {
@@ -145,12 +147,7 @@ export class SurrealSupervisor {
     // 2. Stop health monitor
     this.healthMonitor.stop();
 
-    // 3. Close database connection
-    if (this.databaseService.isOpen) {
-      await this.databaseService.close();
-    }
-
-    // 4. Stop process
+    // 3. Stop process
     if (this.processManager.isRunning) {
       await this.processManager.stop();
     }
@@ -182,16 +179,14 @@ export class SurrealSupervisor {
     );
 
     try {
-      // Close database connection first
-      if (this.databaseService.isOpen) {
-        await this.databaseService.close();
-      }
-
       // Restart the process
       await this.processManager.restart();
 
-      // Reconnect the database
-      await this.databaseService.open();
+      // Verify connectivity after restart
+      const healthy = await this.connectionFactory.healthCheck();
+      if (!healthy) {
+        throw new Error("Failed to verify SurrealDB connectivity after restart");
+      }
 
       // Reset health monitor failure count
       this.healthMonitor.resetFailures();
@@ -222,13 +217,11 @@ export class SurrealSupervisor {
    * Returns true only if:
    * - Supervisor is running
    * - Process is running
-   * - Database is connected
    * - Health status is healthy or degraded
    */
   isHealthy(): boolean {
     if (!this.isRunning) return false;
     if (!this.processManager.isRunning) return false;
-    if (!this.databaseService.isOpen) return false;
 
     const status = this.healthMonitor.getStatus();
     return status === "healthy" || status === "degraded";

@@ -32,8 +32,9 @@
  * This ensures the process is stopped when the test runner exits.
  */
 
+import { Surreal } from "surrealdb";
 import { SurrealProcessManager } from "../database/surreal_process_manager.ts";
-import { SurrealDatabaseService } from "../database/surreal_database_service.ts";
+import { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 
 /**
  * Context returned when creating a test namespace.
@@ -43,8 +44,10 @@ export interface SharedSurrealTestContext {
   namespace: string;
   /** Database name within the namespace (same as namespace) */
   database: string;
-  /** Connected SurrealDatabaseService for this namespace */
-  surrealDb: SurrealDatabaseService;
+  /** Raw Surreal SDK connection for this namespace */
+  db: Surreal;
+  /** Connection factory configured for this test's namespace/database */
+  factory: SurrealConnectionFactory;
 }
 
 /**
@@ -73,7 +76,8 @@ export class SharedSurrealManager {
   // Note: We don't use supervisor/health monitor for tests - simpler is better.
   // If SurrealDB crashes, tests will fail naturally.
   private processManager: SurrealProcessManager | null = null;
-  private adminDb: SurrealDatabaseService | null = null;
+  private adminFactory: SurrealConnectionFactory | null = null;
+  private adminDb: Surreal | null = null;
 
   // Fixed port for shared instance (avoid ephemeral port conflicts)
   private readonly port = 54321;
@@ -140,8 +144,7 @@ export class SharedSurrealManager {
   /**
    * Create an isolated test context with unique namespace.
    *
-   * @param runMigrations - Whether to run SurrealDB migrations (default true)
-   * @returns Context with connected SurrealDatabaseService
+   * @returns Context with raw Surreal connection and factory
    */
   async createTestContext(): Promise<SharedSurrealTestContext> {
     await this.ensureStarted();
@@ -157,21 +160,21 @@ export class SharedSurrealManager {
       `USE NAMESPACE ${namespace}; DEFINE DATABASE ${database}`
     );
 
-    // Create a new database service connected to this namespace
-    const surrealDb = new SurrealDatabaseService({
+    // Create a factory for this test's namespace
+    const factory = new SurrealConnectionFactory({
       connectionUrl: this.processManager!.connectionUrl,
       username: this.username,
       password: this.password,
-      namespace,
-      database,
     });
 
-    await surrealDb.open();
+    // Create a pre-opened connection for convenience
+    const db = await factory.connect({ namespace, database });
 
     return {
       namespace,
       database,
-      surrealDb,
+      db,
+      factory,
     };
   }
 
@@ -179,18 +182,19 @@ export class SharedSurrealManager {
    * Delete a test context (removes the namespace and all data).
    *
    * @param namespace - The namespace to remove
-   * @param surrealDb - The database service to close
+   * @param db - The Surreal connection to close
    */
-  async deleteTestContext(
-    namespace: string,
-    surrealDb?: SurrealDatabaseService
-  ): Promise<void> {
+  async deleteTestContext(namespace: string, db?: Surreal): Promise<void> {
     // Close the test's database connection first
-    if (surrealDb?.isOpen) {
-      await surrealDb.close();
+    if (db) {
+      try {
+        await db.close();
+      } catch {
+        // Ignore close errors
+      }
     }
 
-    if (!this.adminDb?.isOpen) {
+    if (!this.adminDb) {
       return; // Nothing to clean up if not running
     }
 
@@ -232,7 +236,7 @@ export class SharedSurrealManager {
 
     try {
       // Close admin DB connection first
-      if (this.adminDb?.isOpen) {
+      if (this.adminDb) {
         await this.adminDb.close();
       }
 
@@ -246,6 +250,7 @@ export class SharedSurrealManager {
 
     this.isStarted = false;
     this.processManager = null;
+    this.adminFactory = null;
     this.adminDb = null;
   }
 
@@ -278,17 +283,18 @@ export class SharedSurrealManager {
     // Start the process directly (no supervisor/health monitor for tests)
     await this.processManager.start();
 
-    // Create admin database service (connects to default namespace for admin ops)
-    this.adminDb = new SurrealDatabaseService({
+    // Create admin factory
+    this.adminFactory = new SurrealConnectionFactory({
       connectionUrl: this.processManager.connectionUrl,
       username: this.username,
       password: this.password,
+    });
+
+    // Create admin connection (for namespace management)
+    this.adminDb = await this.adminFactory.connect({
       namespace: "test",
       database: "admin",
     });
-
-    // Open admin connection
-    await this.adminDb.open();
 
     this.isStarted = true;
     console.log(

@@ -6,9 +6,10 @@
  * for a particular test, reducing setup time and complexity.
  */
 
+import type { Surreal } from "surrealdb";
 import { DatabaseService } from "../database/database_service.ts";
 import { MigrationService } from "../database/migration_service.ts";
-import { SurrealDatabaseService } from "../database/surreal_database_service.ts";
+import { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
 import {
   SharedSurrealManager,
@@ -86,7 +87,8 @@ export async function createCoreInfrastructure(
   databasePath: string;
   db: DatabaseService;
   surrealTestContext: SharedSurrealTestContext;
-  surrealDb: SurrealDatabaseService;
+  surrealDb: Surreal;
+  surrealFactory: SurrealConnectionFactory;
 }> {
   const { runSQLiteMigrations = true, runSurrealMigrations = true } = options;
 
@@ -116,8 +118,10 @@ export async function createCoreInfrastructure(
   // Run SurrealDB migrations in this namespace if requested
   if (runSurrealMigrations) {
     const surrealMigrationService = new SurrealMigrationService({
-      db: surrealTestContext.surrealDb,
+      connectionFactory: surrealTestContext.factory,
       migrationsDir,
+      namespace: surrealTestContext.namespace,
+      database: surrealTestContext.database,
     });
     await surrealMigrationService.migrate();
   }
@@ -128,7 +132,8 @@ export async function createCoreInfrastructure(
     databasePath,
     db,
     surrealTestContext,
-    surrealDb: surrealTestContext.surrealDb,
+    surrealDb: surrealTestContext.db,
+    surrealFactory: surrealTestContext.factory,
   };
 }
 
@@ -464,7 +469,7 @@ export function createCleanupFunction(
     const manager = SharedSurrealManager.getInstance();
     await manager.deleteTestContext(
       surrealTestContext.namespace,
-      surrealTestContext.surrealDb
+      surrealTestContext.db
     );
 
     // 3. Close SQLite database
