@@ -1,5 +1,6 @@
 import { Surreal } from "surrealdb";
-import { SurrealDatabaseAccessError } from "./surreal_errors.ts";
+import { SurrealDatabaseAccessError, SurrealPoolNotInitializedError } from "./surreal_errors.ts";
+import { SurrealConnectionPool, type PoolStats } from "./surreal_connection_pool.ts";
 
 /**
  * Configuration for the SurrealDB connection factory.
@@ -26,9 +27,15 @@ export interface ConnectionOptions {
 /**
  * Factory for creating SurrealDB connections.
  *
- * Provides a thin wrapper around the SurrealDB SDK that handles connection
- * configuration and lifecycle, returning raw Surreal instances for full
- * SDK access.
+ * Provides two connection modes:
+ *
+ * 1. **Pooled connections** (recommended for services):
+ *    Use `initializePool()` at startup, then `withSystemConnection()`.
+ *    Connections are cached per namespace+database and reused.
+ *
+ * 2. **Unique connections** (for migrations, special cases):
+ *    Use `connect()` or `withConnection()` directly.
+ *    Caller owns the connection and must close it.
  *
  * @example
  * ```typescript
@@ -38,27 +45,109 @@ export interface ConnectionOptions {
  *   password: "root",
  * });
  *
- * // Get a connection to system/system (default)
- * const db = await factory.systemConnection();
- * const users = await db.select("users");
- * await db.close();
+ * // Initialize pool at startup
+ * factory.initializePool();
  *
- * // Or use auto-close pattern
- * const result = await factory.withConnection({}, async (db) => {
+ * // Use pooled connection (preferred for services)
+ * const users = await factory.withSystemConnection({}, async (db) => {
  *   return await db.select("users");
  * });
+ *
+ * // Use unique connection (for migrations, isolated operations)
+ * const db = await factory.connect();
+ * try {
+ *   await db.query("DEFINE TABLE ...");
+ * } finally {
+ *   await db.close();
+ * }
+ *
+ * // Shutdown
+ * await factory.closePool();
  * ```
  */
 export class SurrealConnectionFactory {
   private readonly connectionUrl: string;
   private readonly username: string;
   private readonly password: string;
+  private pool: SurrealConnectionPool | null = null;
 
   constructor(options: SurrealConnectionFactoryOptions) {
     this.connectionUrl = options.connectionUrl;
     this.username = options.username;
     this.password = options.password;
   }
+
+  // ============== Pool Management ==============
+
+  /**
+   * Initialize the connection pool for cached system connections.
+   *
+   * Should be called during application startup after SurrealDB is ready.
+   * Once initialized, use `withSystemConnection()` for pooled access.
+   *
+   * @param options - Pool configuration
+   */
+  initializePool(options?: { idleTimeoutMs?: number }): void {
+    if (this.pool) {
+      console.warn("[SurrealConnectionFactory] Pool already initialized");
+      return;
+    }
+    this.pool = new SurrealConnectionPool({
+      factory: this,
+      idleTimeoutMs: options?.idleTimeoutMs,
+    });
+  }
+
+  /**
+   * Execute callback with a pooled system connection.
+   *
+   * This is the preferred method for most service operations.
+   * The connection is cached and reused across calls, with automatic
+   * cleanup after 5 minutes of inactivity.
+   *
+   * @param options - Namespace and database to connect to
+   * @param callback - Function to execute with the connection
+   * @returns Result of the callback
+   * @throws SurrealPoolNotInitializedError if pool is not initialized
+   * @throws SurrealPoolConnectionError if connection cannot be established
+   */
+  withSystemConnection<T>(
+    options: ConnectionOptions,
+    callback: (db: Surreal) => Promise<T>
+  ): Promise<T> {
+    if (!this.pool) {
+      throw new SurrealPoolNotInitializedError();
+    }
+    return this.pool.withConnection(options, callback);
+  }
+
+  /**
+   * Close the connection pool and all cached connections.
+   * Called during application shutdown.
+   */
+  async closePool(): Promise<void> {
+    if (this.pool) {
+      await this.pool.closeAll();
+      this.pool = null;
+    }
+  }
+
+  /**
+   * Get pool statistics for monitoring.
+   * Returns null if pool is not initialized.
+   */
+  getPoolStats(): PoolStats | null {
+    return this.pool?.getStats() ?? null;
+  }
+
+  /**
+   * Check if the pool is initialized.
+   */
+  get isPoolInitialized(): boolean {
+    return this.pool !== null;
+  }
+
+  // ============== Unique Connections ==============
 
   /**
    * Creates a connection to the system namespace/database.
@@ -68,7 +157,7 @@ export class SurrealConnectionFactory {
    *
    * @returns Raw Surreal SDK instance connected to system/system
    */
-  async systemConnection(): Promise<Surreal> {
+  systemConnection(): Promise<Surreal> {
     return this.connect({ namespace: "system", database: "system" });
   }
 

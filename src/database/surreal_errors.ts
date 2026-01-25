@@ -94,6 +94,35 @@ export class SurrealProcessExitError extends SurrealDatabaseError {
   }
 }
 
+// ============== Pool Errors ==============
+
+/**
+ * Thrown when attempting to use the connection pool before initialization
+ */
+export class SurrealPoolNotInitializedError extends SurrealDatabaseError {
+  constructor() {
+    super("SurrealDB connection pool is not initialized. Call initializePool() first.");
+    this.name = "SurrealPoolNotInitializedError";
+  }
+}
+
+/**
+ * Thrown when a pooled connection fails to establish
+ */
+export class SurrealPoolConnectionError extends SurrealDatabaseError {
+  public readonly namespace: string;
+  public readonly database: string;
+  public readonly originalError: unknown;
+
+  constructor(namespace: string, database: string, originalError: unknown) {
+    super(`Failed to get pooled connection for ${namespace}/${database}`);
+    this.name = "SurrealPoolConnectionError";
+    this.namespace = namespace;
+    this.database = database;
+    this.originalError = originalError;
+  }
+}
+
 // ============== Migration Errors ==============
 
 /**

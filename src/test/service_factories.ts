@@ -115,6 +115,10 @@ export async function createCoreInfrastructure(
   const manager = SharedSurrealManager.getInstance();
   const surrealTestContext = await manager.createTestContext();
 
+  // Initialize the connection pool for this test's factory
+  // Use shorter idle timeout for tests (30 seconds)
+  surrealTestContext.factory.initializePool({ idleTimeoutMs: 30000 });
+
   // Run SurrealDB migrations in this namespace if requested
   if (runSurrealMigrations) {
     const surrealMigrationService = new SurrealMigrationService({
@@ -472,17 +476,20 @@ export function createCleanupFunction(
       await consoleLogService.shutdown();
     }
 
-    // 2. Delete SurrealDB namespace (fast cleanup, shared process stays running)
+    // 2. Close SurrealDB connection pool for this test
+    await surrealTestContext.factory.closePool();
+
+    // 3. Delete SurrealDB namespace (fast cleanup, shared process stays running)
     const manager = SharedSurrealManager.getInstance();
     await manager.deleteTestContext(
       surrealTestContext.namespace,
       surrealTestContext.db
     );
 
-    // 3. Close SQLite database
+    // 4. Close SQLite database
     await db.close();
 
-    // 4. Remove temp directory
+    // 5. Remove temp directory
     try {
       await Deno.remove(tempDir, { recursive: true });
     } catch {

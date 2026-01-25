@@ -22,6 +22,8 @@ export interface SurrealSupervisorOptions {
   restartCooldownMs?: number;
   /** Whether to auto-restart on unhealthy status (default: true) */
   autoRestart?: boolean;
+  /** Idle timeout for pooled connections in ms (default: 300000 = 5 min) */
+  poolIdleTimeoutMs?: number;
 }
 
 /**
@@ -68,6 +70,7 @@ export class SurrealSupervisor {
   private readonly maxRestartAttempts: number;
   private readonly restartCooldownMs: number;
   private readonly autoRestart: boolean;
+  private readonly poolIdleTimeoutMs: number;
 
   private restartAttempts = 0;
   private isRestarting = false;
@@ -81,6 +84,7 @@ export class SurrealSupervisor {
     this.maxRestartAttempts = options.maxRestartAttempts ?? 3;
     this.restartCooldownMs = options.restartCooldownMs ?? 5000;
     this.autoRestart = options.autoRestart ?? true;
+    this.poolIdleTimeoutMs = options.poolIdleTimeoutMs ?? 5 * 60 * 1000; // 5 minutes
   }
 
   /**
@@ -89,8 +93,9 @@ export class SurrealSupervisor {
    * Startup order:
    * 1. Start SurrealDB process
    * 2. Verify database connectivity via factory health check
-   * 3. Start health monitor
-   * 4. Register health status listener for auto-restart
+   * 3. Initialize connection pool
+   * 4. Start health monitor
+   * 5. Register health status listener for auto-restart
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -108,10 +113,15 @@ export class SurrealSupervisor {
       throw new Error("Failed to verify SurrealDB connectivity after process start");
     }
 
-    // 3. Start health monitoring
+    // 3. Initialize connection pool
+    this.connectionFactory.initializePool({
+      idleTimeoutMs: this.poolIdleTimeoutMs,
+    });
+
+    // 4. Start health monitoring
     this.healthMonitor.start();
 
-    // 4. Register auto-restart handler
+    // 5. Register auto-restart handler
     if (this.autoRestart) {
       this.unsubscribeHealthMonitor = this.healthMonitor.onStatusChange(
         (event) => this.handleHealthChange(event)
@@ -123,15 +133,13 @@ export class SurrealSupervisor {
   }
 
   /**
-   * Stop the supervisor (stops monitoring, stops process).
+   * Stop the supervisor (stops monitoring, closes pool, stops process).
    *
    * Shutdown order:
    * 1. Unsubscribe from health events (prevent restart during shutdown)
    * 2. Stop health monitor
-   * 3. Stop process
-   *
-   * Note: No database connection to close - the factory creates connections
-   * on demand and services manage their own connections.
+   * 3. Close connection pool
+   * 4. Stop process
    */
   async stop(): Promise<void> {
     if (!this.isRunning) {
@@ -147,7 +155,10 @@ export class SurrealSupervisor {
     // 2. Stop health monitor
     this.healthMonitor.stop();
 
-    // 3. Stop process
+    // 3. Close connection pool
+    await this.connectionFactory.closePool();
+
+    // 4. Stop process
     if (this.processManager.isRunning) {
       await this.processManager.stop();
     }
