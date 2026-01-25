@@ -160,15 +160,17 @@ export class SharedSurrealManager {
       `USE NAMESPACE ${namespace}; DEFINE DATABASE ${database}`
     );
 
-    // Create a factory for this test's namespace
+    // Create a factory for this test's namespace with defaults set
     const factory = new SurrealConnectionFactory({
       connectionUrl: this.processManager!.connectionUrl,
       username: this.username,
       password: this.password,
+      defaultNamespace: namespace,
+      defaultDatabase: database,
     });
 
-    // Create a pre-opened connection for convenience
-    const db = await factory.connect({ namespace, database });
+    // Create a pre-opened connection for convenience (uses factory defaults)
+    const db = await factory.connect();
 
     return {
       namespace,

@@ -225,11 +225,10 @@ try {
 // ============================================================================
 
 // Initialize settings service and bootstrap defaults
+// Uses factory's default namespace/database (system/system)
 const settingsService = new SettingsService({
   surrealFactory,
   encryptionService,
-  namespace: "system",
-  database: "system",
 });
 await settingsService.bootstrapGlobalSettings();
 console.log("✓ Settings initialized");

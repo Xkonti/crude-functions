@@ -14,9 +14,9 @@ export interface SurrealMigrationServiceOptions {
   connectionFactory: SurrealConnectionFactory;
   /** Path to the migrations directory */
   migrationsDir: string;
-  /** Target namespace (default: "system") */
+  /** Target namespace (optional - uses factory's default if not specified) */
   namespace?: string;
-  /** Target database (default: "system") */
+  /** Target database (optional - uses factory's default if not specified) */
   database?: string;
 }
 
@@ -78,8 +78,8 @@ export class SurrealMigrationService {
   constructor(options: SurrealMigrationServiceOptions) {
     this.connectionFactory = options.connectionFactory;
     this.migrationsDir = options.migrationsDir;
-    this.namespace = options.namespace ?? "system";
-    this.database = options.database ?? "system";
+    this.namespace = options.namespace ?? options.connectionFactory.namespace;
+    this.database = options.database ?? options.connectionFactory.database;
   }
 
   /**

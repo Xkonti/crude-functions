@@ -21,8 +21,6 @@ interface Setting {
 export interface SettingsServiceOptions {
   surrealFactory: SurrealConnectionFactory;
   encryptionService?: IEncryptionService;
-  namespace?: string;  // Default "system"
-  database?: string;   // Default "system"
 }
 
 /**
@@ -40,15 +38,11 @@ export interface SettingsServiceOptions {
 export class SettingsService {
   private readonly surrealFactory: SurrealConnectionFactory;
   private readonly encryptionService?: IEncryptionService;
-  private readonly namespace: string;
-  private readonly database: string;
   private readonly writeMutex = new Mutex();
 
   constructor(options: SettingsServiceOptions) {
     this.surrealFactory = options.surrealFactory;
     this.encryptionService = options.encryptionService;
-    this.namespace = options.namespace ?? "system";
-    this.database = options.database ?? "system";
   }
 
   // ============== Read Operations ==============
@@ -59,9 +53,7 @@ export class SettingsService {
    * @returns The setting value, or null if not found
    */
   getGlobalSetting(name: SettingName): Promise<string | undefined> {
-    return this.surrealFactory.withSystemConnection(
-      { namespace: this.namespace, database: this.database },
-      async (db) => {
+    return this.surrealFactory.withSystemConnection({}, async (db) => {
         const settingId = new RecordId("setting", name);
         const result = await db.query<[Setting | undefined]>(
           `RETURN $settingId.*`,
@@ -104,23 +96,20 @@ export class SettingsService {
 
     const settingId = new RecordId("setting", name);
 
-    await this.surrealFactory.withSystemConnection(
-      { namespace: this.namespace, database: this.database },
-      async (db) => {
-        await db.query(
-          `UPSERT $settingId SET
-            name = $name,
-            value = $newValue,
-            isEncrypted = $encrypted`,
-          {
-            settingId,
-            name,
-            newValue: finalValue,
-            encrypted,
-          }
-        );
-      }
-    );
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPSERT $settingId SET
+          name = $name,
+          value = $newValue,
+          isEncrypted = $encrypted`,
+        {
+          settingId,
+          name,
+          newValue: finalValue,
+          encrypted,
+        }
+      );
+    });
   }
 
   /**
@@ -131,9 +120,7 @@ export class SettingsService {
   async setGlobalSettingsBatch(settings: Map<SettingName, string>): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    await this.surrealFactory.withSystemConnection(
-      { namespace: this.namespace, database: this.database },
-      async (db) => {
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
         for (const [name, value] of settings) {
           const settingId = new RecordId("setting", name);
           await db.query(
@@ -155,9 +142,7 @@ export class SettingsService {
    * @returns Map of setting names to values
    */
   getAllGlobalSettings(): Promise<Map<SettingName, string>> {
-    return this.surrealFactory.withSystemConnection(
-      { namespace: this.namespace, database: this.database },
-      async (db) => {
+    return this.surrealFactory.withSystemConnection({}, async (db) => {
         // Table scan - acceptable for settings UI (low frequency)
         const result = await db.query<[Setting[]]>("SELECT * FROM setting");
         const settings = result?.[0] ?? [];
@@ -189,9 +174,7 @@ export class SettingsService {
   async resetGlobalSettings(names: SettingName[]): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    await this.surrealFactory.withSystemConnection(
-      { namespace: this.namespace, database: this.database },
-      async (db) => {
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
         for (const name of names) {
           const settingId = new RecordId("setting", name);
           const defaultValue = GlobalSettingDefaults[name];
@@ -218,9 +201,7 @@ export class SettingsService {
   async bootstrapGlobalSettings(): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    await this.surrealFactory.withSystemConnection(
-      { namespace: this.namespace, database: this.database },
-      async (db) => {
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
         for (const [name, defaultValue] of Object.entries(GlobalSettingDefaults)) {
           const settingId = new RecordId("setting", name);
 

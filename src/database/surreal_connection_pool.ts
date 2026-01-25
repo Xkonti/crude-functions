@@ -111,8 +111,8 @@ export class SurrealConnectionPool {
     options: ConnectionOptions,
     callback: (db: Surreal) => Promise<T>
   ): Promise<T> {
-    const namespace = options.namespace ?? "system";
-    const database = options.database ?? "system";
+    const namespace = options.namespace ?? this.factory.namespace;
+    const database = options.database ?? this.factory.database;
     const key = this.cacheKey(namespace, database);
 
     // Fast path: existing connected connection

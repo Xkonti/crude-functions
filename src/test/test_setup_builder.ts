@@ -771,12 +771,11 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 3: Create settings service if needed
+    // Uses factory's default namespace/database (set by SharedSurrealManager)
     if (this.flags.settingsService || this.flags.consoleLogService) {
       context.settingsService = await createSettingsService(
         context.encryptionService,
         surrealFactory,
-        surrealTestContext.namespace,
-        surrealTestContext.database
       );
 
       // Apply deferred settings

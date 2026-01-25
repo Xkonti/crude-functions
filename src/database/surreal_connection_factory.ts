@@ -12,15 +12,19 @@ export interface SurrealConnectionFactoryOptions {
   username: string;
   /** Root password for authentication */
   password: string;
+  /** Default namespace for connections (default: "system") */
+  defaultNamespace?: string;
+  /** Default database for connections (default: "system") */
+  defaultDatabase?: string;
 }
 
 /**
  * Options for creating a connection to a specific namespace/database.
  */
 export interface ConnectionOptions {
-  /** Target namespace (default: "system") */
+  /** Target namespace (default: factory's defaultNamespace) */
   namespace?: string;
-  /** Target database (default: "system") */
+  /** Target database (default: factory's defaultDatabase) */
   database?: string;
 }
 
@@ -69,12 +73,30 @@ export class SurrealConnectionFactory {
   private readonly connectionUrl: string;
   private readonly username: string;
   private readonly password: string;
+  private readonly defaultNamespace: string;
+  private readonly defaultDatabase: string;
   private pool: SurrealConnectionPool | null = null;
 
   constructor(options: SurrealConnectionFactoryOptions) {
     this.connectionUrl = options.connectionUrl;
     this.username = options.username;
     this.password = options.password;
+    this.defaultNamespace = options.defaultNamespace ?? "system";
+    this.defaultDatabase = options.defaultDatabase ?? "system";
+  }
+
+  /**
+   * Returns the default namespace for connections.
+   */
+  get namespace(): string {
+    return this.defaultNamespace;
+  }
+
+  /**
+   * Returns the default database for connections.
+   */
+  get database(): string {
+    return this.defaultDatabase;
   }
 
   // ============== Pool Management ==============
@@ -150,15 +172,15 @@ export class SurrealConnectionFactory {
   // ============== Unique Connections ==============
 
   /**
-   * Creates a connection to the system namespace/database.
+   * Creates a connection to the default namespace/database.
    *
-   * This is the default for server configuration and data.
+   * Uses the factory's defaultNamespace and defaultDatabase settings.
    * Caller owns the connection and is responsible for closing it.
    *
-   * @returns Raw Surreal SDK instance connected to system/system
+   * @returns Raw Surreal SDK instance connected to the default namespace/database
    */
   systemConnection(): Promise<Surreal> {
-    return this.connect({ namespace: "system", database: "system" });
+    return this.connect();
   }
 
   /**
@@ -166,13 +188,13 @@ export class SurrealConnectionFactory {
    *
    * Caller owns the connection and is responsible for closing it.
    *
-   * @param options - Namespace and database to connect to (defaults to system/system)
+   * @param options - Namespace and database to connect to (defaults to factory's defaults)
    * @returns Raw Surreal SDK instance
    * @throws SurrealDatabaseAccessError if connection fails
    */
   async connect(options: ConnectionOptions = {}): Promise<Surreal> {
-    const namespace = options.namespace ?? "system";
-    const database = options.database ?? "system";
+    const namespace = options.namespace ?? this.defaultNamespace;
+    const database = options.database ?? this.defaultDatabase;
 
     const db = new Surreal();
 

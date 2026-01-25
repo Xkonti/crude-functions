@@ -120,12 +120,11 @@ export async function createCoreInfrastructure(
   surrealTestContext.factory.initializePool({ idleTimeoutMs: 30000 });
 
   // Run SurrealDB migrations in this namespace if requested
+  // Uses factory's default namespace/database (set by SharedSurrealManager)
   if (runSurrealMigrations) {
     const surrealMigrationService = new SurrealMigrationService({
       connectionFactory: surrealTestContext.factory,
       migrationsDir,
-      namespace: surrealTestContext.namespace,
-      database: surrealTestContext.database,
     });
     await surrealMigrationService.migrate();
   }
@@ -185,18 +184,15 @@ export function createHashService(keys: EncryptionKeyFile): HashService {
 /**
  * Creates the SettingsService and bootstraps global settings.
  * Requires SurrealDB connection factory and encryption service.
+ * Uses the factory's default namespace/database.
  */
 export async function createSettingsService(
   encryptionService: VersionedEncryptionService,
   surrealFactory: SurrealConnectionFactory,
-  namespace?: string,
-  database?: string
 ): Promise<SettingsService> {
   const settingsService = new SettingsService({
     surrealFactory,
     encryptionService,
-    namespace,
-    database,
   });
   await settingsService.bootstrapGlobalSettings();
   return settingsService;
