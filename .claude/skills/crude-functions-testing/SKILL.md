@@ -45,15 +45,57 @@ Skip TestSetupBuilder for:
 - **Single-class unit tests** - Testing one service in isolation
 - **Low-level utilities** - Simple helpers, validators, formatters
 
+### integrationTest() Helper
+
+**Location:** `src/test/test_helpers.ts`
+
+When using TestSetupBuilder, you **must use `integrationTest()`** instead of `Deno.test()`.
+
+**Why:** TestSetupBuilder uses a shared SurrealDB process for performance. Deno's test sanitizer treats this shared infrastructure as a "leak" since it persists across tests. The `integrationTest()` wrapper disables the resource and ops sanitizers to allow this.
+
+```typescript
+import { integrationTest } from "@/test/test_helpers.ts";
+import { TestSetupBuilder } from "@/test/test_setup_builder.ts";
+import { expect } from "@std/expect";
+
+// ✓ Correct - uses integrationTest for TestSetupBuilder tests
+integrationTest("RoutesService.getAll returns empty initially", async () => {
+  const ctx = await TestSetupBuilder.create().withRoutes().build();
+  try {
+    const routes = await ctx.routesService.getAll();
+    expect(routes).toEqual([]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ✗ Wrong - Deno.test will fail with sanitizer errors
+Deno.test("This will fail", async () => {
+  const ctx = await TestSetupBuilder.create().withRoutes().build();
+  // ... sanitizer errors about leaked resources
+});
+```
+
+**When to use `integrationTest()`:**
+- Any test using TestSetupBuilder
+- Tests with long-lived shared infrastructure
+- Tests needing disabled sanitizers
+
+**When to use `Deno.test()`:**
+- Pure function tests (no infrastructure)
+- Simple helper-based unit tests that don't use TestSetupBuilder
+- Tests that fully clean up all resources
+
 ### How to Use TestSetupBuilder
 
 #### Basic Pattern
 
 ```typescript
+import { integrationTest } from "@/test/test_helpers.ts";
 import { TestSetupBuilder } from "@/test/test_setup_builder.ts";
 import { expect } from "@std/expect";
 
-Deno.test("RoutesService.getAll returns empty array initially", async () => {
+integrationTest("RoutesService.getAll returns empty array initially", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()  // All services
     .build();
@@ -73,17 +115,41 @@ Deno.test("RoutesService.getAll returns empty array initially", async () => {
 // Minimal - just metrics
 .withMetrics()  // → ExecutionMetricsService + MetricsStateService
 
+// Encryption only
+.withEncryption()  // → EncryptionService + HashService
+
 // Settings (auto-enables encryption)
 .withSettings()  // → SettingsService + EncryptionService + HashService
 
 // Logs (auto-enables settings)
 .withLogs()  // → ConsoleLogService + SettingsService + encryption
 
+// Routes (auto-enables files)
+.withRoutes()  // → RoutesService + FileService
+
+// Files only
+.withFiles()  // → FileService
+
+// API Keys (auto-enables encryption)
+.withApiKeys()  // → ApiKeyService + EncryptionService + HashService
+
 // Secrets (auto-enables encryption)
 .withSecrets()  // → SecretsService + EncryptionService
 
 // Users (auto-enables auth)
 .withUsers()  // → UserService + Auth + encryption
+
+// Instance ID
+.withInstanceId()  // → InstanceIdService
+
+// Job Queue (auto-enables instanceId)
+.withJobQueue()  // → JobQueueService + InstanceIdService
+
+// Scheduling (auto-enables jobQueue)
+.withScheduling()  // → SchedulingService + JobQueueService + InstanceIdService
+
+// Code Sources (auto-enables scheduling, encryption)
+.withCodeSources()  // → CodeSourceService + SchedulingService + encryption
 
 // Everything
 .withAll()  // → All services
@@ -104,6 +170,10 @@ Deno.test("RoutesService.getAll returns empty array initially", async () => {
 .withSecretsService()
 .withAuth()
 .withUserService()
+.withInstanceIdService()
+.withJobQueueService()
+.withSchedulingService()
+.withCodeSourceService()
 ```
 
 #### Deferred Data Pattern
@@ -121,6 +191,31 @@ const ctx = await TestSetupBuilder.create()
 // All data created in correct order with FK constraints satisfied
 const routes = await ctx.routesService.getAll();
 expect(routes.length).toBe(1);
+```
+
+**Available deferred data methods:**
+
+```typescript
+// Users
+.withAdminUser("admin@example.com", "password123", ["admin"])
+
+// API Keys
+.withApiKeyGroup("group-name", "optional description")
+.withApiKey("group-name", "key-value", "optional-name", "optional-description")
+
+// Routes and Files
+.withRoute("/path", "filename.ts", { methods: ["GET", "POST"] })
+.withFile("filename.ts", "export default () => 'Hello'")
+
+// Settings
+.withSetting("setting.name", "value")
+
+// Logs and Metrics
+.withConsoleLog({ routeName: "test", level: "info", message: "log message" })
+.withMetric({ routeName: "test", executionTimeMs: 100, success: true })
+
+// Jobs
+.withJob({ name: "test-job", ... })
 ```
 
 #### Auto-Dependency Resolution
@@ -167,6 +262,116 @@ const ctx = await TestSetupBuilder.create()
   .build();
 ```
 
+## SurrealDB Testing
+
+### Overview
+
+Tests use a **shared SurrealDB process** managed by `SharedSurrealManager`:
+- **Singleton process** - One SurrealDB instance shared across all tests for performance
+- **Namespace isolation** - Each test gets a unique namespace (UUID-based) for data isolation
+- **Memory mode** - Runs in memory for speed
+- **Auto-cleanup** - Namespaces are deleted per-test, process cleaned up on exit
+
+**Location:** `src/test/shared_surreal_manager.ts`
+
+### SurrealDB Context Properties
+
+All test contexts include these SurrealDB-related properties:
+
+```typescript
+interface BaseTestContext {
+  // ... SQLite properties ...
+
+  // SurrealDB properties (always available)
+  surrealDb: Surreal;              // Raw Surreal SDK connection to test namespace
+  surrealFactory: SurrealConnectionFactory;  // Factory for creating new connections
+  surrealNamespace: string;        // Unique namespace (e.g., "test_abc123...")
+  surrealDatabase: string;         // Database name (same as namespace)
+
+  cleanup: () => Promise<void>;    // Cleans up namespace and resources
+}
+```
+
+### Infrastructure Control Methods
+
+For testing migration logic or customizing the test environment:
+
+```typescript
+// Custom migrations directory (default: ./migrations)
+.withMigrationsDir("/path/to/migrations")
+
+// Skip SQLite migrations during build
+.withoutSQLiteMigrations()
+
+// Skip SurrealDB migrations during build
+.withoutSurrealMigrations()
+
+// Only base context - no services enabled
+.withBaseOnly()
+```
+
+### Typical SurrealDB Test Pattern
+
+From `src/database/surreal_migration_service_test.ts`:
+
+```typescript
+import { integrationTest } from "@/test/test_helpers.ts";
+import { TestSetupBuilder } from "@/test/test_setup_builder.ts";
+import { expect } from "@std/expect";
+
+integrationTest("migrate applies all migrations on fresh database", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  try {
+    // Write test migration files
+    await Deno.writeTextFile(
+      `${tempMigrationsDir}/000-init.surql`,
+      `
+      DEFINE TABLE users SCHEMAFULL;
+      DEFINE FIELD name ON users TYPE string;
+      `
+    );
+
+    const ctx = await TestSetupBuilder.create()
+      .withMigrationsDir(tempMigrationsDir)
+      .withoutSQLiteMigrations()       // Don't run SQLite migrations
+      .withoutSurrealMigrations()      // Don't auto-run SurrealDB migrations
+      .withBaseOnly()                  // Just base context, no services
+      .build();
+
+    try {
+      // Create migration service with SurrealDB context
+      const migrationService = new SurrealMigrationService({
+        connectionFactory: ctx.surrealFactory,
+        migrationsDir: tempMigrationsDir,
+        namespace: ctx.surrealNamespace,
+        database: ctx.surrealDatabase,
+      });
+
+      // Run migrations
+      const result = await migrationService.migrate();
+      expect(result.appliedCount).toBe(1);
+
+      // Query SurrealDB directly to verify
+      const [users] = await ctx.surrealDb.query<[unknown[]]>("SELECT * FROM users");
+      expect(Array.isArray(users)).toBe(true);
+    } finally {
+      await ctx.cleanup();  // Inner cleanup - SurrealDB namespace + SQLite
+    }
+  } finally {
+    await Deno.remove(tempMigrationsDir, { recursive: true });  // Outer cleanup - temp dir
+  }
+});
+```
+
+### Best Practices for SurrealDB Tests
+
+1. **Always use `integrationTest()`** - Required for shared SurrealDB infrastructure
+2. **Use nested try-finally** - Outer for temp resources, inner for ctx.cleanup()
+3. **Use `.withBaseOnly()` for migration tests** - Prevents auto-running migrations you're testing
+4. **Query `ctx.surrealDb` directly** - Verify state after operations
+5. **Namespace isolation is automatic** - No manual cleanup needed beyond `ctx.cleanup()`
+
 ## Test Structure Patterns
 
 ### File Naming
@@ -193,8 +398,8 @@ Deno.test("validateRouteName rejects invalid names", () => {
   expect(validateRouteName("hello world")).toBe(false);  // Space
 });
 
-// Group 2: Basic CRUD operations
-Deno.test("RoutesService.addRoute creates new route", async () => {
+// Group 2: Basic CRUD operations (uses integrationTest for TestSetupBuilder)
+integrationTest("RoutesService.addRoute creates new route", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute("test", "test.ts", { methods: ["GET"] });
@@ -206,7 +411,7 @@ Deno.test("RoutesService.addRoute creates new route", async () => {
 });
 
 // Group 3: Edge cases and errors
-Deno.test("RoutesService.addRoute rejects duplicate names", async () => {
+integrationTest("RoutesService.addRoute rejects duplicate names", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await ctx.routesService.addRoute("test", "test.ts", { methods: ["GET"] });
@@ -219,7 +424,7 @@ Deno.test("RoutesService.addRoute rejects duplicate names", async () => {
 });
 
 // Group 4: Concurrency and state management
-Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
+integrationTest("concurrent rebuildIfNeeded calls share single rebuild", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     // Test concurrent access patterns
@@ -234,7 +439,7 @@ Deno.test("concurrent rebuildIfNeeded calls share single rebuild", async () => {
 });
 
 // Group 5: Integration scenarios
-Deno.test("full workflow: create route, execute, log metrics", async () => {
+integrationTest("full workflow: create route, execute, log metrics", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
   try {
     // Multi-service integration test
@@ -328,7 +533,7 @@ Deno.test("MyService processes data correctly", async () => {
 For multi-service tests, use TestSetupBuilder to get real implementations:
 
 ```typescript
-Deno.test("Routes and files work together", async () => {
+integrationTest("Routes and files work together", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoutes()  // Also enables FileService
     .build();
@@ -400,7 +605,7 @@ Deno.test("Middleware rejects unauthenticated requests", async () => {
 ### Always Use Try-Finally Cleanup
 
 ```typescript
-Deno.test("Example test", async () => {
+integrationTest("Example test", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
   try {
     // Test logic here
@@ -470,7 +675,7 @@ expect(
 For services with concurrent access patterns, test thoroughly:
 
 ```typescript
-Deno.test("concurrent writes are serialized", async () => {
+integrationTest("concurrent writes are serialized", async () => {
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     const writes = Array.from({ length: 10 }, (_, i) =>
@@ -521,7 +726,7 @@ const ctx = await TestSetupBuilder.create()
 
 ```typescript
 // Bad - missing cleanup on early return
-Deno.test("Bad test", async () => {
+integrationTest("Bad test", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
   if (someCondition) {
     return;  // ❌ Leaked resources!
@@ -530,7 +735,7 @@ Deno.test("Bad test", async () => {
 });
 
 // Good - try-finally ensures cleanup
-Deno.test("Good test", async () => {
+integrationTest("Good test", async () => {
   const ctx = await TestSetupBuilder.create().withAll().build();
   try {
     if (someCondition) {
@@ -579,11 +784,14 @@ expect(processCompleted).toBe(true);  // ✅ Deterministic
 - **Type definitions:** `src/test/types.ts`
 - **Service factories:** `src/test/service_factories.ts`
 - **Dependency graph:** `src/test/dependency_graph.ts`
+- **SharedSurrealManager:** `src/test/shared_surreal_manager.ts`
+- **Test helpers:** `src/test/test_helpers.ts`
 
 ## Example Test Files
 
-- **Integration test:** `src/routes/routes_service_test.ts` (722 lines, comprehensive)
+- **Integration test:** `src/routes/routes_service_test.ts` (comprehensive, covers all test groups)
 - **Unit test (helper pattern):** `src/env/env_isolator_test.ts`
 - **Unit test (encryption):** `src/encryption/encryption_service_test.ts`
 - **Manual mocking:** `src/auth/auth_middleware_test.ts`
 - **Deferred data pattern:** `src/logs/console_log_service_test.ts`
+- **SurrealDB migration test:** `src/database/surreal_migration_service_test.ts`
