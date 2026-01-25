@@ -1,8 +1,8 @@
 import { betterAuth } from "better-auth";
 import { admin } from "better-auth/plugins";
 import { createAccessControl } from "better-auth/plugins/access";
-import { Database } from "@db/sqlite";
-import { DenoSqlite3Dialect } from "@soapbox/kysely-deno-sqlite";
+import { surrealAdapter } from "./surreal_adapter.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 
 /**
  * Access control statement defining resources and their available actions.
@@ -34,8 +34,8 @@ const userRead = ac.newRole({
  * Options for creating the Better Auth instance.
  */
 export interface AuthOptions {
-  /** Path to the SQLite database file */
-  databasePath: string;
+  /** SurrealDB connection factory for database access */
+  surrealFactory: SurrealConnectionFactory;
   /** Base URL for the application (optional - auto-detected from requests if not set) */
   baseUrl?: string;
   /** Secret key for signing sessions */
@@ -95,20 +95,14 @@ export function getTrustedOrigins(
 /**
  * Creates and configures the Better Auth instance.
  *
- * Uses DenoSqlite3Dialect for Kysely compatibility with Deno's @db/sqlite.
- * Creates its own SQLite connection - safe because SQLite WAL mode supports
- * multiple connections.
+ * Uses SurrealDB adapter for database operations.
+ * The adapter handles all record ID conversions and foreign key relationships.
  */
 export function createAuth(options: AuthOptions) {
-  // Create a Kysely dialect compatible with Deno's @db/sqlite
-  const sqliteDb = new Database(options.databasePath);
-  const dialect = new DenoSqlite3Dialect({ database: sqliteDb });
-
   return betterAuth({
-    database: {
-      dialect,
-      type: "sqlite",
-    },
+    database: surrealAdapter({
+      surrealFactory: options.surrealFactory,
+    }),
     baseURL: options.baseUrl,
     secret: options.secret,
 
@@ -130,9 +124,9 @@ export function createAuth(options: AuthOptions) {
       return getTrustedOrigins(options.baseUrl, request);
     },
 
-    // Performance: Use JOINs for session lookups (2-3x faster)
+    // SurrealDB adapter doesn't support JOINs, so disable this
     experimental: {
-      joins: true,
+      joins: false,
     },
 
     // Admin plugin for user management

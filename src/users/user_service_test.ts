@@ -1,15 +1,18 @@
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
-import type { DatabaseService } from "../database/database_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { RecordId } from "surrealdb";
 
 /**
- * Helper to insert a user directly in the database with explicit control over all fields.
+ * Helper to insert a user directly in SurrealDB with explicit control over all fields.
  * Used for edge case tests (null names, explicit timestamps, banned users, whitespace roles).
  * For standard tests, use TestSetupBuilder.withAdminUser() instead.
+ *
+ * Note: SurrealDB uses NONE for optional fields, not NULL. We omit fields that are undefined/null.
  */
 async function insertUserDirectly(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   options: {
     email: string;
     name?: string | null;
@@ -21,39 +24,42 @@ async function insertUserDirectly(
   }
 ): Promise<string> {
   const userId = crypto.randomUUID();
-  const roleString = options.roles?.join(",") ?? null;
+  const roleString = options.roles?.join(",") ?? undefined;
 
-  if (options.createdAt) {
-    await db.execute(
-      `INSERT INTO user (id, email, emailVerified, name, role, banned, banReason, banExpires, createdAt, updatedAt)
-       VALUES (?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        userId,
-        options.email,
-        options.name ?? null,
-        roleString,
-        options.banned ? 1 : 0,
-        options.banReason ?? null,
-        options.banExpires ?? null,
-        options.createdAt,
-        options.createdAt,
-      ]
+  await surrealFactory.withSystemConnection({}, async (db) => {
+    const userRecordId = new RecordId("user", userId);
+
+    // Build content object - only include non-null values
+    // SurrealDB uses NONE for optional fields, which means we omit them
+    const content: Record<string, unknown> = {
+      email: options.email,
+      emailVerified: false,
+      banned: options.banned ?? false,
+    };
+
+    // Only add optional fields if they have values
+    if (options.name !== undefined && options.name !== null) {
+      content.name = options.name;
+    }
+    if (roleString !== undefined) {
+      content.role = roleString;
+    }
+    if (options.banReason !== undefined) {
+      content.banReason = options.banReason;
+    }
+    if (options.banExpires !== undefined) {
+      content.banExpires = new Date(options.banExpires);
+    }
+    if (options.createdAt !== undefined) {
+      content.createdAt = new Date(options.createdAt);
+    }
+
+    await db.query(
+      `CREATE $userRecordId CONTENT $content`,
+      { userRecordId, content }
     );
-  } else {
-    await db.execute(
-      `INSERT INTO user (id, email, emailVerified, name, role, banned, banReason, banExpires, createdAt, updatedAt)
-       VALUES (?, ?, 0, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-      [
-        userId,
-        options.email,
-        options.name ?? null,
-        roleString,
-        options.banned ? 1 : 0,
-        options.banReason ?? null,
-        options.banExpires ?? null,
-      ]
-    );
-  }
+  });
+
   return userId;
 }
 
@@ -81,21 +87,21 @@ integrationTest("UserService.getAll returns all users ordered by createdAt DESC"
 
   try {
     // Create users with explicit timestamps to ensure proper ordering
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "user1@test.com",
       name: "User 1",
       roles: ["userRead"],
       createdAt: "2024-01-01 10:00:00",
     });
 
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "user2@test.com",
       name: "User 2",
       roles: ["userMgmt"],
       createdAt: "2024-01-02 10:00:00",
     });
 
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "user3@test.com",
       name: "User 3",
       roles: ["permanent", "userMgmt"],
@@ -181,7 +187,7 @@ integrationTest("UserService.getByEmail returns user when found (case-insensitiv
 
   try {
     // Use insertUserDirectly to preserve exact email case
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "Test@Example.COM",
       name: "Test User",
       roles: [],
@@ -288,13 +294,13 @@ integrationTest("UserService.getUserCount returns correct count", async () => {
   try {
     expect(await ctx.userService.getUserCount()).toBe(0);
 
-    await insertUserDirectly(ctx.db, { email: "user1@test.com", name: "User 1", roles: [] });
+    await insertUserDirectly(ctx.surrealFactory, { email: "user1@test.com", name: "User 1", roles: [] });
     expect(await ctx.userService.getUserCount()).toBe(1);
 
-    await insertUserDirectly(ctx.db, { email: "user2@test.com", name: "User 2", roles: [] });
+    await insertUserDirectly(ctx.surrealFactory, { email: "user2@test.com", name: "User 2", roles: [] });
     expect(await ctx.userService.getUserCount()).toBe(2);
 
-    await insertUserDirectly(ctx.db, { email: "user3@test.com", name: "User 3", roles: [] });
+    await insertUserDirectly(ctx.surrealFactory, { email: "user3@test.com", name: "User 3", roles: [] });
     expect(await ctx.userService.getUserCount()).toBe(3);
   } finally {
     await ctx.cleanup();
@@ -325,7 +331,7 @@ integrationTest("UserService.userExistsByEmail returns correct boolean (case-ins
 
   try {
     // Use insertUserDirectly to preserve exact email case
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "Test@Example.COM",
       name: "Test User",
       roles: [],
@@ -478,8 +484,14 @@ integrationTest("UserService.deleteUser allows deleting non-permanent users", as
     const users = await ctx.userService.getAll();
     const userId = users[0].id;
 
-    // Delete directly from DB since Better Auth removeUser requires authentication
-    await ctx.db.execute("DELETE FROM user WHERE id = ?", [userId]);
+    // Delete directly from SurrealDB since Better Auth removeUser requires authentication
+    await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const userRecordId = new RecordId("user", userId);
+      // Delete related sessions and accounts first (cascade)
+      await db.query(`DELETE FROM session WHERE userId = $userRecordId`, { userRecordId });
+      await db.query(`DELETE FROM account WHERE userId = $userRecordId`, { userRecordId });
+      await db.query(`DELETE $userRecordId`, { userRecordId });
+    });
 
     // Verify user was deleted
     expect(await ctx.userService.userExists(userId)).toBe(false);
@@ -552,8 +564,11 @@ integrationTest("UserService.addRole is idempotent", async () => {
     const users = await ctx.userService.getAll();
     const userId = users[0].id;
 
-    // Directly update role in database to simulate addRole
-    await ctx.db.execute("UPDATE user SET role = ? WHERE id = ?", ["userRead,userMgmt", userId]);
+    // Directly update role in SurrealDB to simulate addRole
+    await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const userRecordId = new RecordId("user", userId);
+      await db.query(`UPDATE $userRecordId SET role = 'userRead,userMgmt'`, { userRecordId });
+    });
     const user = await ctx.userService.getById(userId);
     expect(user!.roles).toContain("userMgmt");
     expect(user!.roles).toContain("userRead");
@@ -600,8 +615,11 @@ integrationTest("UserService.removeRole is idempotent", async () => {
     const users = await ctx.userService.getAll();
     const userId = users[0].id;
 
-    // Directly update role in database to simulate removeRole
-    await ctx.db.execute("UPDATE user SET role = ? WHERE id = ?", ["userMgmt", userId]);
+    // Directly update role in SurrealDB to simulate removeRole
+    await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const userRecordId = new RecordId("user", userId);
+      await db.query(`UPDATE $userRecordId SET role = 'userMgmt'`, { userRecordId });
+    });
     const user = await ctx.userService.getById(userId);
     expect(user!.roles).not.toContain("userRead");
     expect(user!.roles).toContain("userMgmt");
@@ -694,7 +712,7 @@ integrationTest("UserService.getAll handles users with null names gracefully", a
 
   try {
     // Create user with null name directly
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "test@example.com",
       name: null,
       roles: [],
@@ -715,13 +733,21 @@ integrationTest("UserService correctly parses roles with whitespace", async () =
     .build();
 
   try {
-    // Create user with roles that have extra whitespace - must use direct DB
+    // Create user with roles that have extra whitespace - must use SurrealDB directly
     const userId = crypto.randomUUID();
-    await ctx.db.execute(
-      `INSERT INTO user (id, email, emailVerified, name, role, banned, createdAt, updatedAt)
-       VALUES (?, ?, 0, ?, ?, 0, datetime('now'), datetime('now'))`,
-      [userId, "test@example.com", "Test User", " permanent , userMgmt "]
-    );
+    await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const userRecordId = new RecordId("user", userId);
+      await db.query(
+        `CREATE $userRecordId CONTENT {
+          email: 'test@example.com',
+          emailVerified: false,
+          name: 'Test User',
+          role: ' permanent , userMgmt ',
+          banned: false
+        }`,
+        { userRecordId }
+      );
+    });
 
     const user = await ctx.userService.getById(userId);
 
@@ -738,7 +764,7 @@ integrationTest("UserService.getAll handles banned users correctly", async () =>
     .build();
 
   try {
-    const userId = await insertUserDirectly(ctx.db, {
+    const userId = await insertUserDirectly(ctx.surrealFactory, {
       email: "banned@example.com",
       name: "Banned User",
       roles: [],
@@ -767,7 +793,7 @@ integrationTest("UserService.getAll handles date parsing correctly", async () =>
   try {
     // Create user with specific ISO timestamp
     const testDate = "2024-06-15T14:30:00Z";
-    await insertUserDirectly(ctx.db, {
+    await insertUserDirectly(ctx.surrealFactory, {
       email: "test@example.com",
       name: "Test User",
       roles: [],

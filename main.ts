@@ -260,17 +260,22 @@ async function getIntSetting(name: typeof SettingNames[keyof typeof SettingNames
   return isNaN(parsed) ? defaultValue : parsed;
 }
 
-// Check if any users exist (determines whether sign-up is enabled)
-const userExists = await db.queryOne<{ id: string }>("SELECT id FROM user LIMIT 1");
-const hasUsers = userExists !== null;
+// Check if any users exist in SurrealDB (determines whether sign-up is enabled)
+const hasUsers = await surrealFactory.withSystemConnection({}, async (db) => {
+  const [result] = await db.query<[{ id: unknown }[]]>(
+    `SELECT id FROM user LIMIT 1`
+  );
+  return (result?.length ?? 0) > 0;
+});
 
 // Initialize Better Auth
 // baseUrl is optional - when not set, Better Auth auto-detects from request headers
 // trustedOrigins dynamically resolves from baseUrl or request origin
 // Sign-up is only enabled during first-run setup (when no users exist)
 // Auth secret is stored in the encryption keys file (auto-generated on first run)
+// Uses SurrealDB adapter for all auth data storage
 const auth = createAuth({
-  databasePath: "./data/database.db",
+  surrealFactory,
   baseUrl: Deno.env.get("AUTH_BASE_URL") || undefined,
   secret: encryptionKeys.better_auth_secret,
   hasUsers,
@@ -278,7 +283,7 @@ const auth = createAuth({
 
 // Initialize user service
 const userService = new UserService({
-  db,
+  surrealFactory,
   auth,
 });
 

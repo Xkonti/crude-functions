@@ -276,7 +276,7 @@ async function createTestApp(
 
   const app = new Hono();
   const auth = createMockAuth({ authenticated });
-  const userService = new UserService({ db, auth });
+  const userService = new UserService({ surrealFactory: surrealTestContext.factory, auth });
   app.route(
     "/web",
     createWebRoutes({ auth, db, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService })
