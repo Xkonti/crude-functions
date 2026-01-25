@@ -222,7 +222,8 @@ integrationTest("pool tracks reference count correctly", async () => {
         // Start another operation
         const nested = ctx.surrealFactory.withSystemConnection(
           { namespace: ctx.surrealNamespace, database: ctx.surrealDatabase },
-          () => {
+          // deno-lint-ignore require-await
+          async () => {
             // Check refCount is 2
             const stats2 = ctx.surrealFactory.getPoolStats();
             expect(stats2?.totalRefCount).toBe(2);
@@ -408,7 +409,8 @@ integrationTest("withSystemConnection throws when pool not initialized", () => {
   // Don't initialize pool
 
   expect(() => {
-    factory.withSystemConnection({}, () => {
+    // deno-lint-ignore require-await
+    factory.withSystemConnection({}, async () => {
       return "should not reach";
     });
   }).toThrow(SurrealPoolNotInitializedError);
@@ -424,7 +426,8 @@ integrationTest("pool handles callback errors without leaking connection", async
     await expect(
       ctx.surrealFactory.withSystemConnection(
         { namespace: ctx.surrealNamespace, database: ctx.surrealDatabase },
-        () => {
+        // deno-lint-ignore require-await
+        async () => {
           throw new Error("Intentional test error");
         }
       )
@@ -467,7 +470,8 @@ integrationTest("getPoolStats returns correct information", async () => {
     // During use
     await ctx.surrealFactory.withSystemConnection(
       { namespace: ctx.surrealNamespace, database: ctx.surrealDatabase },
-      () => {
+      // deno-lint-ignore require-await
+      async () => {
         stats = ctx.surrealFactory.getPoolStats();
         expect(stats?.activeConnections).toBe(1);
         expect(stats?.totalRefCount).toBe(1);
