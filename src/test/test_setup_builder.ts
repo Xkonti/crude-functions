@@ -785,17 +785,18 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 4: Create auth if needed
+    // Uses SurrealDB adapter for all auth data storage
     if (this.flags.auth || this.flags.userService) {
-      context.auth = createBetterAuth(databasePath, context.encryptionKeys);
+      context.auth = createBetterAuth(surrealFactory, context.encryptionKeys);
     }
 
     // STEP 5: Create user service if needed
     if (this.flags.userService) {
-      context.userService = createUserService(db, context.auth);
+      context.userService = createUserService(surrealFactory, context.auth);
 
-      // Create deferred users
+      // Create deferred users directly in SurrealDB
       for (const user of this.deferredUsers) {
-        await createUserDirectly(db, user.email, user.password, user.roles);
+        await createUserDirectly(surrealFactory, user.email, user.password, user.roles);
       }
     }
 

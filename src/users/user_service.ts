@@ -1,29 +1,29 @@
-import type { DatabaseService } from "../database/database_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { betterAuth } from "better-auth";
 import type { User, CreateUserData, UpdateUserData, UserSession } from "./types.ts";
+import { RecordId } from "surrealdb";
 
 /**
- * Raw database row type from the user table.
+ * Raw database row type from the SurrealDB user table.
  * Internal to the service - consumers never see this.
  */
-interface UserRow {
-  id: string;
+interface SurrealUserRow {
+  id: RecordId | string;
   email: string;
-  emailVerified: number; // SQLite boolean (0/1)
+  emailVerified: boolean;
   name: string | null;
   image: string | null;
-  role: string | null; // Comma-separated string
-  banned: number; // SQLite boolean (0/1)
+  role: string | null;
+  banned: boolean;
   banReason: string | null;
-  banExpires: string | null; // ISO 8601 timestamp
-  createdAt: string; // ISO 8601 timestamp
-  updatedAt: string; // ISO 8601 timestamp
-  [key: string]: unknown; // Index signature for Row compatibility
+  banExpires: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface UserServiceOptions {
-  /** Database service for querying user table */
-  db: DatabaseService;
+  /** SurrealDB connection factory for querying user table */
+  surrealFactory: SurrealConnectionFactory;
   /** Better Auth instance for Admin API calls */
   auth: ReturnType<typeof betterAuth>;
 }
@@ -37,11 +37,11 @@ export interface UserServiceOptions {
  * No caching - always reads from database for simplicity and consistency.
  */
 export class UserService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly auth: ReturnType<typeof betterAuth>;
 
   constructor(options: UserServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.auth = options.auth;
   }
 
@@ -52,11 +52,12 @@ export class UserService {
    * @returns Array of users, ordered by creation date (newest first)
    */
   async getAll(): Promise<User[]> {
-    const rows = await this.db.queryAll<UserRow>(
-      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
-       FROM user
-       ORDER BY createdAt DESC`
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[SurrealUserRow[]]>(
+        `SELECT * FROM user ORDER BY createdAt DESC`
+      );
+      return result ?? [];
+    });
 
     return rows.map((row) => this.rowToUser(row));
   }
@@ -67,12 +68,14 @@ export class UserService {
    * @returns User object or null if not found
    */
   async getById(id: string): Promise<User | null> {
-    const row = await this.db.queryOne<UserRow>(
-      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
-       FROM user
-       WHERE id = ?`,
-      [id]
-    );
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const recordId = new RecordId("user", id);
+      const [result] = await db.query<[SurrealUserRow | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId }
+      );
+      return result ?? null;
+    });
 
     return row ? this.rowToUser(row) : null;
   }
@@ -83,12 +86,14 @@ export class UserService {
    * @returns User object or null if not found
    */
   async getByEmail(email: string): Promise<User | null> {
-    const row = await this.db.queryOne<UserRow>(
-      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
-       FROM user
-       WHERE email = ? COLLATE NOCASE`,
-      [email]
-    );
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // SurrealDB uses string::lowercase for case-insensitive comparison
+      const [result] = await db.query<[SurrealUserRow[]]>(
+        `SELECT * FROM user WHERE string::lowercase(email) = string::lowercase($email) LIMIT 1`,
+        { email }
+      );
+      return result?.[0] ?? null;
+    });
 
     return row ? this.rowToUser(row) : null;
   }
@@ -99,13 +104,15 @@ export class UserService {
    * @returns Array of users with that role
    */
   async getUsersByRole(role: string): Promise<User[]> {
-    const rows = await this.db.queryAll<UserRow>(
-      `SELECT id, email, emailVerified, name, image, role, banned, banReason, banExpires, createdAt, updatedAt
-       FROM user
-       WHERE role LIKE ?
-       ORDER BY createdAt DESC`,
-      [`%${role}%`]
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Use CONTAINS to check if role string contains the role
+      // Then filter in-memory for exact match
+      const [result] = await db.query<[SurrealUserRow[]]>(
+        `SELECT * FROM user WHERE role CONTAINS $role ORDER BY createdAt DESC`,
+        { role }
+      );
+      return result ?? [];
+    });
 
     // Filter in-memory to ensure exact role match (not substring)
     const users = rows.map((row) => this.rowToUser(row));
@@ -120,10 +127,12 @@ export class UserService {
    * @returns True if at least one user exists
    */
   async hasUsers(): Promise<boolean> {
-    const row = await this.db.queryOne<{ id: string }>(
-      "SELECT id FROM user LIMIT 1"
-    );
-    return row !== null;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[{ id: RecordId }[]]>(
+        `SELECT id FROM user LIMIT 1`
+      );
+      return (result?.length ?? 0) > 0;
+    });
   }
 
   /**
@@ -131,10 +140,12 @@ export class UserService {
    * @returns Number of users in the database
    */
   async getUserCount(): Promise<number> {
-    const result = await this.db.queryOne<{ count: number }>(
-      "SELECT COUNT(*) as count FROM user"
-    );
-    return result?.count ?? 0;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[{ count: number }[]]>(
+        `SELECT count() FROM user GROUP ALL`
+      );
+      return result?.[0]?.count ?? 0;
+    });
   }
 
   /**
@@ -143,11 +154,13 @@ export class UserService {
    * @returns True if user exists
    */
   async userExistsByEmail(email: string): Promise<boolean> {
-    const row = await this.db.queryOne<{ id: string }>(
-      "SELECT id FROM user WHERE email = ? COLLATE NOCASE LIMIT 1",
-      [email]
-    );
-    return row !== null;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[{ id: RecordId }[]]>(
+        `SELECT id FROM user WHERE string::lowercase(email) = string::lowercase($email) LIMIT 1`,
+        { email }
+      );
+      return (result?.length ?? 0) > 0;
+    });
   }
 
   /**
@@ -156,11 +169,14 @@ export class UserService {
    * @returns True if user exists
    */
   async userExists(id: string): Promise<boolean> {
-    const row = await this.db.queryOne<{ id: string }>(
-      "SELECT id FROM user WHERE id = ? LIMIT 1",
-      [id]
-    );
-    return row !== null;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const recordId = new RecordId("user", id);
+      const [result] = await db.query<[SurrealUserRow | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId }
+      );
+      return result !== null && result !== undefined;
+    });
   }
 
   // ============== Write Operations (Better Auth Admin API) ==============
@@ -459,24 +475,65 @@ export class UserService {
   // ============== Private Helper Methods ==============
 
   /**
+   * Extract string ID from SurrealDB RecordId.
+   */
+  private extractId(id: RecordId | string): string {
+    if (typeof id === "string") {
+      // String might be in "table:id" format
+      if (id.includes(":")) {
+        return id.split(":")[1];
+      }
+      return id;
+    }
+    // RecordId object
+    return String(id.id);
+  }
+
+  /**
+   * Convert a value to Date, handling SurrealDB's datetime type.
+   * SurrealDB may return Date objects or its own DateTime wrapper.
+   */
+  private toDate(value: Date | unknown): Date {
+    if (value instanceof Date) {
+      return value;
+    }
+    // SurrealDB's DateTime has a toDate() method
+    if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+      return value.toDate() as Date;
+    }
+    // Try to construct from string/number
+    return new Date(value as string | number);
+  }
+
+  /**
+   * Convert an optional value to Date or undefined.
+   */
+  private toOptionalDate(value: Date | unknown | null): Date | undefined {
+    if (value === null || value === undefined) {
+      return undefined;
+    }
+    return this.toDate(value);
+  }
+
+  /**
    * Convert database row to public User type.
-   * Handles role parsing, boolean conversion, and date parsing.
+   * Handles role parsing and SurrealDB type conversions.
    * @param row - Raw database row
    * @returns Typed User object
    */
-  private rowToUser(row: UserRow): User {
+  private rowToUser(row: SurrealUserRow): User {
     return {
-      id: row.id,
+      id: this.extractId(row.id),
       email: row.email,
-      emailVerified: row.emailVerified === 1,
+      emailVerified: row.emailVerified,
       name: row.name ?? undefined,
       image: row.image ?? undefined,
       roles: row.role ? row.role.split(",").map((r) => r.trim()) : [],
-      banned: row.banned === 1,
+      banned: row.banned,
       banReason: row.banReason ?? undefined,
-      banExpires: row.banExpires ? new Date(row.banExpires) : undefined,
-      createdAt: new Date(row.createdAt),
-      updatedAt: new Date(row.updatedAt),
+      banExpires: this.toOptionalDate(row.banExpires),
+      createdAt: this.toDate(row.createdAt),
+      updatedAt: this.toDate(row.updatedAt),
     };
   }
 

@@ -160,7 +160,7 @@ integrationTest("createAuth with hasUsers=false allows sign-up", async () => {
   try {
     // Create auth with hasUsers=false (sign-up enabled)
     const auth = createAuth({
-      databasePath: ctx.databasePath,
+      surrealFactory: ctx.surrealFactory,
       secret: "test-secret-key-for-testing-purposes",
       hasUsers: false,
     });
@@ -180,7 +180,7 @@ integrationTest("createAuth trusted origins integration", async () => {
   try {
     // Create auth with explicit baseUrl
     const auth = createAuth({
-      databasePath: ctx.databasePath,
+      surrealFactory: ctx.surrealFactory,
       baseUrl: "https://myapp.example.com",
       secret: "test-secret-key-for-testing-purposes",
       hasUsers: false,

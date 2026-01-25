@@ -301,14 +301,14 @@ export function createSecretsService(
 
 /**
  * Creates the Better Auth instance.
- * Requires database path and encryption keys.
+ * Requires SurrealDB connection factory and encryption keys.
  */
 export function createBetterAuth(
-  databasePath: string,
+  surrealFactory: SurrealConnectionFactory,
   encryptionKeys: EncryptionKeyFile
 ): ReturnType<typeof betterAuth> {
   return createAuth({
-    databasePath,
+    surrealFactory,
     secret: encryptionKeys.better_auth_secret,
     hasUsers: false, // Always enable sign-up for tests
   });
@@ -316,13 +316,13 @@ export function createBetterAuth(
 
 /**
  * Creates the UserService.
- * Requires database and auth instance.
+ * Requires SurrealDB connection factory and auth instance.
  */
 export function createUserService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   auth: ReturnType<typeof betterAuth>
 ): UserService {
-  return new UserService({ db, auth });
+  return new UserService({ surrealFactory, auth });
 }
 
 // =============================================================================
@@ -330,36 +330,65 @@ export function createUserService(
 // =============================================================================
 
 /**
- * Creates a user directly in the database (bypasses Better Auth API).
+ * Creates a user directly in SurrealDB (bypasses Better Auth API).
  * Uses bcrypt for password hashing to match Better Auth's format.
+ *
+ * Note: SurrealDB uses NONE for optional fields, not NULL.
  */
 export async function createUserDirectly(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   email: string,
   password: string,
   roles: string[] = ["userMgmt"]
 ): Promise<string> {
   const userId = crypto.randomUUID();
-  const roleString = roles.join(",");
-
-  // Insert user record
-  await db.execute(
-    `INSERT INTO user (id, email, emailVerified, name, role, banned, createdAt, updatedAt)
-     VALUES (?, ?, 0, ?, ?, 0, datetime('now'), datetime('now'))`,
-    [userId, email, email.split("@")[0], roleString || null]
-  );
+  // Only include role if roles array is non-empty
+  const roleString = roles.length > 0 ? roles.join(",") : undefined;
 
   // Hash password using bcrypt (Better Auth uses bcrypt internally)
   const { hash } = await import("@da/bcrypt");
   const hashedPassword = await hash(password);
 
-  // Insert account record with credential provider
-  const accountId = crypto.randomUUID();
-  await db.execute(
-    `INSERT INTO account (id, userId, accountId, providerId, password, createdAt, updatedAt)
-     VALUES (?, ?, ?, 'credential', ?, datetime('now'), datetime('now'))`,
-    [accountId, userId, email, hashedPassword]
-  );
+  await surrealFactory.withSystemConnection({}, async (db) => {
+    const { RecordId } = await import("surrealdb");
+
+    // Create user record with specific ID
+    const userRecordId = new RecordId("user", userId);
+
+    // Build content object - only include role if defined
+    const userContent: Record<string, unknown> = {
+      email,
+      emailVerified: false,
+      name: email.split("@")[0],
+      banned: false,
+    };
+    if (roleString !== undefined) {
+      userContent.role = roleString;
+    }
+
+    await db.query(
+      `CREATE $userRecordId CONTENT $userContent`,
+      { userRecordId, userContent }
+    );
+
+    // Create account record with credential provider
+    const accountId = crypto.randomUUID();
+    const accountRecordId = new RecordId("account", accountId);
+    await db.query(
+      `CREATE $accountRecordId CONTENT {
+        userId: $userRecordId,
+        accountId: $email,
+        providerId: 'credential',
+        password: $password
+      }`,
+      {
+        accountRecordId,
+        userRecordId,
+        email,
+        password: hashedPassword,
+      }
+    );
+  });
 
   return userId;
 }
