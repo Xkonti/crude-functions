@@ -870,7 +870,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 8.5: Create secrets service if needed
     if (this.flags.secretsService) {
-      context.secretsService = createSecretsService(db, context.encryptionService);
+      context.secretsService = createSecretsService(surrealFactory, context.encryptionService);
     }
 
     // STEP 9: Create console log service if needed (after routes exist for FK constraint)

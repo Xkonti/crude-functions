@@ -283,14 +283,14 @@ export function createApiKeyService(
 
 /**
  * Creates the SecretsService.
- * Requires database and encryption service.
+ * Requires SurrealDB connection factory and encryption service.
  */
 export function createSecretsService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   encryptionService: VersionedEncryptionService
 ): SecretsService {
   return new SecretsService({
-    db,
+    surrealFactory,
     encryptionService,
   });
 }

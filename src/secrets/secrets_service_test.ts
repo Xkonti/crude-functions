@@ -2,19 +2,19 @@ import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
 import { SecretsService } from "./secrets_service.ts";
-import { SecretScope } from "./types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
  * Helper to create SecretsService from TestSetupBuilder context.
- * SecretsService depends on db + encryptionService, which TestSetupBuilder provides
+ * SecretsService depends on surrealFactory + encryptionService, which TestSetupBuilder provides
  * when using .withEncryption() or any service that depends on encryption.
  */
 function createSecretsService(ctx: {
-  db: import("../database/database_service.ts").DatabaseService;
+  surrealFactory: import("../database/surreal_connection_factory.ts").SurrealConnectionFactory;
   encryptionService: import("../encryption/types.ts").IEncryptionService;
 }): SecretsService {
   return new SecretsService({
-    db: ctx.db,
+    surrealFactory: ctx.surrealFactory,
     encryptionService: ctx.encryptionService,
   });
 }
@@ -128,8 +128,8 @@ integrationTest("SecretsService.createGlobalSecret creates secret and returns in
     expect(secrets.length).toBe(1);
     expect(secrets[0].name).toBe("API_KEY");
     expect(secrets[0].comment).toBe("Test comment");
-    // getGlobalSecrets doesn't return values
-    expect("value" in secrets[0]).toBe(false);
+    expect(secrets[0].scopeType).toBe("global");
+    expect(secrets[0].value).toBe("secret-value");
   } finally {
     await ctx.cleanup();
   }
@@ -143,16 +143,15 @@ integrationTest("SecretsService.getGlobalSecretById returns secret with decrypte
     await service.createGlobalSecret("API_KEY", "my-secret-value", "Comment");
 
     const secrets = await service.getGlobalSecrets();
-    const secret = await service.getGlobalSecretById(secrets[0].id);
+    const secretId = recordIdToString(secrets[0].id);
+    const secret = await service.getGlobalSecretById(secretId);
 
     expect(secret).not.toBeNull();
     expect(secret!.name).toBe("API_KEY");
     expect(secret!.value).toBe("my-secret-value");
     expect(secret!.comment).toBe("Comment");
-    expect(secret!.scope).toBe(SecretScope.Global);
-    expect(secret!.functionId).toBeNull();
-    expect(secret!.apiGroupId).toBeNull();
-    expect(secret!.apiKeyId).toBeNull();
+    expect(secret!.scopeType).toBe("global");
+    expect(secret!.scopeRef).toBeNull();
   } finally {
     await ctx.cleanup();
   }
@@ -163,14 +162,14 @@ integrationTest("SecretsService.getGlobalSecretById returns null for nonexistent
 
   try {
     const service = createSecretsService(ctx);
-    const secret = await service.getGlobalSecretById(9999);
+    const secret = await service.getGlobalSecretById("nonexistent");
     expect(secret).toBeNull();
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("SecretsService.getGlobalSecretsWithValues returns all secrets with decrypted values", async () => {
+integrationTest("SecretsService.getGlobalSecrets returns all secrets with decrypted values", async () => {
   const ctx = await TestSetupBuilder.create().withEncryption().build();
 
   try {
@@ -178,7 +177,7 @@ integrationTest("SecretsService.getGlobalSecretsWithValues returns all secrets w
     await service.createGlobalSecret("SECRET_1", "value-1", "First");
     await service.createGlobalSecret("SECRET_2", "value-2", "Second");
 
-    const secrets = await service.getGlobalSecretsWithValues();
+    const secrets = await service.getGlobalSecrets();
     expect(secrets.length).toBe(2);
 
     // Sorted by name
@@ -214,9 +213,10 @@ integrationTest("SecretsService.updateGlobalSecret updates value and comment", a
     await service.createGlobalSecret("MY_SECRET", "old-value", "Old comment");
 
     const secrets = await service.getGlobalSecrets();
-    await service.updateGlobalSecret(secrets[0].id, "new-value", "New comment");
+    const secretId = recordIdToString(secrets[0].id);
+    await service.updateGlobalSecret(secretId, "new-value", "New comment");
 
-    const updated = await service.getGlobalSecretById(secrets[0].id);
+    const updated = await service.getGlobalSecretById(secretId);
     expect(updated!.value).toBe("new-value");
     expect(updated!.comment).toBe("New comment");
   } finally {
@@ -230,8 +230,8 @@ integrationTest("SecretsService.updateGlobalSecret throws for nonexistent ID", a
   try {
     const service = createSecretsService(ctx);
     await expect(
-      service.updateGlobalSecret(9999, "value")
-    ).rejects.toThrow("Secret with ID 9999 not found");
+      service.updateGlobalSecret("nonexistent", "value")
+    ).rejects.toThrow("Secret with ID nonexistent not found");
   } finally {
     await ctx.cleanup();
   }
@@ -247,7 +247,7 @@ integrationTest("SecretsService.deleteGlobalSecret removes secret", async () => 
     const secrets = await service.getGlobalSecrets();
     expect(secrets.length).toBe(1);
 
-    await service.deleteGlobalSecret(secrets[0].id);
+    await service.deleteGlobalSecret(recordIdToString(secrets[0].id));
 
     const afterDelete = await service.getGlobalSecrets();
     expect(afterDelete.length).toBe(0);
@@ -261,8 +261,8 @@ integrationTest("SecretsService.deleteGlobalSecret throws for nonexistent ID", a
 
   try {
     const service = createSecretsService(ctx);
-    await expect(service.deleteGlobalSecret(9999)).rejects.toThrow(
-      "Secret with ID 9999 not found"
+    await expect(service.deleteGlobalSecret("nonexistent")).rejects.toThrow(
+      "Secret with ID nonexistent not found"
     );
   } finally {
     await ctx.cleanup();
@@ -306,8 +306,9 @@ integrationTest("SecretsService.createFunctionSecret creates function-scoped sec
     expect(secrets.length).toBe(1);
     expect(secrets[0].name).toBe("FUNC_SECRET");
     expect(secrets[0].value).toBe("value");
-    expect(secrets[0].functionId).toBe(functionId);
-    expect(secrets[0].scope).toBe(SecretScope.Function);
+    expect(secrets[0].scopeType).toBe("function");
+    expect(secrets[0].scopeRef?.tb).toBe("function");
+    expect(secrets[0].scopeRef?.id).toBe(String(functionId));
   } finally {
     await ctx.cleanup();
   }
@@ -373,7 +374,7 @@ integrationTest("SecretsService.getFunctionSecretById returns correct secret", a
     await service.createFunctionSecret(functionId, "MY_SECRET", "secret-value");
 
     const secrets = await service.getFunctionSecrets(functionId);
-    const secret = await service.getFunctionSecretById(functionId, secrets[0].id);
+    const secret = await service.getFunctionSecretById(functionId, recordIdToString(secrets[0].id));
 
     expect(secret!.value).toBe("secret-value");
   } finally {
@@ -394,10 +395,11 @@ integrationTest("SecretsService.updateFunctionSecret updates value", async () =>
 
     await service.createFunctionSecret(functionId, "MY_SECRET", "old");
     const secrets = await service.getFunctionSecrets(functionId);
+    const secretId = recordIdToString(secrets[0].id);
 
-    await service.updateFunctionSecret(functionId, secrets[0].id, "new", "Updated");
+    await service.updateFunctionSecret(functionId, secretId, "new", "Updated");
 
-    const updated = await service.getFunctionSecretById(functionId, secrets[0].id);
+    const updated = await service.getFunctionSecretById(functionId, secretId);
     expect(updated!.value).toBe("new");
     expect(updated!.comment).toBe("Updated");
   } finally {
@@ -419,7 +421,7 @@ integrationTest("SecretsService.deleteFunctionSecret removes secret", async () =
     await service.createFunctionSecret(functionId, "TO_DELETE", "value");
     const secrets = await service.getFunctionSecrets(functionId);
 
-    await service.deleteFunctionSecret(functionId, secrets[0].id);
+    await service.deleteFunctionSecret(functionId, recordIdToString(secrets[0].id));
 
     const remaining = await service.getFunctionSecrets(functionId);
     expect(remaining.length).toBe(0);
@@ -462,8 +464,9 @@ integrationTest("SecretsService.createGroupSecret creates group-scoped secret", 
     expect(secrets.length).toBe(1);
     expect(secrets[0].name).toBe("GROUP_SECRET");
     expect(secrets[0].value).toBe("value");
-    expect(secrets[0].apiGroupId).toBe(group!.id);
-    expect(secrets[0].scope).toBe(SecretScope.Group);
+    expect(secrets[0].scopeType).toBe("group");
+    expect(secrets[0].scopeRef?.tb).toBe("apiKeyGroup");
+    expect(secrets[0].scopeRef?.id).toBe(group!.id);
   } finally {
     await ctx.cleanup();
   }
@@ -504,10 +507,11 @@ integrationTest("SecretsService.updateGroupSecret updates value", async () => {
 
     await service.createGroupSecret(group!.id, "MY_SECRET", "old");
     const secrets = await service.getGroupSecrets(group!.id);
+    const secretId = recordIdToString(secrets[0].id);
 
-    await service.updateGroupSecret(group!.id, secrets[0].id, "new", "Updated");
+    await service.updateGroupSecret(group!.id, secretId, "new", "Updated");
 
-    const updated = await service.getGroupSecretById(group!.id, secrets[0].id);
+    const updated = await service.getGroupSecretById(group!.id, secretId);
     expect(updated!.value).toBe("new");
   } finally {
     await ctx.cleanup();
@@ -526,7 +530,7 @@ integrationTest("SecretsService.deleteGroupSecret removes secret", async () => {
     await service.createGroupSecret(group!.id, "TO_DELETE", "value");
     const secrets = await service.getGroupSecrets(group!.id);
 
-    await service.deleteGroupSecret(group!.id, secrets[0].id);
+    await service.deleteGroupSecret(group!.id, recordIdToString(secrets[0].id));
 
     const remaining = await service.getGroupSecrets(group!.id);
     expect(remaining.length).toBe(0);
@@ -572,8 +576,9 @@ integrationTest("SecretsService.createKeySecret creates key-scoped secret", asyn
     expect(secrets.length).toBe(1);
     expect(secrets[0].name).toBe("KEY_SECRET");
     expect(secrets[0].value).toBe("value");
-    expect(secrets[0].apiKeyId).toBe(keyId);
-    expect(secrets[0].scope).toBe(SecretScope.Key);
+    expect(secrets[0].scopeType).toBe("key");
+    expect(secrets[0].scopeRef?.tb).toBe("apiKey");
+    expect(secrets[0].scopeRef?.id).toBe(keyId);
   } finally {
     await ctx.cleanup();
   }
@@ -616,10 +621,11 @@ integrationTest("SecretsService.updateKeySecret updates value", async () => {
 
     await service.createKeySecret(keyId, "MY_SECRET", "old");
     const secrets = await service.getKeySecrets(keyId);
+    const secretId = recordIdToString(secrets[0].id);
 
-    await service.updateKeySecret(keyId, secrets[0].id, "new", "Updated");
+    await service.updateKeySecret(keyId, secretId, "new", "Updated");
 
-    const updated = await service.getKeySecretById(keyId, secrets[0].id);
+    const updated = await service.getKeySecretById(keyId, secretId);
     expect(updated!.value).toBe("new");
   } finally {
     await ctx.cleanup();
@@ -640,7 +646,7 @@ integrationTest("SecretsService.deleteKeySecret removes secret", async () => {
     await service.createKeySecret(keyId, "TO_DELETE", "value");
     const secrets = await service.getKeySecrets(keyId);
 
-    await service.deleteKeySecret(keyId, secrets[0].id);
+    await service.deleteKeySecret(keyId, recordIdToString(secrets[0].id));
 
     const remaining = await service.getKeySecrets(keyId);
     expect(remaining.length).toBe(0);
@@ -653,7 +659,7 @@ integrationTest("SecretsService.deleteKeySecret removes secret", async () => {
 // Hierarchical Resolution Tests
 // =====================
 
-integrationTest("SecretsService.getSecretByNameAndScope returns correct scope", async () => {
+integrationTest("SecretsService.getSecretByScope returns correct scope", async () => {
   const ctx = await TestSetupBuilder.create()
     .withEncryption()
     .withRoute("/test", "test.ts")
@@ -675,16 +681,16 @@ integrationTest("SecretsService.getSecretByNameAndScope returns correct scope", 
     await service.createKeySecret(keys![0].id, "API_KEY", "key-value");
 
     // Query each scope explicitly
-    const globalVal = await service.getSecretByNameAndScope("API_KEY", SecretScope.Global);
+    const globalVal = await service.getSecretByScope("API_KEY", "global");
     expect(globalVal).toBe("global-value");
 
-    const funcVal = await service.getSecretByNameAndScope("API_KEY", SecretScope.Function, functionId);
+    const funcVal = await service.getSecretByScope("API_KEY", "function", functionId);
     expect(funcVal).toBe("function-value");
 
-    const groupVal = await service.getSecretByNameAndScope("API_KEY", SecretScope.Group, undefined, group!.id);
+    const groupVal = await service.getSecretByScope("API_KEY", "group", undefined, group!.id);
     expect(groupVal).toBe("group-value");
 
-    const keyVal = await service.getSecretByNameAndScope("API_KEY", SecretScope.Key, undefined, undefined, keys![0].id);
+    const keyVal = await service.getSecretByScope("API_KEY", "key", undefined, undefined, keys![0].id);
     expect(keyVal).toBe("key-value");
   } finally {
     await ctx.cleanup();
@@ -934,10 +940,13 @@ integrationTest("SecretsService stores values encrypted in database", async () =
     const service = createSecretsService(ctx);
     await service.createGlobalSecret("MY_SECRET", "plaintext-value");
 
-    // Query raw database value
-    const row = await ctx.db.queryOne<{ value: string }>(
-      "SELECT value FROM secrets LIMIT 1"
-    );
+    // Query raw database value from SurrealDB
+    const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ value: string }[]]>(
+        `SELECT value FROM secret WHERE name = "MY_SECRET" LIMIT 1`
+      );
+      return rows?.[0];
+    });
 
     // Should NOT be plaintext
     expect(row!.value).not.toBe("plaintext-value");

@@ -1,74 +1,29 @@
 import { Hono } from "@hono/hono";
 import type { SecretsService } from "./secrets_service.ts";
-import type { Secret, SecretRow } from "./types.ts";
-import { SecretScope } from "./types.ts";
+import type { Secret, SecretScopeType } from "./types.ts";
 import {
   validateSecretName,
   validateScope,
   validateSecretValue,
 } from "../validation/secrets.ts";
-import { validateId } from "../validation/common.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
- * Convert numeric scope enum to string
+ * Normalize a secret for API response.
+ * Converts RecordId to string at the API boundary.
  */
-function scopeToString(scope: number): string {
-  switch (scope) {
-    case SecretScope.Global:
-      return "global";
-    case SecretScope.Function:
-      return "function";
-    case SecretScope.Group:
-      return "group";
-    case SecretScope.Key:
-      return "key";
-    default:
-      return "unknown";
-  }
-}
-
-/**
- * Get the scopeId from a secret (the parent entity ID)
- */
-function getScopeId(secret: Secret | SecretRow): number | null {
-  const row = secret as Record<string, unknown>;
-  if (row.functionId !== null && row.functionId !== undefined) {
-    return row.functionId as number;
-  }
-  if (row.apiGroupId !== null && row.apiGroupId !== undefined) {
-    return row.apiGroupId as number;
-  }
-  if (row.apiKeyId !== null && row.apiKeyId !== undefined) {
-    return row.apiKeyId as number;
-  }
-  return null;
-}
-
-/**
- * Normalize a secret for API response
- */
-function normalizeSecret(
-  secret: Secret | SecretRow
-): Record<string, unknown> {
-  const row = secret as Record<string, unknown>;
-  const scope = typeof row.scope === "number" ? row.scope : 0;
-  const normalized: Record<string, unknown> = {
-    id: secret.id,
+function normalizeSecret(secret: Secret): Record<string, unknown> {
+  return {
+    id: recordIdToString(secret.id),
     name: secret.name,
+    value: secret.value,
+    decryptionError: secret.decryptionError ?? null,
     comment: secret.comment,
-    scope: scopeToString(scope),
-    scopeId: getScopeId(secret),
+    scopeType: secret.scopeType,
+    scopeRef: secret.scopeRef ? recordIdToString(secret.scopeRef) : null,
     createdAt: secret.createdAt,
     updatedAt: secret.updatedAt,
   };
-
-  // Include value and decryptionError if present (Secret type)
-  if ("value" in secret) {
-    normalized.value = (secret as Secret).value;
-    normalized.decryptionError = (secret as Secret).decryptionError ?? null;
-  }
-
-  return normalized;
 }
 
 export function createSecretsRoutes(service: SecretsService): Hono {
@@ -78,7 +33,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
   // Must be before /:id to avoid name being treated as ID
   routes.get("/by-name/:name", async (c) => {
     const name = c.req.param("name");
-    const scope = c.req.query("scope");
+    const scope = c.req.query("scope") as SecretScopeType | undefined;
 
     // Validate scope if provided
     if (scope && !validateScope(scope)) {
@@ -102,11 +57,10 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
   // GET /api/secrets - List all secrets with optional filtering
   routes.get("/", async (c) => {
-    const scope = c.req.query("scope");
+    const scope = c.req.query("scope") as SecretScopeType | undefined;
     const functionIdStr = c.req.query("functionId");
     const groupIdStr = c.req.query("groupId");
     const keyIdStr = c.req.query("keyId");
-    const includeValuesStr = c.req.query("includeValues");
 
     // Validate scope
     if (scope && !validateScope(scope)) {
@@ -116,44 +70,33 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       );
     }
 
-    // Parse numeric IDs
+    // Parse IDs
     let functionId: number | undefined;
-    let groupId: number | undefined;
-    let keyId: number | undefined;
+    let groupId: string | undefined;
+    let keyId: string | undefined;
 
     if (functionIdStr) {
-      const parsed = validateId(functionIdStr);
-      if (parsed === null) {
+      const parsed = parseInt(functionIdStr, 10);
+      if (isNaN(parsed)) {
         return c.json({ error: "Invalid functionId" }, 400);
       }
       functionId = parsed;
     }
 
+    // groupId and keyId are now strings (SurrealDB IDs)
     if (groupIdStr) {
-      const parsed = validateId(groupIdStr);
-      if (parsed === null) {
-        return c.json({ error: "Invalid groupId" }, 400);
-      }
-      groupId = parsed;
+      groupId = groupIdStr;
     }
 
     if (keyIdStr) {
-      const parsed = validateId(keyIdStr);
-      if (parsed === null) {
-        return c.json({ error: "Invalid keyId" }, 400);
-      }
-      keyId = parsed;
+      keyId = keyIdStr;
     }
 
-    // Parse includeValues boolean
-    const includeValues = includeValuesStr === "true";
-
     const secrets = await service.getAllSecrets({
-      scope,
+      scopeType: scope,
       functionId,
       groupId,
       keyId,
-      includeValues,
     });
 
     return c.json({
@@ -163,8 +106,8 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
   // GET /api/secrets/:id - Get secret by ID
   routes.get("/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
-    if (id === null) {
+    const id = c.req.param("id");
+    if (!id || id.trim() === "") {
       return c.json({ error: "Invalid secret ID" }, 400);
     }
 
@@ -182,7 +125,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       name?: string;
       value?: string;
       comment?: string;
-      scope?: string;
+      scopeType?: string;
       functionId?: number;
       groupId?: string;
       keyId?: string;
@@ -214,33 +157,33 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       return c.json({ error: "Secret value cannot be empty" }, 400);
     }
 
-    if (!body.scope) {
-      return c.json({ error: "Missing required field: scope" }, 400);
+    if (!body.scopeType) {
+      return c.json({ error: "Missing required field: scopeType" }, 400);
     }
 
-    if (!validateScope(body.scope)) {
+    if (!validateScope(body.scopeType)) {
       return c.json(
-        { error: `Invalid scope '${body.scope}'. Must be one of: global, function, group, key` },
+        { error: `Invalid scopeType '${body.scopeType}'. Must be one of: global, function, group, key` },
         400
       );
     }
 
     // Validate scope-specific requirements
-    if (body.scope === "function" && body.functionId === undefined) {
+    if (body.scopeType === "function" && body.functionId === undefined) {
       return c.json(
         { error: "functionId is required for function-scoped secrets" },
         400
       );
     }
 
-    if (body.scope === "group" && body.groupId === undefined) {
+    if (body.scopeType === "group" && body.groupId === undefined) {
       return c.json(
         { error: "groupId is required for group-scoped secrets" },
         400
       );
     }
 
-    if (body.scope === "key" && body.keyId === undefined) {
+    if (body.scopeType === "key" && body.keyId === undefined) {
       return c.json(
         { error: "keyId is required for key-scoped secrets" },
         400
@@ -248,11 +191,11 @@ export function createSecretsRoutes(service: SecretsService): Hono {
     }
 
     try {
-      const id = await service.createSecret({
+      const recordId = await service.createSecret({
         name: body.name,
         value: body.value,
         comment: body.comment,
-        scope: body.scope,
+        scopeType: body.scopeType as SecretScopeType,
         functionId: body.functionId,
         groupId: body.groupId,
         keyId: body.keyId,
@@ -260,9 +203,9 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
       return c.json(
         {
-          id,
+          id: recordIdToString(recordId),
           name: body.name,
-          scope: body.scope,
+          scopeType: body.scopeType,
         },
         201
       );
@@ -284,13 +227,12 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
   // PUT /api/secrets/:id - Update a secret
   routes.put("/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
-    if (id === null) {
+    const id = c.req.param("id");
+    if (!id || id.trim() === "") {
       return c.json({ error: "Invalid secret ID" }, 400);
     }
 
     let body: {
-      name?: string;
       value?: string;
       comment?: string;
     };
@@ -302,21 +244,9 @@ export function createSecretsRoutes(service: SecretsService): Hono {
     }
 
     // Require at least one field
-    if (
-      body.name === undefined &&
-      body.value === undefined &&
-      body.comment === undefined
-    ) {
+    if (body.value === undefined && body.comment === undefined) {
       return c.json(
-        { error: "At least one field (name, value, or comment) must be provided" },
-        400
-      );
-    }
-
-    // Validate name if provided
-    if (body.name !== undefined && !validateSecretName(body.name)) {
-      return c.json(
-        { error: "Invalid secret name. Must match pattern [a-zA-Z0-9_-]+" },
+        { error: "At least one field (value or comment) must be provided" },
         400
       );
     }
@@ -328,7 +258,6 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
     try {
       await service.updateSecretById(id, {
-        name: body.name,
         value: body.value,
         comment: body.comment,
       });
@@ -349,8 +278,8 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
   // DELETE /api/secrets/:id - Delete a secret
   routes.delete("/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
-    if (id === null) {
+    const id = c.req.param("id");
+    if (!id || id.trim() === "") {
       return c.json({ error: "Invalid secret ID" }, 400);
     }
 

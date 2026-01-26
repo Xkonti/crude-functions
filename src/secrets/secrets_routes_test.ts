@@ -4,6 +4,7 @@ import { createSecretsRoutes } from "./secrets_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
 import type { BaseTestContext, SecretsContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
  * Creates a Hono app with secrets routes from a TestSetupBuilder context.
@@ -51,8 +52,8 @@ integrationTest("GET /api/secrets returns all secrets without values by default"
 
     // Should not include values by default
     expect(json.secrets[0].value).toBeUndefined();
-    expect(json.secrets[0].scope).toBe("global");
-    expect(json.secrets[0].scopeId).toBeNull();
+    expect(json.secrets[0].scopeType).toBe("global");
+    expect(json.secrets[0].scopeRef).toBeNull();
   } finally {
     await ctx.cleanup();
   }
@@ -105,7 +106,7 @@ integrationTest("GET /api/secrets?scope=global filters by scope", async () => {
     const json = await res.json();
     expect(json.secrets.length).toBe(1);
     expect(json.secrets[0].name).toBe("GLOBAL");
-    expect(json.secrets[0].scope).toBe("global");
+    expect(json.secrets[0].scopeType).toBe("global");
   } finally {
     await ctx.cleanup();
   }
@@ -145,7 +146,7 @@ integrationTest("GET /api/secrets?scope=function&functionId=1 filters by functio
     const json = await res.json();
     expect(json.secrets.length).toBe(1);
     expect(json.secrets[0].name).toBe("SECRET1");
-    expect(json.secrets[0].scopeId).toBe(route1!.id);
+    expect(json.secrets[0].scopeRef).toBe(route1!.id);
   } finally {
     await ctx.cleanup();
   }
@@ -194,8 +195,8 @@ integrationTest("GET /api/secrets/:id returns secret by ID", async () => {
 
   try {
     await ctx.secretsService.createGlobalSecret("MY_SECRET", "secret_value", "test comment");
-    const secrets = await ctx.secretsService.getGlobalSecretsWithValues();
-    const secretId = secrets[0].id;
+    const secrets = await ctx.secretsService.getGlobalSecrets();
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`);
@@ -206,8 +207,8 @@ integrationTest("GET /api/secrets/:id returns secret by ID", async () => {
     expect(json.name).toBe("MY_SECRET");
     expect(json.value).toBe("secret_value");
     expect(json.comment).toBe("test comment");
-    expect(json.scope).toBe("global");
-    expect(json.scopeId).toBeNull();
+    expect(json.scopeType).toBe("global");
+    expect(json.scopeRef).toBeNull();
   } finally {
     await ctx.cleanup();
   }
@@ -313,7 +314,7 @@ integrationTest("GET /api/secrets/by-name/:name?scope=global filters by scope", 
     const json = await res.json();
     expect(json.secrets.length).toBe(1);
     expect(json.secrets[0].value).toBe("global_value");
-    expect(json.secrets[0].scope).toBe("global");
+    expect(json.secrets[0].scopeType).toBe("global");
   } finally {
     await ctx.cleanup();
   }
@@ -361,7 +362,7 @@ integrationTest("POST /api/secrets creates global secret", async () => {
     const json = await res.json();
     expect(json.id).toBeDefined();
     expect(json.name).toBe("NEW_SECRET");
-    expect(json.scope).toBe("global");
+    expect(json.scopeType).toBe("global");
 
     // Verify secret was created
     const secret = await ctx.secretsService.getSecretById(json.id);
@@ -402,7 +403,7 @@ integrationTest("POST /api/secrets creates function-scoped secret", async () => 
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.scope).toBe("function");
+    expect(json.scopeType).toBe("function");
 
     // Verify secret was created
     const secrets = await ctx.secretsService.getFunctionSecrets(route!.id);
@@ -437,7 +438,7 @@ integrationTest("POST /api/secrets creates group-scoped secret", async () => {
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.scope).toBe("group");
+    expect(json.scopeType).toBe("group");
 
     // Verify secret was created
     const secrets = await ctx.secretsService.getGroupSecrets(groupId);
@@ -475,7 +476,7 @@ integrationTest("POST /api/secrets creates key-scoped secret", async () => {
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.scope).toBe("key");
+    expect(json.scopeType).toBe("key");
 
     // Verify secret was created
     const secrets = await ctx.secretsService.getKeySecrets(keyId);
@@ -755,7 +756,7 @@ integrationTest("PUT /api/secrets/:id updates name", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("OLD_NAME", "value");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -786,7 +787,7 @@ integrationTest("PUT /api/secrets/:id updates value", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("MY_SECRET", "old_value");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -814,7 +815,7 @@ integrationTest("PUT /api/secrets/:id updates comment", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("MY_SECRET", "value", "old comment");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -841,7 +842,7 @@ integrationTest("PUT /api/secrets/:id updates multiple fields", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("OLD", "old_value", "old comment");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -874,7 +875,7 @@ integrationTest("PUT /api/secrets/:id rejects when no fields provided", async ()
   try {
     await ctx.secretsService.createGlobalSecret("TEST", "value");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -900,7 +901,7 @@ integrationTest("PUT /api/secrets/:id rejects invalid name", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("TEST", "value");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -926,7 +927,7 @@ integrationTest("PUT /api/secrets/:id rejects empty value", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("TEST", "value");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {
@@ -1026,7 +1027,7 @@ integrationTest("DELETE /api/secrets/:id deletes secret", async () => {
   try {
     await ctx.secretsService.createGlobalSecret("TO_DELETE", "value");
     const secrets = await ctx.secretsService.getGlobalSecrets();
-    const secretId = secrets[0].id;
+    const secretId = recordIdToString(secrets[0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/secrets/${secretId}`, {

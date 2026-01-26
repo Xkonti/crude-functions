@@ -1,40 +1,53 @@
 /**
  * Types for secrets management system
+ *
+ * ID Handling Pattern:
+ * - Runtime/Interfaces: Always use RecordId type
+ * - API/Web UI boundaries: Convert to string via recordIdToString()
  */
 
+import type { RecordId } from "surrealdb";
+
 /**
- * Complete secret record with all fields
- * Values are decrypted when loaded from database
+ * Secret scope type - determines what the secret is scoped to
+ */
+export type SecretScopeType = "global" | "function" | "group" | "key";
+
+/**
+ * Complete secret record with all fields.
+ * Values are decrypted when loaded from database.
+ * IDs are RecordId - convert to string only at API/Web UI boundaries.
  */
 export interface Secret {
-  id: number;
+  id: RecordId;
   name: string;
   value: string; // Decrypted value (empty string if decryption failed)
   decryptionError?: string; // Set if decryption failed
   comment: string | null;
-  scope: number; // 0=global, 1=function, 2=group, 3=key
-  functionId: number | null;
-  apiGroupId: number | null;
-  apiKeyId: number | null;
+  scopeType: SecretScopeType;
+  scopeRef: RecordId | null; // Record reference or null for global
   createdAt: string;
   updatedAt: string;
 }
 
 /**
- * Secret row for list view (without value field)
- * Used when listing secrets to avoid decrypting all values
+ * Raw row from SurrealDB query.
+ * Contains encrypted value before decryption.
  */
 export interface SecretRow {
-  id: number;
+  id: RecordId;
   name: string;
+  value: string; // encrypted value
   comment: string | null;
+  scopeType: SecretScopeType;
+  scopeRef: RecordId | null;
   createdAt: string;
   updatedAt: string;
-  [key: string]: unknown; // Index signature for Row compatibility
 }
 
 /**
- * Secret scope enum
+ * Secret scope enum - kept for backward compatibility during transition
+ * @deprecated Use SecretScopeType string literals instead
  */
 export enum SecretScope {
   Global = 0,
@@ -44,15 +57,16 @@ export enum SecretScope {
 }
 
 /**
- * Preview source for secrets preview feature
+ * Preview source for secrets preview feature.
+ * Uses strings since it's for presentation layer.
  */
 export interface SecretPreviewSource {
-  scope: 'global' | 'function' | 'group' | 'key';
+  scope: SecretScopeType;
   value: string;
   decryptionError?: string; // Set if decryption failed
-  groupId?: string;
+  groupId?: string; // String for presentation
   groupName?: string;
-  keyId?: string;
+  keyId?: string; // String for presentation
   keyName?: string;
 }
 

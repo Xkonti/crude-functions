@@ -12,6 +12,7 @@ import type { ExecutionMetric, MetricType } from "../metrics/types.ts";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret, SecretPreview } from "../secrets/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import { formatForDisplay } from "../utils/datetime.ts";
@@ -1392,17 +1393,19 @@ function renderFunctionSecretCreateForm(
 }
 
 /**
- * Renders the edit secret form
+ * Renders the edit secret form.
+ * Accepts Secret type with RecordId, converts to string for URLs.
  */
 function renderFunctionSecretEditForm(
   functionId: number,
-  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
+  secret: Secret,
   error?: string,
   csrfToken: string = ""
 ): string {
+  const secretId = recordIdToString(secret.id);
   return `
     ${error ? flashMessages(undefined, error) : ""}
-    <form method="POST" action="/web/functions/secrets/${functionId}/edit/${secret.id}">
+    <form method="POST" action="/web/functions/secrets/${functionId}/edit/${secretId}">
       ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
@@ -2090,11 +2093,10 @@ export function createFunctionsPages(
   // GET /secrets/:id/edit/:secretId - Edit secret form
   routes.get("/secrets/:id/edit/:secretId", async (c) => {
     const idParam = c.req.param("id");
-    const secretIdParam = c.req.param("secretId");
+    const secretId = c.req.param("secretId");
     const functionId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
 
-    if (isNaN(functionId) || isNaN(secretId)) {
+    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );
@@ -2138,11 +2140,10 @@ export function createFunctionsPages(
   // POST /secrets/:id/edit/:secretId - Handle secret update
   routes.post("/secrets/:id/edit/:secretId", async (c) => {
     const idParam = c.req.param("id");
-    const secretIdParam = c.req.param("secretId");
+    const secretId = c.req.param("secretId");
     const functionId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
 
-    if (isNaN(functionId) || isNaN(secretId)) {
+    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );
@@ -2238,11 +2239,10 @@ export function createFunctionsPages(
   // GET /secrets/:id/delete/:secretId - Delete confirmation
   routes.get("/secrets/:id/delete/:secretId", async (c) => {
     const idParam = c.req.param("id");
-    const secretIdParam = c.req.param("secretId");
+    const secretId = c.req.param("secretId");
     const functionId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
 
-    if (isNaN(functionId) || isNaN(secretId)) {
+    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );
@@ -2281,11 +2281,10 @@ export function createFunctionsPages(
   // POST /secrets/:id/delete/:secretId - Handle deletion
   routes.post("/secrets/:id/delete/:secretId", async (c) => {
     const idParam = c.req.param("id");
-    const secretIdParam = c.req.param("secretId");
+    const secretId = c.req.param("secretId");
     const functionId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
 
-    if (isNaN(functionId) || isNaN(secretId)) {
+    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );

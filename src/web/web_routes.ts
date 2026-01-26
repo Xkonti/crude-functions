@@ -12,6 +12,7 @@ import { layout, getLayoutUser } from "./templates.ts";
 import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
 import type { Auth } from "../auth/auth.ts";
 import type { DatabaseService } from "../database/database_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
@@ -26,6 +27,7 @@ import type { SourceFileService } from "../files/source_file_service.ts";
 export interface WebRoutesOptions {
   auth: Auth;
   db: DatabaseService;
+  surrealFactory: SurrealConnectionFactory;
   userService: UserService;
   routesService: RoutesService;
   apiKeyService: ApiKeyService;
@@ -38,11 +40,11 @@ export interface WebRoutesOptions {
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { auth, db, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService } = options;
+  const { auth, db, surrealFactory, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
-  const secretsService = new SecretsService({ db, encryptionService });
+  const secretsService = new SecretsService({ surrealFactory, encryptionService });
 
   // Mount setup pages (public - only accessible when no users exist)
   routes.route("/setup", createSetupPages({ auth, userService, settingsService }));
@@ -117,7 +119,7 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
   routes.route("/code", createSourcePages(codeSourceService, sourceFileService, settingsService));
   routes.route("/functions", createFunctionsPages(routesService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService));
   routes.route("/keys", createKeysPages(apiKeyService, secretsService, settingsService));
-  routes.route("/secrets", createSecretsPages({ db, encryptionService, settingsService }));
+  routes.route("/secrets", createSecretsPages({ surrealFactory, encryptionService, settingsService }));
   routes.route("/settings", createSettingsPages({ settingsService, apiKeyService }));
 
   return routes;

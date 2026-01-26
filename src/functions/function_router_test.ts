@@ -9,7 +9,7 @@ import type { TestContext } from "../test/types.ts";
 /** Creates a FunctionRouter with all required services from TestSetupBuilder context */
 function createFunctionRouterWithContext(ctx: TestContext) {
   const secretsService = new SecretsService({
-    db: ctx.db,
+    surrealFactory: ctx.surrealFactory,
     encryptionService: ctx.encryptionService,
   });
   return new FunctionRouter({
@@ -772,7 +772,7 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
 
     // Create SecretsService for secret operations
     const secretsService = new SecretsService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
     });
 

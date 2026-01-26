@@ -396,7 +396,7 @@ if (!currentAccessGroups && mgmtGroup) {
 
 // Initialize secrets service
 const secretsService = new SecretsService({
-  db,
+  surrealFactory,
   encryptionService,
 });
 
@@ -523,6 +523,7 @@ const functionApp = createFunctionApp(functionRouter);
 const managementApp = createManagementApp({
   auth,
   db,
+  surrealFactory,
   apiKeyService,
   routesService,
   consoleLogService,
