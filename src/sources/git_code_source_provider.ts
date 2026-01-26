@@ -206,9 +206,6 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
    * - If not cloned: performs initial clone
    * - If URL changed: deletes directory and re-clones
    * - Otherwise: fetches and resets to target ref
-   *
-   * Note: source.typeSettings is already decrypted by rowToSource() before
-   * being passed here - do NOT decrypt again.
    */
   async sync(
     source: CodeSource,
