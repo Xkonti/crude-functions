@@ -122,12 +122,11 @@ export function createSourcePages(
   }
 
   /**
-   * Parse and validate source ID from route param.
-   * ID is now the source name (string).
+   * Parse source ID from route param.
+   * Returns null if ID is empty/missing.
    */
   function parseSourceId(idParam: string): string | null {
-    // ID is now the source name - validate the format
-    return codeSourceService.isValidSourceName(idParam) ? idParam : null;
+    return idParam ? idParam : null;
   }
 
   // ============================================================================
@@ -1144,7 +1143,6 @@ export function createSourcePages(
         </div>
       </form>
       <script>
-        const sourceName = ${JSON.stringify(source.name)};
         const sourceId = ${JSON.stringify(source.id)};
         const csrfToken = ${JSON.stringify(csrfToken)};
         let selectedFile = null;
@@ -1210,13 +1208,13 @@ export function createSourcePages(
             if (selectedFile) {
               const formData = new FormData();
               formData.append('file', selectedFile);
-              response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(path), {
+              response = await fetch('/api/sources/' + encodeURIComponent(sourceId) + '/files/' + encodeURIComponent(path), {
                 method: 'PUT',
                 headers: { 'X-CSRF-Token': csrfToken },
                 body: formData
               });
             } else {
-              response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(path), {
+              response = await fetch('/api/sources/' + encodeURIComponent(sourceId) + '/files/' + encodeURIComponent(path), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body: JSON.stringify({ content: content })
@@ -1383,7 +1381,6 @@ export function createSourcePages(
           </div>
         </form>
         <script>
-          const sourceName = ${JSON.stringify(source.name)};
           const sourceId = ${JSON.stringify(source.id)};
           const filePath = ${JSON.stringify(path)};
           const csrfToken = ${JSON.stringify(csrfToken)};
@@ -1397,7 +1394,7 @@ export function createSourcePages(
             btn.textContent = 'Saving...';
 
             try {
-              const response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(filePath), {
+              const response = await fetch('/api/sources/' + encodeURIComponent(sourceId) + '/files/' + encodeURIComponent(filePath), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                 body: JSON.stringify({ content: content })
@@ -1452,7 +1449,6 @@ export function createSourcePages(
         </article>
 
         <script>
-          const sourceName = ${JSON.stringify(source.name)};
           const sourceId = ${JSON.stringify(source.id)};
           const filePath = ${JSON.stringify(path)};
           const csrfToken = ${JSON.stringify(csrfToken)};
@@ -1475,7 +1471,7 @@ export function createSourcePages(
             try {
               const formData = new FormData();
               formData.append('file', file);
-              const response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(filePath), {
+              const response = await fetch('/api/sources/' + encodeURIComponent(sourceId) + '/files/' + encodeURIComponent(filePath), {
                 method: 'PUT',
                 headers: { 'X-CSRF-Token': csrfToken },
                 body: formData
@@ -1549,7 +1545,6 @@ export function createSourcePages(
         </footer>
       </article>
       <script>
-        const sourceName = ${JSON.stringify(source.name)};
         const sourceId = ${JSON.stringify(source.id)};
         const filePath = ${JSON.stringify(path)};
         const csrfToken = ${JSON.stringify(csrfToken)};
@@ -1562,7 +1557,7 @@ export function createSourcePages(
           btn.textContent = 'Deleting...';
 
           try {
-            const response = await fetch('/api/sources/' + encodeURIComponent(sourceName) + '/files/' + encodeURIComponent(filePath), {
+            const response = await fetch('/api/sources/' + encodeURIComponent(sourceId) + '/files/' + encodeURIComponent(filePath), {
               method: 'DELETE',
               headers: { 'X-CSRF-Token': csrfToken }
             });

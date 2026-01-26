@@ -124,6 +124,7 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
   api.route("/sources", createSourceFileRoutes({
     sourceFileService: deps.sourceFileService,
     settingsService: deps.settingsService,
+    codeSourceService: deps.codeSourceService,
   }));
 
   // Encryption key rotation

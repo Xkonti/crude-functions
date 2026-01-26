@@ -1,6 +1,7 @@
 import { Hono, type Context } from "@hono/hono";
 import type { SourceFileService } from "./source_file_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { CodeSourceService } from "../sources/code_source_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import { normalizePath, validateFilePath } from "../validation/files.ts";
 import { getContentType, isTextContentType } from "./content_type.ts";
@@ -13,6 +14,7 @@ import {
 export interface SourceFileRoutesOptions {
   sourceFileService: SourceFileService;
   settingsService: SettingsService;
+  codeSourceService: CodeSourceService;
 }
 
 interface ParseResult {
@@ -25,14 +27,14 @@ interface ParseResult {
  * Creates source-aware file routes.
  *
  * API structure:
- * - GET    /:sourceName/files           - List files in source
- * - GET    /:sourceName/files/:path     - Get file content
- * - POST   /:sourceName/files/:path     - Create file (409 if exists)
- * - PUT    /:sourceName/files/:path     - Create or update file
- * - DELETE /:sourceName/files/:path     - Delete file
+ * - GET    /:id/files           - List files in source
+ * - GET    /:id/files/:path     - Get file content
+ * - POST   /:id/files/:path     - Create file (409 if exists)
+ * - PUT    /:id/files/:path     - Create or update file
+ * - DELETE /:id/files/:path     - Delete file
  */
 export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
-  const { sourceFileService, settingsService } = options;
+  const { sourceFileService, settingsService, codeSourceService } = options;
   const routes = new Hono();
 
   // Helper: Get max file size from settings
@@ -43,16 +45,23 @@ export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
     return setting ? parseInt(setting, 10) : 52428800; // 50 MB default
   }
 
-  // Helper: Extract and validate source name from route param
-  function extractSourceName(c: Context): {
+  // Helper: Extract source ID and resolve to source name
+  async function resolveSourceName(c: Context): Promise<{
     sourceName: string | null;
     error: string | null;
-  } {
-    const sourceName = c.req.param("sourceName");
-    if (!sourceName) {
-      return { sourceName: null, error: "Missing source name" };
+    status?: 400 | 404;
+  }> {
+    const id = c.req.param("id");
+    if (!id) {
+      return { sourceName: null, error: "Missing source ID", status: 400 };
     }
-    return { sourceName, error: null };
+
+    const source = await codeSourceService.getById(id);
+    if (!source) {
+      return { sourceName: null, error: "Source not found", status: 404 };
+    }
+
+    return { sourceName: source.name, error: null };
   }
 
   // Helper: Extract and validate path from route param
@@ -123,11 +132,11 @@ export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
     return await parseRawBody(c, maxSize);
   }
 
-  // GET /:sourceName/files - List all files in source
-  routes.get("/:sourceName/files", async (c) => {
-    const { sourceName, error } = extractSourceName(c);
+  // GET /:id/files - List all files in source
+  routes.get("/:id/files", async (c) => {
+    const { sourceName, error, status } = await resolveSourceName(c);
     if (error) {
-      return c.json({ error }, 400);
+      return c.json({ error }, status!);
     }
 
     try {
@@ -138,11 +147,11 @@ export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
     }
   });
 
-  // GET /:sourceName/files/:path - Get file content
-  routes.get("/:sourceName/files/:path{.+}", async (c) => {
-    const { sourceName, error: sourceError } = extractSourceName(c);
+  // GET /:id/files/:path - Get file content
+  routes.get("/:id/files/:path{.+}", async (c) => {
+    const { sourceName, error: sourceError, status } = await resolveSourceName(c);
     if (sourceError) {
-      return c.json({ error: sourceError }, 400);
+      return c.json({ error: sourceError }, status!);
     }
 
     const { path, error: pathError } = extractPath(c);
@@ -198,11 +207,11 @@ export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
     }
   });
 
-  // POST /:sourceName/files/:path - Create file (409 if exists)
-  routes.post("/:sourceName/files/:path{.+}", async (c) => {
-    const { sourceName, error: sourceError } = extractSourceName(c);
+  // POST /:id/files/:path - Create file (409 if exists)
+  routes.post("/:id/files/:path{.+}", async (c) => {
+    const { sourceName, error: sourceError, status } = await resolveSourceName(c);
     if (sourceError) {
-      return c.json({ error: sourceError }, 400);
+      return c.json({ error: sourceError }, status!);
     }
 
     const { path, error: pathError } = extractPath(c);
@@ -235,11 +244,11 @@ export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
     }
   });
 
-  // PUT /:sourceName/files/:path - Create or update file (upsert)
-  routes.put("/:sourceName/files/:path{.+}", async (c) => {
-    const { sourceName, error: sourceError } = extractSourceName(c);
+  // PUT /:id/files/:path - Create or update file (upsert)
+  routes.put("/:id/files/:path{.+}", async (c) => {
+    const { sourceName, error: sourceError, status } = await resolveSourceName(c);
     if (sourceError) {
-      return c.json({ error: sourceError }, 400);
+      return c.json({ error: sourceError }, status!);
     }
 
     const { path, error: pathError } = extractPath(c);
@@ -274,11 +283,11 @@ export function createSourceFileRoutes(options: SourceFileRoutesOptions): Hono {
     }
   });
 
-  // DELETE /:sourceName/files/:path - Delete file
-  routes.delete("/:sourceName/files/:path{.+}", async (c) => {
-    const { sourceName, error: sourceError } = extractSourceName(c);
+  // DELETE /:id/files/:path - Delete file
+  routes.delete("/:id/files/:path{.+}", async (c) => {
+    const { sourceName, error: sourceError, status } = await resolveSourceName(c);
     if (sourceError) {
-      return c.json({ error: sourceError }, 400);
+      return c.json({ error: sourceError }, status!);
     }
 
     const { path, error: pathError } = extractPath(c);

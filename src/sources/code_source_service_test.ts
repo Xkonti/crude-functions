@@ -202,8 +202,8 @@ integrationTest("CodeSourceService.create creates source with minimal config", a
       type: "manual",
     });
 
-    // ID is now the source name (string)
-    expect(source.id).toBe("utils");
+    // ID is auto-generated, name is as provided
+    expect(source.id).toBeTruthy();
     expect(source.name).toBe("utils");
     expect(source.type).toBe("manual");
     expect(source.enabled).toBe(true);

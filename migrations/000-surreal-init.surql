@@ -103,7 +103,6 @@ DEFINE INDEX IF NOT EXISTS idx_verification_identifier ON verification FIELDS id
 --------------------------------------------------------------------------------
 
 -- Code sources table - manages code directories under code/
--- Record ID is the source name (e.g., codeSource:my-repo)
 DEFINE TABLE IF NOT EXISTS codeSource SCHEMAFULL TYPE NORMAL;
 
 DEFINE FIELD IF NOT EXISTS name ON TABLE codeSource TYPE string;

@@ -146,7 +146,7 @@ export class CodeSourceService {
   }
 
   /**
-   * Get a code source by ID (which is the source name).
+   * Get a code source by ID.
    */
   async getById(id: string): Promise<CodeSource | null> {
     const recordId = new RecordId("codeSource", id);
@@ -162,14 +162,20 @@ export class CodeSourceService {
 
   /**
    * Get a code source by name.
-   * Same as getById since name IS the ID.
    */
-  getByName(name: string): Promise<CodeSource | null> {
-    return this.getById(name);
+  async getByName(name: string): Promise<CodeSource | null> {
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[CodeSourceRow[]]>(
+        `SELECT * FROM codeSource WHERE name = $name LIMIT 1`,
+        { name },
+      );
+      return result?.[0] ?? null;
+    });
+    return row ? this.rowToSource(row) : null;
   }
 
   /**
-   * Check if a source exists.
+   * Check if a source exists by ID.
    */
   async exists(id: string): Promise<boolean> {
     const recordId = new RecordId("codeSource", id);
@@ -185,10 +191,19 @@ export class CodeSourceService {
 
   /**
    * Check if a source name is taken.
-   * Same as exists since name IS the ID.
    */
-  nameExists(name: string): Promise<boolean> {
-    return this.exists(name);
+  async nameExists(name: string): Promise<boolean> {
+    const exists = await this.surrealFactory.withSystemConnection(
+      {},
+      async (db) => {
+        const [result] = await db.query<[{ count: number }[]]>(
+          `SELECT count() as count FROM codeSource WHERE name = $name`,
+          { name },
+        );
+        return (result?.[0]?.count ?? 0) > 0;
+      },
+    );
+    return exists;
   }
 
   // ============== Mutation Operations ==============
@@ -226,36 +241,38 @@ export class CodeSourceService {
       input.syncSettings ?? {},
     );
 
-    // Create record with name as ID
-    const recordId = new RecordId("codeSource", input.name);
+    // Create record (SurrealDB auto-generates ID)
+    const createdRow = await this.surrealFactory.withSystemConnection(
+      {},
+      async (db) => {
+        const [result] = await db.query<[CodeSourceRow[]]>(
+          `CREATE codeSource SET
+            name = $name,
+            type = $type,
+            typeSettings = $typeSettings,
+            syncSettings = $syncSettings,
+            enabled = $enabled`,
+          {
+            name: input.name,
+            type: input.type,
+            typeSettings: encryptedTypeSettings,
+            syncSettings: encryptedSyncSettings,
+            enabled: input.enabled ?? true,
+          },
+        );
+        return result?.[0] ?? null;
+      },
+    );
 
-    await this.surrealFactory.withSystemConnection({}, async (db) => {
-      await db.query(
-        `CREATE $recordId SET
-          name = $name,
-          type = $type,
-          typeSettings = $typeSettings,
-          syncSettings = $syncSettings,
-          enabled = $enabled`,
-        {
-          recordId,
-          name: input.name,
-          type: input.type,
-          typeSettings: encryptedTypeSettings,
-          syncSettings: encryptedSyncSettings,
-          enabled: input.enabled ?? true,
-        },
-      );
-    });
+    if (!createdRow) {
+      throw new Error("Failed to create source record");
+    }
 
     // Create directory via provider
     await provider.ensureDirectory(input.name);
 
-    // Get the created source
-    const source = await this.getById(input.name);
-    if (!source) {
-      throw new Error("Failed to retrieve created source");
-    }
+    // Convert to CodeSource entity
+    const source = await this.rowToSource(createdRow);
 
     // Create schedule if needed (syncable source with interval)
     await this.ensureSchedule(source);
@@ -354,7 +371,7 @@ export class CodeSourceService {
    * Delete a code source.
    * Deletes the source directory via the provider.
    *
-   * @param id - Source ID (same as name)
+   * @param id - Source ID
    * @param deleteDirectory - Whether to delete directory (default: true)
    * @throws {SourceNotFoundError} If source doesn't exist
    */
