@@ -8,7 +8,7 @@ import { RecordId } from "surrealdb";
  * Internal to the service - consumers never see this.
  */
 interface SurrealUserRow {
-  id: RecordId | string;
+  id: RecordId<"user">;
   email: string;
   emailVerified: boolean;
   name: string | null;
@@ -475,21 +475,6 @@ export class UserService {
   // ============== Private Helper Methods ==============
 
   /**
-   * Extract string ID from SurrealDB RecordId.
-   */
-  private extractId(id: RecordId | string): string {
-    if (typeof id === "string") {
-      // String might be in "table:id" format
-      if (id.includes(":")) {
-        return id.split(":")[1];
-      }
-      return id;
-    }
-    // RecordId object
-    return String(id.id);
-  }
-
-  /**
    * Convert a value to Date, handling SurrealDB's datetime type.
    * SurrealDB may return Date objects or its own DateTime wrapper.
    */
@@ -523,7 +508,7 @@ export class UserService {
    */
   private rowToUser(row: SurrealUserRow): User {
     return {
-      id: this.extractId(row.id),
+      id: row.id.id as string,
       email: row.email,
       emailVerified: row.emailVerified,
       name: row.name ?? undefined,

@@ -46,6 +46,7 @@ The examples below use `localhost:9000` (management port). If running in single-
 |--------|----------|-------------|
 | GET | `/api/sources` | List all code sources |
 | GET | `/api/sources/:id` | Get source by ID |
+| GET | `/api/sources/by-name/:name` | Get source by name |
 | POST | `/api/sources` | Create a new code source |
 | PUT | `/api/sources/:id` | Update source configuration |
 | DELETE | `/api/sources/:id` | Delete source and directory |
@@ -96,13 +97,14 @@ curl -X POST http://localhost:9000/api/sources \
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/sources/:sourceName/files` | List files in a source |
-| GET | `/api/sources/:sourceName/files/:path` | Get file content |
-| PUT | `/api/sources/:sourceName/files/:path` | Create/update file (manual sources only) |
-| DELETE | `/api/sources/:sourceName/files/:path` | Delete file (manual sources only) |
+| GET | `/api/sources/:id/files` | List files in a source |
+| GET | `/api/sources/:id/files/:path` | Get file content |
+| PUT | `/api/sources/:id/files/:path` | Create/update file (manual sources only) |
+| DELETE | `/api/sources/:id/files/:path` | Delete file (manual sources only) |
 
 **Notes:**
 
+- `:id` is the source ID (auto-generated), not the source name
 - File paths are URL-encoded (use `%2F` for nested paths)
 - File operations require source to exist
 - Write operations only work on manual sources (git sources are read-only)
@@ -114,20 +116,23 @@ curl -X POST http://localhost:9000/api/sources \
 **Upload formats (PUT):**
 
 ```bash
+# First, get the source ID (either from creation response or by listing sources)
+SOURCE_ID="abc123xyz"  # Replace with actual source ID
+
 # JSON body
 curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/json" \
   -d '{"content": "file contents", "encoding": "utf-8"}' \
-  http://localhost:9000/api/sources/my-api/files/example.ts
+  http://localhost:9000/api/sources/$SOURCE_ID/files/example.ts
 
 # Multipart form-data
 curl -X PUT -H "X-API-Key: key" \
   -F "file=@local-file.ts" \
-  http://localhost:9000/api/sources/my-api/files/example.ts
+  http://localhost:9000/api/sources/$SOURCE_ID/files/example.ts
 
 # Raw binary
 curl -X PUT -H "X-API-Key: key" -H "Content-Type: application/octet-stream" \
   --data-binary @local-file.bin \
-  http://localhost:9000/api/sources/my-api/files/binary.bin
+  http://localhost:9000/api/sources/$SOURCE_ID/files/binary.bin
 ```
 
 ### API Key Groups

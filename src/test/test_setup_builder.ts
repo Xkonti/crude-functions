@@ -958,7 +958,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     // STEP 14: Create code source service if needed
     if (this.flags.codeSourceService) {
       context.codeSourceService = createCodeSourceService(
-        db,
+        surrealFactory,
         context.encryptionService,
         context.jobQueueService,
         context.schedulingService,

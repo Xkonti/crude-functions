@@ -55,14 +55,15 @@ integrationTest("GET /api/sources/:id returns 404 for non-existent source", asyn
   }
 });
 
-integrationTest("GET /api/sources/:id returns 400 for invalid ID", async () => {
+integrationTest("GET /api/sources/:id returns 404 for non-existent ID", async () => {
   const { app, ctx } = await createTestApp();
   try {
-    const res = await app.request("/api/sources/invalid");
-    expect(res.status).toBe(400);
+    // Any non-existent ID returns 404 (IDs are no longer validated for format)
+    const res = await app.request("/api/sources/nonexistent-id");
+    expect(res.status).toBe(404);
 
     const body = await res.json();
-    expect(body.error).toContain("Invalid source ID");
+    expect(body.error).toContain("not found");
   } finally {
     await ctx.cleanup();
   }

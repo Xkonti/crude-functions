@@ -53,11 +53,12 @@ function createMockCodeSourceService(): CodeSourceService {
 
   return {
     getAll: () => Promise.resolve(sources),
-    getById: (id: number) => Promise.resolve(sources.find((s) => s.id === id) ?? null),
+    // ID is now the source name (string)
+    getById: (id: string) => Promise.resolve(sources.find((s) => s.id === id) ?? null),
     getByName: (name: string) => Promise.resolve(sources.find((s) => s.name === name) ?? null),
     create: (input: { name: string; type: "manual" | "git"; typeSettings?: object; syncSettings?: object; enabled?: boolean }) => {
       const source: CodeSource = {
-        id: sources.length + 1,
+        id: input.name, // ID is now the source name
         name: input.name,
         type: input.type,
         typeSettings: input.typeSettings ?? {},
@@ -72,7 +73,8 @@ function createMockCodeSourceService(): CodeSourceService {
       sources.push(source);
       return Promise.resolve(source);
     },
-    update: (id: number, updates: { typeSettings?: object; syncSettings?: object; enabled?: boolean }) => {
+    // ID is now the source name (string)
+    update: (id: string, updates: { typeSettings?: object; syncSettings?: object; enabled?: boolean }) => {
       const source = sources.find((s) => s.id === id);
       if (!source) return Promise.reject(new Error("Source not found"));
       if (updates.typeSettings !== undefined) source.typeSettings = updates.typeSettings;
@@ -81,7 +83,8 @@ function createMockCodeSourceService(): CodeSourceService {
       source.updatedAt = new Date();
       return Promise.resolve(source);
     },
-    delete: (id: number) => {
+    // ID is now the source name (string)
+    delete: (id: string) => {
       const index = sources.findIndex((s) => s.id === id);
       if (index === -1) return Promise.reject(new Error("Source not found"));
       sources.splice(index, 1);
@@ -91,6 +94,7 @@ function createMockCodeSourceService(): CodeSourceService {
     isEditable: () => Promise.resolve(true),
     triggerManualSync: () => Promise.resolve(null),
     registerProvider: () => {},
+    isValidSourceName: (name: string) => /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/.test(name),
   } as unknown as CodeSourceService;
 }
 

@@ -449,17 +449,18 @@ export function createSchedulingService(
 
 /**
  * Creates the CodeSourceService with providers registered.
- * Requires database, encryption service, job queue service, scheduling service, and code directory.
+ * Requires SurrealDB connection factory, encryption service, job queue service,
+ * scheduling service, and code directory.
  */
 export function createCodeSourceService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   encryptionService: VersionedEncryptionService,
   jobQueueService: JobQueueService,
   schedulingService: SchedulingService,
   codeDir: string,
 ): CodeSourceService {
   const service = new CodeSourceService({
-    db,
+    surrealFactory,
     encryptionService,
     jobQueueService,
     schedulingService,
@@ -467,11 +468,16 @@ export function createCodeSourceService(
   });
 
   // Register providers (manual and git)
+  // Manual provider has no sensitive fields
   service.registerProvider(
     new ManualCodeSourceProvider({ codeDirectory: codeDir }),
   );
+  // Git provider needs encryption service for authToken encryption
   service.registerProvider(
-    new GitCodeSourceProvider({ codeDirectory: codeDir }),
+    new GitCodeSourceProvider({
+      codeDirectory: codeDir,
+      encryptionService,
+    }),
   );
 
   return service;

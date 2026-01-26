@@ -4,10 +4,8 @@
 -- This migration runs with root credentials.
 -- The connection should be established to system/system before running.
 
--- Ensure namespace exists (idempotent)
+-- TODO: Make it parametrized somehow
 DEFINE NAMESPACE IF NOT EXISTS system;
-
--- Ensure database exists (idempotent)
 DEFINE DATABASE IF NOT EXISTS system;
 
 -- Schema version tracking table
@@ -24,38 +22,15 @@ UPSERT schema_version:current SET version = 0;
 --------------------------------------------------------------------------------
 
 -- Settings table - stores application settings (global and in future per-user)
-DEFINE TABLE IF NOT EXISTS setting
-  SCHEMAFULL TYPE NORMAL
-  ;
+DEFINE TABLE IF NOT EXISTS setting SCHEMAFULL TYPE NORMAL;
 
-DEFINE FIELD IF NOT EXISTS
-  name ON TABLE setting
-  TYPE string
-  ;
+DEFINE FIELD IF NOT EXISTS name ON TABLE setting TYPE string;
+DEFINE FIELD IF NOT EXISTS value ON TABLE setting TYPE string;
+DEFINE FIELD IF NOT EXISTS isEncrypted ON TABLE setting TYPE bool;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE setting TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE setting TYPE datetime VALUE time::now();
 
-DEFINE FIELD IF NOT EXISTS
-  value ON TABLE setting
-  TYPE string
-  ;
-
-DEFINE FIELD IF NOT EXISTS
-  isEncrypted ON TABLE setting
-  TYPE bool
-  ;
-
-DEFINE FIELD IF NOT EXISTS
-  updatedAt ON TABLE setting
-  TYPE datetime
-  VALUE time::now()
-  ;
-
--- Each setting name should be unique
-DEFINE INDEX unique_setting
-  ON setting
-  FIELDS name
-  UNIQUE
-  ;
-
+DEFINE INDEX unique_setting ON setting FIELDS name UNIQUE;
 
 --------------------------------------------------------------------------------
 -- Better Auth Tables
@@ -122,3 +97,36 @@ DEFINE FIELD IF NOT EXISTS createdAt ON TABLE verification TYPE option<datetime>
 DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE verification TYPE option<datetime>;
 
 DEFINE INDEX IF NOT EXISTS idx_verification_identifier ON verification FIELDS identifier;
+
+--------------------------------------------------------------------------------
+-- Code Sources
+--------------------------------------------------------------------------------
+
+-- Code sources table - manages code directories under code/
+DEFINE TABLE IF NOT EXISTS codeSource SCHEMAFULL TYPE NORMAL;
+
+DEFINE FIELD IF NOT EXISTS name ON TABLE codeSource TYPE string;
+DEFINE FIELD IF NOT EXISTS type ON TABLE codeSource TYPE string; -- "manual" or "git"
+DEFINE FIELD IF NOT EXISTS enabled ON TABLE codeSource TYPE bool DEFAULT true;
+
+-- Type-specific settings (FLEXIBLE allows varying structures by source type)
+-- Fields include: url, branch, tag, commit, authToken (encrypted by provider)
+DEFINE FIELD IF NOT EXISTS typeSettings ON TABLE codeSource TYPE object FLEXIBLE DEFAULT {};
+
+-- Sync settings (common across syncable types)
+-- Fields include: intervalSeconds, webhookEnabled, webhookSecret (encrypted by service)
+DEFINE FIELD IF NOT EXISTS syncSettings ON TABLE codeSource TYPE object FLEXIBLE DEFAULT {};
+
+-- Sync status tracking
+DEFINE FIELD IF NOT EXISTS lastSyncStartedAt ON TABLE codeSource TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS lastSyncAt ON TABLE codeSource TYPE option<datetime>;
+DEFINE FIELD IF NOT EXISTS lastSyncError ON TABLE codeSource TYPE option<string>;
+
+-- Timestamps
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE codeSource TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE codeSource TYPE datetime VALUE time::now();
+
+-- Indexes
+DEFINE INDEX IF NOT EXISTS unique_codeSource_name ON codeSource FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS idx_codeSource_enabled ON codeSource FIELDS enabled;
+DEFINE INDEX IF NOT EXISTS idx_codeSource_type ON codeSource FIELDS type;

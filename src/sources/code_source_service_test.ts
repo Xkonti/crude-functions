@@ -6,6 +6,7 @@ import type {
   CodeSource,
   ProviderCapabilities,
   SyncResult,
+  TypeSettings,
 } from "./types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
 import {
@@ -17,6 +18,7 @@ import {
   WebhookAuthError,
   WebhookDisabledError,
 } from "./errors.ts";
+import { RecordId } from "surrealdb";
 
 // ============================================================================
 // Mock Provider for Testing
@@ -45,6 +47,13 @@ function createMockProvider(
   return {
     type,
     getCapabilities: () => capabilities,
+    // No-op encryption for mock provider - settings pass through unchanged
+    encryptSensitiveFields: (settings: TypeSettings): Promise<TypeSettings> => {
+      return Promise.resolve(settings);
+    },
+    decryptSensitiveFields: (settings: TypeSettings): Promise<TypeSettings> => {
+      return Promise.resolve(settings);
+    },
     sync: (_source: CodeSource, token: CancellationToken): Promise<SyncResult> => {
       token.throwIfCancelled();
       if (options?.throwOnSync) {
@@ -193,7 +202,8 @@ integrationTest("CodeSourceService.create creates source with minimal config", a
       type: "manual",
     });
 
-    expect(source.id).toBeGreaterThan(0);
+    // ID is auto-generated, name is as provided
+    expect(source.id).toBeTruthy();
     expect(source.name).toBe("utils");
     expect(source.type).toBe("manual");
     expect(source.enabled).toBe(true);
@@ -279,7 +289,7 @@ integrationTest("CodeSourceService.create throws on unregistered provider", asyn
     // Import CodeSourceService to create a fresh instance without providers
     const { CodeSourceService } = await import("./code_source_service.ts");
     const freshService = new CodeSourceService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       jobQueueService: ctx.jobQueueService,
       schedulingService: ctx.schedulingService,
@@ -392,7 +402,8 @@ integrationTest("CodeSourceService.getById returns source or null", async () => 
     const found = await ctx.codeSourceService.getById(created.id);
     expect(found?.name).toBe("utils");
 
-    const notFound = await ctx.codeSourceService.getById(99999);
+    // ID is now a string (the source name)
+    const notFound = await ctx.codeSourceService.getById("nonexistent");
     expect(notFound).toBeNull();
   } finally {
     await ctx.cleanup();
@@ -424,7 +435,8 @@ integrationTest("CodeSourceService.exists returns true/false correctly", async (
     const created = await ctx.codeSourceService.create({ name: "utils", type: "manual" });
 
     expect(await ctx.codeSourceService.exists(created.id)).toBe(true);
-    expect(await ctx.codeSourceService.exists(99999)).toBe(false);
+    // ID is now a string (the source name)
+    expect(await ctx.codeSourceService.exists("nonexistent")).toBe(false);
   } finally {
     await ctx.cleanup();
   }
@@ -520,8 +532,9 @@ integrationTest("CodeSourceService.update updates enabled status", async () => {
 integrationTest("CodeSourceService.update throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // ID is now a string (the source name)
     await expect(
-      ctx.codeSourceService.update(99999, { enabled: false }),
+      ctx.codeSourceService.update("nonexistent", { enabled: false }),
     ).rejects.toThrow(SourceNotFoundError);
   } finally {
     await ctx.cleanup();
@@ -571,7 +584,8 @@ integrationTest("CodeSourceService.delete removes source", async () => {
 integrationTest("CodeSourceService.delete throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
-    await expect(ctx.codeSourceService.delete(99999)).rejects.toThrow(
+    // ID is now a string (the source name)
+    await expect(ctx.codeSourceService.delete("nonexistent")).rejects.toThrow(
       SourceNotFoundError,
     );
   } finally {
@@ -586,7 +600,8 @@ integrationTest("CodeSourceService.delete throws for non-existent source", async
 integrationTest("CodeSourceService encrypts and decrypts typeSettings correctly", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
-    ctx.codeSourceService.registerProvider(createMockProvider("git"));
+    // Use real git provider which encrypts authToken
+    // (The default providers registered by withCodeSources() include the real GitCodeSourceProvider)
 
     const sensitiveSettings = {
       url: "https://github.com/user/repo.git",
@@ -604,12 +619,21 @@ integrationTest("CodeSourceService encrypts and decrypts typeSettings correctly"
     const retrieved = await ctx.codeSourceService.getById(source.id);
     expect(retrieved?.typeSettings).toEqual(sensitiveSettings);
 
-    // Verify raw DB value is encrypted (not plaintext)
-    const rawRow = await ctx.db.queryOne<{ typeSettings: string }>(
-      "SELECT typeSettings FROM codeSources WHERE id = ?",
-      [source.id],
-    );
-    expect(rawRow?.typeSettings).not.toContain("super-secret-token-123");
+    // Verify raw DB value has encrypted authToken (not plaintext)
+    // Query SurrealDB directly to check the encrypted value
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ typeSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    // authToken should be encrypted (different from plaintext)
+    expect(rawRow?.typeSettings?.authToken).not.toBe("super-secret-token-123");
+    // But url/branch should be unchanged (not encrypted)
+    expect(rawRow?.typeSettings?.url).toBe("https://github.com/user/repo.git");
+    expect(rawRow?.typeSettings?.branch).toBe("main");
   } finally {
     await ctx.cleanup();
   }
@@ -635,12 +659,20 @@ integrationTest("CodeSourceService encrypts and decrypts syncSettings correctly"
     const retrieved = await ctx.codeSourceService.getById(source.id);
     expect(retrieved?.syncSettings).toEqual(sensitiveSettings);
 
-    // Verify raw DB value is encrypted
-    const rawRow = await ctx.db.queryOne<{ syncSettings: string }>(
-      "SELECT syncSettings FROM codeSources WHERE id = ?",
-      [source.id],
-    );
-    expect(rawRow?.syncSettings).not.toContain("webhook-secret-456");
+    // Verify raw DB value has encrypted webhookSecret (not plaintext)
+    // Query SurrealDB directly to check the encrypted value
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ syncSettings: { webhookSecret?: string; intervalSeconds?: number } } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    // webhookSecret should be encrypted (different from plaintext)
+    expect(rawRow?.syncSettings?.webhookSecret).not.toBe("webhook-secret-456");
+    // But intervalSeconds should be unchanged (not encrypted)
+    expect(rawRow?.syncSettings?.intervalSeconds).toBe(300);
   } finally {
     await ctx.cleanup();
   }
@@ -665,7 +697,8 @@ integrationTest("CodeSourceService.isEditable returns correct value", async () =
 
     expect(await ctx.codeSourceService.isEditable(manual.id)).toBe(true);
     expect(await ctx.codeSourceService.isEditable(git.id)).toBe(false);
-    expect(await ctx.codeSourceService.isEditable(99999)).toBe(false);
+    // ID is now a string (the source name)
+    expect(await ctx.codeSourceService.isEditable("nonexistent")).toBe(false);
   } finally {
     await ctx.cleanup();
   }
@@ -686,7 +719,8 @@ integrationTest("CodeSourceService.isSyncable returns correct value", async () =
 
     expect(await ctx.codeSourceService.isSyncable(manual.id)).toBe(false);
     expect(await ctx.codeSourceService.isSyncable(git.id)).toBe(true);
-    expect(await ctx.codeSourceService.isSyncable(99999)).toBe(false);
+    // ID is now a string (the source name)
+    expect(await ctx.codeSourceService.isSyncable("nonexistent")).toBe(false);
   } finally {
     await ctx.cleanup();
   }
@@ -762,8 +796,9 @@ integrationTest("CodeSourceService.markSyncFailed sets error and clears startedA
 integrationTest("CodeSourceService.triggerManualSync throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // ID is now a string (the source name)
     await expect(
-      ctx.codeSourceService.triggerManualSync(99999),
+      ctx.codeSourceService.triggerManualSync("nonexistent"),
     ).rejects.toThrow(SourceNotFoundError);
   } finally {
     await ctx.cleanup();
@@ -813,8 +848,9 @@ integrationTest("CodeSourceService.triggerManualSync enqueues job for syncable s
 integrationTest("CodeSourceService.triggerWebhookSync throws for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // ID is now a string (the source name)
     await expect(
-      ctx.codeSourceService.triggerWebhookSync(99999, "secret"),
+      ctx.codeSourceService.triggerWebhookSync("nonexistent", "secret"),
     ).rejects.toThrow(SourceNotFoundError);
   } finally {
     await ctx.cleanup();
@@ -937,8 +973,9 @@ integrationTest("CodeSourceService.triggerWebhookSync returns null for disabled 
 integrationTest("CodeSourceService.pauseSchedule throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // ID is now a string (the source name)
     await expect(
-      ctx.codeSourceService.pauseSchedule(99999),
+      ctx.codeSourceService.pauseSchedule("nonexistent"),
     ).rejects.toThrow(SourceNotFoundError);
   } finally {
     await ctx.cleanup();
@@ -948,8 +985,9 @@ integrationTest("CodeSourceService.pauseSchedule throws SourceNotFoundError for 
 integrationTest("CodeSourceService.resumeSchedule throws SourceNotFoundError for non-existent source", async () => {
   const ctx = await TestSetupBuilder.create().withCodeSources().build();
   try {
+    // ID is now a string (the source name)
     await expect(
-      ctx.codeSourceService.resumeSchedule(99999),
+      ctx.codeSourceService.resumeSchedule("nonexistent"),
     ).rejects.toThrow(SourceNotFoundError);
   } finally {
     await ctx.cleanup();

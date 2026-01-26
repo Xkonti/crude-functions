@@ -27,7 +27,7 @@ Deno.test("ManualCodeSourceProvider.sync returns immediate success", async () =>
   const provider = new ManualCodeSourceProvider({ codeDirectory: "/tmp" });
 
   const mockSource: CodeSource = {
-    id: 1,
+    id: "test-source", // ID is now the source name (string)
     name: "test-source",
     type: "manual",
     typeSettings: {},

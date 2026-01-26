@@ -1,6 +1,7 @@
 import { Mutex } from "@core/asyncutil/mutex";
 import { join } from "@std/path";
-import type { DatabaseService } from "../database/database_service.ts";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
@@ -11,7 +12,6 @@ import type {
   CodeSourceType,
   NewCodeSource,
   UpdateCodeSource,
-  TypeSettings,
   SyncSettings,
   SyncResult,
   CodeSourceProvider,
@@ -52,16 +52,19 @@ function constantTimeCompare(a: string, b: string): boolean {
  *
  * Responsibilities:
  * - CRUD operations for code sources (database)
- * - Encrypted storage of typeSettings and syncSettings
+ * - Field-level encryption of sensitive settings (webhookSecret)
  * - Provider registration and delegation
  * - Schedule management for sync operations
  * - Validation of source configuration
  *
- * This service owns all database access to the codeSources table.
+ * This service owns all database access to the codeSource table.
  * File and sync operations are delegated to registered providers.
+ *
+ * Note: typeSettings encryption is delegated to providers (e.g., GitCodeSourceProvider
+ * encrypts authToken). This service only handles syncSettings.webhookSecret encryption.
  */
 export class CodeSourceService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly encryptionService: IEncryptionService;
   private readonly jobQueueService: JobQueueService;
   private readonly schedulingService: SchedulingService;
@@ -72,7 +75,7 @@ export class CodeSourceService {
   private readonly providers = new Map<CodeSourceType, CodeSourceProvider>();
 
   constructor(options: CodeSourceServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.encryptionService = options.encryptionService;
     this.jobQueueService = options.jobQueueService;
     this.schedulingService = options.schedulingService;
@@ -120,9 +123,12 @@ export class CodeSourceService {
    * Get all code sources.
    */
   async getAll(): Promise<CodeSource[]> {
-    const rows = await this.db.queryAll<CodeSourceRow>(
-      `SELECT * FROM codeSources ORDER BY name ASC`,
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[CodeSourceRow[]]>(
+        `SELECT * FROM codeSource ORDER BY name ASC`,
+      );
+      return result ?? [];
+    });
     return Promise.all(rows.map((row) => this.rowToSource(row)));
   }
 
@@ -130,20 +136,27 @@ export class CodeSourceService {
    * Get all enabled code sources.
    */
   async getAllEnabled(): Promise<CodeSource[]> {
-    const rows = await this.db.queryAll<CodeSourceRow>(
-      `SELECT * FROM codeSources WHERE enabled = 1 ORDER BY name ASC`,
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[CodeSourceRow[]]>(
+        `SELECT * FROM codeSource WHERE enabled = true ORDER BY name ASC`,
+      );
+      return result ?? [];
+    });
     return Promise.all(rows.map((row) => this.rowToSource(row)));
   }
 
   /**
    * Get a code source by ID.
    */
-  async getById(id: number): Promise<CodeSource | null> {
-    const row = await this.db.queryOne<CodeSourceRow>(
-      `SELECT * FROM codeSources WHERE id = ?`,
-      [id],
-    );
+  async getById(id: string): Promise<CodeSource | null> {
+    const recordId = new RecordId("codeSource", id);
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[CodeSourceRow | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result ?? null;
+    });
     return row ? this.rowToSource(row) : null;
   }
 
@@ -151,33 +164,46 @@ export class CodeSourceService {
    * Get a code source by name.
    */
   async getByName(name: string): Promise<CodeSource | null> {
-    const row = await this.db.queryOne<CodeSourceRow>(
-      `SELECT * FROM codeSources WHERE name = ?`,
-      [name],
-    );
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[CodeSourceRow[]]>(
+        `SELECT * FROM codeSource WHERE name = $name LIMIT 1`,
+        { name },
+      );
+      return result?.[0] ?? null;
+    });
     return row ? this.rowToSource(row) : null;
   }
 
   /**
-   * Check if a source exists.
+   * Check if a source exists by ID.
    */
-  async exists(id: number): Promise<boolean> {
-    const row = await this.db.queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM codeSources WHERE id = ?`,
-      [id],
-    );
-    return (row?.count ?? 0) > 0;
+  async exists(id: string): Promise<boolean> {
+    const recordId = new RecordId("codeSource", id);
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[CodeSourceRow | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result ?? null;
+    });
+    return row !== null;
   }
 
   /**
    * Check if a source name is taken.
    */
   async nameExists(name: string): Promise<boolean> {
-    const row = await this.db.queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM codeSources WHERE name = ?`,
-      [name],
+    const exists = await this.surrealFactory.withSystemConnection(
+      {},
+      async (db) => {
+        const [result] = await db.query<[{ count: number }[]]>(
+          `SELECT count() as count FROM codeSource WHERE name = $name`,
+          { name },
+        );
+        return (result?.[0]?.count ?? 0) > 0;
+      },
     );
-    return (row?.count ?? 0) > 0;
+    return exists;
   }
 
   // ============== Mutation Operations ==============
@@ -205,39 +231,54 @@ export class CodeSourceService {
     // Get provider (validates type is supported)
     const provider = this.getProvider(input.type);
 
-    // Encrypt settings
-    const typeSettingsStr = await this.encryptSettings(input.typeSettings ?? {});
-    const syncSettingsStr = await this.encryptSettings(input.syncSettings ?? {});
-
-    // Insert into database
-    const result = await this.db.execute(
-      `INSERT INTO codeSources (name, type, typeSettings, syncSettings, enabled, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-      [
-        input.name,
-        input.type,
-        typeSettingsStr,
-        syncSettingsStr,
-        (input.enabled ?? true) ? 1 : 0,
-      ],
+    // Encrypt sensitive fields
+    // Provider encrypts its typeSettings sensitive fields (e.g., authToken)
+    const encryptedTypeSettings = await provider.encryptSensitiveFields(
+      input.typeSettings ?? {},
+    );
+    // Service encrypts syncSettings.webhookSecret
+    const encryptedSyncSettings = await this.encryptSyncSettings(
+      input.syncSettings ?? {},
     );
 
-    const sourceId = Number(result.lastInsertRowId);
+    // Create record (SurrealDB auto-generates ID)
+    const createdRow = await this.surrealFactory.withSystemConnection(
+      {},
+      async (db) => {
+        const [result] = await db.query<[CodeSourceRow[]]>(
+          `CREATE codeSource SET
+            name = $name,
+            type = $type,
+            typeSettings = $typeSettings,
+            syncSettings = $syncSettings,
+            enabled = $enabled`,
+          {
+            name: input.name,
+            type: input.type,
+            typeSettings: encryptedTypeSettings,
+            syncSettings: encryptedSyncSettings,
+            enabled: input.enabled ?? true,
+          },
+        );
+        return result?.[0] ?? null;
+      },
+    );
+
+    if (!createdRow) {
+      throw new Error("Failed to create source record");
+    }
 
     // Create directory via provider
     await provider.ensureDirectory(input.name);
 
-    // Get the created source
-    const source = await this.getById(sourceId);
-    if (!source) {
-      throw new Error("Failed to retrieve created source");
-    }
+    // Convert to CodeSource entity
+    const source = await this.rowToSource(createdRow);
 
     // Create schedule if needed (syncable source with interval)
     await this.ensureSchedule(source);
 
     logger.info(
-      `[CodeSource] Created source '${input.name}' (type: ${input.type}, id: ${sourceId})`,
+      `[CodeSource] Created source '${input.name}' (type: ${input.type})`,
     );
 
     return source;
@@ -250,7 +291,7 @@ export class CodeSourceService {
    * @throws {SourceNotFoundError} If source doesn't exist
    * @throws {InvalidSourceConfigError} If configuration is invalid
    */
-  async update(id: number, updates: UpdateCodeSource): Promise<CodeSource> {
+  async update(id: string, updates: UpdateCodeSource): Promise<CodeSource> {
     using _lock = await this.writeMutex.acquire();
 
     // Get existing source
@@ -268,38 +309,39 @@ export class CodeSourceService {
     }
 
     // Build update fields
-    const fields: string[] = [];
-    const values: (string | number)[] = [];
+    const setFields: string[] = [];
+    const params: Record<string, unknown> = {
+      recordId: new RecordId("codeSource", id),
+    };
 
     if (updates.typeSettings !== undefined) {
-      const encrypted = await this.encryptSettings(updates.typeSettings);
-      fields.push("typeSettings = ?");
-      values.push(encrypted);
+      const provider = this.getProvider(existing.type);
+      const encrypted = await provider.encryptSensitiveFields(updates.typeSettings);
+      setFields.push("typeSettings = $typeSettings");
+      params.typeSettings = encrypted;
     }
 
     if (updates.syncSettings !== undefined) {
-      const encrypted = await this.encryptSettings(updates.syncSettings);
-      fields.push("syncSettings = ?");
-      values.push(encrypted);
+      const encrypted = await this.encryptSyncSettings(updates.syncSettings);
+      setFields.push("syncSettings = $syncSettings");
+      params.syncSettings = encrypted;
     }
 
     if (updates.enabled !== undefined) {
-      fields.push("enabled = ?");
-      values.push(updates.enabled ? 1 : 0);
+      setFields.push("enabled = $enabled");
+      params.enabled = updates.enabled;
     }
 
-    if (fields.length === 0) {
+    if (setFields.length === 0) {
       return existing; // Nothing to update
     }
 
-    // Add updatedAt
-    fields.push("updatedAt = CURRENT_TIMESTAMP");
-    values.push(id);
-
-    await this.db.execute(
-      `UPDATE codeSources SET ${fields.join(", ")} WHERE id = ?`,
-      values,
-    );
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPDATE $recordId SET ${setFields.join(", ")}`,
+        params,
+      );
+    });
 
     // Get updated source
     const updated = await this.getById(id);
@@ -333,7 +375,7 @@ export class CodeSourceService {
    * @param deleteDirectory - Whether to delete directory (default: true)
    * @throws {SourceNotFoundError} If source doesn't exist
    */
-  async delete(id: number, deleteDirectory = true): Promise<void> {
+  async delete(id: string, deleteDirectory = true): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
     const source = await this.getById(id);
@@ -357,7 +399,10 @@ export class CodeSourceService {
     }
 
     // Delete from database
-    await this.db.execute(`DELETE FROM codeSources WHERE id = ?`, [id]);
+    const recordId = new RecordId("codeSource", id);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(`DELETE $recordId`, { recordId });
+    });
 
     logger.info(`[CodeSource] Deleted source '${source.name}' (id: ${id})`);
   }
@@ -365,7 +410,7 @@ export class CodeSourceService {
   /**
    * Enable or disable a source.
    */
-  setEnabled(id: number, enabled: boolean): Promise<CodeSource> {
+  setEnabled(id: string, enabled: boolean): Promise<CodeSource> {
     return this.update(id, { enabled });
   }
 
@@ -374,44 +419,47 @@ export class CodeSourceService {
   /**
    * Mark sync as started. Sets lastSyncStartedAt, clears lastSyncError.
    */
-  async markSyncStarted(id: number): Promise<void> {
-    await this.db.execute(
-      `UPDATE codeSources
-       SET lastSyncStartedAt = CURRENT_TIMESTAMP,
-           lastSyncError = NULL,
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [id],
-    );
+  async markSyncStarted(id: string): Promise<void> {
+    const recordId = new RecordId("codeSource", id);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPDATE $recordId SET
+          lastSyncStartedAt = time::now(),
+          lastSyncError = NONE`,
+        { recordId },
+      );
+    });
   }
 
   /**
    * Mark sync as completed. Sets lastSyncAt, clears error and startedAt.
    */
-  async markSyncCompleted(id: number): Promise<void> {
-    await this.db.execute(
-      `UPDATE codeSources
-       SET lastSyncAt = CURRENT_TIMESTAMP,
-           lastSyncStartedAt = NULL,
-           lastSyncError = NULL,
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [id],
-    );
+  async markSyncCompleted(id: string): Promise<void> {
+    const recordId = new RecordId("codeSource", id);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPDATE $recordId SET
+          lastSyncAt = time::now(),
+          lastSyncStartedAt = NONE,
+          lastSyncError = NONE`,
+        { recordId },
+      );
+    });
   }
 
   /**
    * Mark sync as failed. Sets lastSyncError, clears startedAt.
    */
-  async markSyncFailed(id: number, error: string): Promise<void> {
-    await this.db.execute(
-      `UPDATE codeSources
-       SET lastSyncError = ?,
-           lastSyncStartedAt = NULL,
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [error, id],
-    );
+  async markSyncFailed(id: string, error: string): Promise<void> {
+    const recordId = new RecordId("codeSource", id);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPDATE $recordId SET
+          lastSyncError = $error,
+          lastSyncStartedAt = NONE`,
+        { recordId, error },
+      );
+    });
   }
 
   // ============== Schedule Management ==============
@@ -419,7 +467,7 @@ export class CodeSourceService {
   /**
    * Get the schedule name for a source.
    */
-  private getScheduleName(sourceId: number): string {
+  private getScheduleName(sourceId: string): string {
     return `source_sync_${sourceId}`;
   }
 
@@ -503,7 +551,7 @@ export class CodeSourceService {
    *
    * @param sourceId - Source ID
    */
-  private async deleteSchedule(sourceId: number): Promise<void> {
+  private async deleteSchedule(sourceId: string): Promise<void> {
     const scheduleName = this.getScheduleName(sourceId);
     try {
       const schedule = await this.schedulingService.getSchedule(scheduleName);
@@ -528,7 +576,7 @@ export class CodeSourceService {
    * @param sourceId - Source ID
    * @throws {SourceNotFoundError} If source doesn't exist
    */
-  async pauseSchedule(sourceId: number): Promise<void> {
+  async pauseSchedule(sourceId: string): Promise<void> {
     const source = await this.getById(sourceId);
     if (!source) {
       throw new SourceNotFoundError(sourceId);
@@ -556,7 +604,7 @@ export class CodeSourceService {
    * @param sourceId - Source ID
    * @throws {SourceNotFoundError} If source doesn't exist
    */
-  async resumeSchedule(sourceId: number): Promise<void> {
+  async resumeSchedule(sourceId: string): Promise<void> {
     const source = await this.getById(sourceId);
     if (!source) {
       throw new SourceNotFoundError(sourceId);
@@ -586,7 +634,7 @@ export class CodeSourceService {
    * @throws {SourceNotFoundError} If source doesn't exist
    * @throws {SourceNotSyncableError} If source type doesn't support sync
    */
-  async triggerManualSync(id: number): Promise<Job | null> {
+  async triggerManualSync(id: string): Promise<Job | null> {
     const source = await this.getById(id);
     if (!source) {
       throw new SourceNotFoundError(id);
@@ -644,7 +692,7 @@ export class CodeSourceService {
    * @throws {SourceNotSyncableError} If source type doesn't support sync
    */
   async triggerWebhookSync(
-    id: number,
+    id: string,
     providedSecret: string,
   ): Promise<Job | null> {
     const source = await this.getById(id);
@@ -727,7 +775,7 @@ export class CodeSourceService {
    * @throws {SourceNotSyncableError} If source type doesn't support sync
    * @throws {ProviderNotFoundError} If no provider registered for type
    */
-  async syncSource(id: number, token: CancellationToken): Promise<SyncResult> {
+  async syncSource(id: string, token: CancellationToken): Promise<SyncResult> {
     const source = await this.getById(id);
     if (!source) {
       throw new SourceNotFoundError(id);
@@ -785,7 +833,7 @@ export class CodeSourceService {
    * Check if a source is editable (supports file writes via API).
    * Uses provider.getCapabilities().isEditable.
    */
-  async isEditable(id: number): Promise<boolean> {
+  async isEditable(id: string): Promise<boolean> {
     const source = await this.getById(id);
     if (!source) {
       return false;
@@ -803,7 +851,7 @@ export class CodeSourceService {
    * Check if a source is syncable (has remote to sync from).
    * Uses provider.getCapabilities().isSyncable.
    */
-  async isSyncable(id: number): Promise<boolean> {
+  async isSyncable(id: string): Promise<boolean> {
     const source = await this.getById(id);
     if (!source) {
       return false;
@@ -962,63 +1010,102 @@ export class CodeSourceService {
   }
 
   /**
-   * Encrypt settings object to JSON string.
+   * Encrypt webhookSecret in sync settings.
+   * Only encrypts if webhookSecret is present.
    */
-  private encryptSettings(settings: unknown): Promise<string> {
-    const json = JSON.stringify(settings);
-    return this.encryptionService.encrypt(json);
+  private async encryptSyncSettings(settings: SyncSettings): Promise<SyncSettings> {
+    if (!settings.webhookSecret) {
+      return settings;
+    }
+    return {
+      ...settings,
+      webhookSecret: await this.encryptionService.encrypt(settings.webhookSecret),
+    };
   }
 
   /**
-   * Decrypt settings JSON string to object.
+   * Decrypt webhookSecret in sync settings.
+   * Only decrypts if webhookSecret is present.
    */
-  private async decryptSettings<T>(encrypted: string | null): Promise<T> {
-    if (!encrypted) {
-      return {} as T;
+  private async decryptSyncSettings(settings: SyncSettings): Promise<SyncSettings> {
+    if (!settings.webhookSecret) {
+      return settings;
     }
-    const json = await this.encryptionService.decrypt(encrypted);
     try {
-      return JSON.parse(json) as T;
+      return {
+        ...settings,
+        webhookSecret: await this.encryptionService.decrypt(settings.webhookSecret),
+      };
     } catch (error) {
       logger.error(
-        `[CodeSource] Failed to parse decrypted settings, returning empty object:`,
+        `[CodeSource] Failed to decrypt webhookSecret, returning as-is:`,
         error,
       );
-      return {} as T;
+      return settings;
     }
+  }
+
+  /**
+   * Convert a value to Date, handling SurrealDB's datetime type.
+   */
+  private toDate(value: Date | unknown): Date {
+    if (value instanceof Date) {
+      return value;
+    }
+    // SurrealDB's DateTime has a toDate() method
+    if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
+      return value.toDate() as Date;
+    }
+    // Try to construct from string/number
+    return new Date(value as string | number);
+  }
+
+  /**
+   * Convert an optional value to Date or null.
+   */
+  private toOptionalDate(value: Date | unknown | null): Date | null {
+    if (value === null || value === undefined) {
+      return null;
+    }
+    return this.toDate(value);
   }
 
   /**
    * Convert database row to CodeSource entity.
+   * Decrypts both syncSettings.webhookSecret and typeSettings sensitive fields.
    */
   private async rowToSource(row: CodeSourceRow): Promise<CodeSource> {
     // Validate type
-    if (!isCodeSourceType(row.type)) {
-      throw new Error(`Invalid source type in database: ${row.type}`);
+    const typeStr = row.type as string;
+    if (!isCodeSourceType(typeStr)) {
+      throw new Error(`Invalid source type in database: ${typeStr}`);
     }
 
-    // Decrypt settings
-    const typeSettings = await this.decryptSettings<TypeSettings>(
-      row.typeSettings,
-    );
-    const syncSettings = await this.decryptSettings<SyncSettings>(
-      row.syncSettings,
-    );
+    // Extract ID from RecordId
+    const id = row.id.id as string;
+
+    // Decrypt syncSettings.webhookSecret
+    const syncSettings = await this.decryptSyncSettings(row.syncSettings ?? {});
+
+    // Decrypt typeSettings via provider (if provider is registered)
+    let typeSettings = row.typeSettings ?? {};
+    if (this.providers.has(typeStr)) {
+      const provider = this.providers.get(typeStr)!;
+      typeSettings = await provider.decryptSensitiveFields(typeSettings);
+    }
 
     return {
-      id: row.id,
+      id,
       name: row.name,
-      type: row.type,
+      type: typeStr,
       typeSettings,
       syncSettings,
-      lastSyncStartedAt: row.lastSyncStartedAt
-        ? new Date(row.lastSyncStartedAt)
-        : null,
-      lastSyncAt: row.lastSyncAt ? new Date(row.lastSyncAt) : null,
-      lastSyncError: row.lastSyncError,
-      enabled: row.enabled === 1,
-      createdAt: new Date(row.createdAt),
-      updatedAt: new Date(row.updatedAt),
+      lastSyncStartedAt: this.toOptionalDate(row.lastSyncStartedAt),
+      lastSyncAt: this.toOptionalDate(row.lastSyncAt),
+      lastSyncError: row.lastSyncError ?? null,
+      enabled: row.enabled,
+      createdAt: this.toDate(row.createdAt),
+      updatedAt: this.toDate(row.updatedAt),
     };
   }
 }
