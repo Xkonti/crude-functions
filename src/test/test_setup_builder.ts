@@ -825,9 +825,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       }
     }
 
-    // STEP 7: Create routes service if needed (after API keys for key resolution)
+    // STEP 6.5: Create secrets service if needed (before routes for cascade delete)
+    if (this.flags.secretsService) {
+      context.secretsService = createSecretsService(surrealFactory, context.encryptionService);
+    }
+
+    // STEP 7: Create routes service if needed (after API keys for key resolution, after secrets for cascade delete)
     if (this.flags.routesService) {
-      context.routesService = createRoutesService(db);
+      // Pass secretsService for cascade delete of function-scoped secrets
+      context.routesService = createRoutesService(db, context.secretsService);
 
       // Create deferred routes
       for (const { path, fileName, options } of this.deferredRoutes) {
@@ -866,11 +872,6 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       for (const { name, content } of this.deferredFiles) {
         await context.fileService.writeFile(name, content);
       }
-    }
-
-    // STEP 8.5: Create secrets service if needed
-    if (this.flags.secretsService) {
-      context.secretsService = createSecretsService(surrealFactory, context.encryptionService);
     }
 
     // STEP 9: Create console log service if needed (after routes exist for FK constraint)

@@ -3,6 +3,7 @@ import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ApiKeyExtractor } from "./extractors/mod.ts";
 import { createDefaultExtractors } from "./extractors/mod.ts";
 import { logger } from "../utils/logger.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 export interface ApiKeyValidationResult {
   /** Whether the API key is valid */
@@ -78,7 +79,7 @@ export class ApiKeyValidator {
           valid: true,
           keyGroup: keyInfo.groupName,
           keyGroupId: keyInfo.groupId,
-          keyId: keyInfo.keyId,
+          keyId: recordIdToString(keyInfo.keyId),
           source: source!,
         };
       }

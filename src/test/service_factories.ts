@@ -239,10 +239,13 @@ export function createConsoleLogService(
 
 /**
  * Creates the RoutesService.
- * Requires only database.
+ * Requires database, optionally accepts SecretsService for cascade delete.
  */
-export function createRoutesService(db: DatabaseService): RoutesService {
-  return new RoutesService({ db });
+export function createRoutesService(
+  db: DatabaseService,
+  secretsService?: SecretsService
+): RoutesService {
+  return new RoutesService({ db, secretsService });
 }
 
 // =============================================================================

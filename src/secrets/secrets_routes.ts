@@ -11,19 +11,26 @@ import { recordIdToString } from "../database/surreal_helpers.ts";
 /**
  * Normalize a secret for API response.
  * Converts RecordId to string at the API boundary.
+ * @param secret - The secret to normalize
+ * @param includeValue - Whether to include the secret value (default: true)
  */
-function normalizeSecret(secret: Secret): Record<string, unknown> {
-  return {
+function normalizeSecret(secret: Secret, includeValue = true): Record<string, unknown> {
+  const result: Record<string, unknown> = {
     id: recordIdToString(secret.id),
     name: secret.name,
-    value: secret.value,
-    decryptionError: secret.decryptionError ?? null,
     comment: secret.comment,
     scopeType: secret.scopeType,
     scopeRef: secret.scopeRef ? recordIdToString(secret.scopeRef) : null,
     createdAt: secret.createdAt,
     updatedAt: secret.updatedAt,
   };
+
+  if (includeValue) {
+    result.value = secret.value;
+    result.decryptionError = secret.decryptionError ?? null;
+  }
+
+  return result;
 }
 
 export function createSecretsRoutes(service: SecretsService): Hono {
@@ -51,7 +58,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
 
     return c.json({
       name,
-      secrets: secrets.map(normalizeSecret),
+      secrets: secrets.map(s => normalizeSecret(s)),
     });
   });
 
@@ -61,6 +68,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
     const functionIdStr = c.req.query("functionId");
     const groupIdStr = c.req.query("groupId");
     const keyIdStr = c.req.query("keyId");
+    const includeValues = c.req.query("includeValues") === "true";
 
     // Validate scope
     if (scope && !validateScope(scope)) {
@@ -100,7 +108,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
     });
 
     return c.json({
-      secrets: secrets.map(normalizeSecret),
+      secrets: secrets.map(s => normalizeSecret(s, includeValues)),
     });
   });
 

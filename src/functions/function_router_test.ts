@@ -3,21 +3,16 @@ import { expect } from "@std/expect";
 import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { FunctionRouter } from "./function_router.ts";
-import { SecretsService } from "../secrets/secrets_service.ts";
 import type { TestContext } from "../test/types.ts";
 
 /** Creates a FunctionRouter with all required services from TestSetupBuilder context */
 function createFunctionRouterWithContext(ctx: TestContext) {
-  const secretsService = new SecretsService({
-    surrealFactory: ctx.surrealFactory,
-    encryptionService: ctx.encryptionService,
-  });
   return new FunctionRouter({
     routesService: ctx.routesService,
     apiKeyService: ctx.apiKeyService,
     consoleLogService: ctx.consoleLogService,
     executionMetricsService: ctx.executionMetricsService,
-    secretsService,
+    secretsService: ctx.secretsService,
     codeDirectory: ctx.codeDir,
   });
 }
@@ -770,11 +765,8 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     // Flush buffered logs before checking
     await ctx.consoleLogService.flush();
 
-    // Create SecretsService for secret operations
-    const secretsService = new SecretsService({
-      surrealFactory: ctx.surrealFactory,
-      encryptionService: ctx.encryptionService,
-    });
+    // Use the shared secretsService from context (needed for cascade delete to work)
+    const secretsService = ctx.secretsService;
 
     // Add function-specific secrets for this route
     await secretsService.createFunctionSecret(routeId, "SECRET_KEY", "secret-value", "Test secret");

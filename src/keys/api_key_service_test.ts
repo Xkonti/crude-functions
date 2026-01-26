@@ -6,6 +6,8 @@ import {
   validateKeyValue,
 } from "../validation/keys.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
+import { RecordId } from "surrealdb";
 
 // =====================
 // Validation tests (pure functions, no database needed)
@@ -89,8 +91,9 @@ integrationTest("ApiKeyService.addKey adds key to database", async () => {
     expect(keys![0].name).toBe("email-key");
     expect(keys![0].value).toBe("newkey");
     expect(keys![0].description).toBe("test description");
-    expect(typeof keys![0].id).toBe("string");
-    expect(keys![0].id.length).toBeGreaterThan(0);
+    expect(keys![0].id).toBeInstanceOf(RecordId);
+    // Verify it can be converted to a valid string ID
+    expect(recordIdToString(keys![0].id).length).toBeGreaterThan(0);
   } finally {
     await ctx.cleanup();
   }
@@ -196,7 +199,7 @@ integrationTest("ApiKeyService.removeKeyById removes key by ID", async () => {
     await ctx.apiKeyService.addKey("management", "key-2", "value2");
 
     const keys = await ctx.apiKeyService.getKeys("management");
-    const key1Id = keys!.find((k) => k.value === "value1")!.id;
+    const key1Id = recordIdToString(keys!.find((k) => k.value === "value1")!.id);
 
     await ctx.apiKeyService.removeKeyById(key1Id);
 
@@ -238,8 +241,9 @@ integrationTest("ApiKeyService.createGroup creates a new group", async () => {
 
     const id = await ctx.apiKeyService.createGroup("email", "Email service keys");
 
-    expect(typeof id).toBe("string");
-    expect(id.length).toBeGreaterThan(0);
+    expect(id).toBeInstanceOf(RecordId);
+    // Verify it can be converted to a valid string ID
+    expect(recordIdToString(id).length).toBeGreaterThan(0);
 
     const groups = await ctx.apiKeyService.getGroups();
     expect(groups.length).toBe(initialCount + 1);
@@ -283,10 +287,11 @@ integrationTest("ApiKeyService.getGroupById returns group by ID", async () => {
 
   try {
     const id = await ctx.apiKeyService.createGroup("email", "Email keys");
+    const idStr = recordIdToString(id);
 
-    const group = await ctx.apiKeyService.getGroupById(id);
+    const group = await ctx.apiKeyService.getGroupById(idStr);
     expect(group).not.toBeNull();
-    expect(group!.id).toBe(id);
+    expect(recordIdToString(group!.id)).toBe(idStr);
     expect(group!.name).toBe("email");
   } finally {
     await ctx.cleanup();
@@ -298,9 +303,10 @@ integrationTest("ApiKeyService.updateGroup updates group description", async () 
 
   try {
     const id = await ctx.apiKeyService.createGroup("email", "Old desc");
-    await ctx.apiKeyService.updateGroup(id, "New desc");
+    const idStr = recordIdToString(id);
+    await ctx.apiKeyService.updateGroup(idStr, "New desc");
 
-    const group = await ctx.apiKeyService.getGroupById(id);
+    const group = await ctx.apiKeyService.getGroupById(idStr);
     expect(group!.description).toBe("New desc");
   } finally {
     await ctx.cleanup();
@@ -312,9 +318,10 @@ integrationTest("ApiKeyService.deleteGroup removes group", async () => {
 
   try {
     const id = await ctx.apiKeyService.createGroup("email", "Email keys");
-    await ctx.apiKeyService.deleteGroup(id);
+    const idStr = recordIdToString(id);
+    await ctx.apiKeyService.deleteGroup(idStr);
 
-    const group = await ctx.apiKeyService.getGroupById(id);
+    const group = await ctx.apiKeyService.getGroupById(idStr);
     expect(group).toBeNull();
   } finally {
     await ctx.cleanup();
@@ -329,7 +336,7 @@ integrationTest("ApiKeyService.deleteGroup cascades to keys", async () => {
     await ctx.apiKeyService.addKey("email", "key-2", "value2");
 
     const group = await ctx.apiKeyService.getGroupByName("email");
-    await ctx.apiKeyService.deleteGroup(group!.id);
+    await ctx.apiKeyService.deleteGroup(recordIdToString(group!.id));
 
     // Keys should be gone due to cascade
     expect(await ctx.apiKeyService.hasKey("email", "value1")).toBe(false);
@@ -384,7 +391,7 @@ integrationTest("ApiKeyService - Encryption at rest", async (t) => {
       // Query raw database value from SurrealDB
       const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
         const [result] = await db.query<[{ value: string }[]]>(
-          "SELECT value FROM apiKey LIMIT 1"
+          "SELECT * FROM apiKey LIMIT 1"
         );
         return result;
       });
@@ -596,7 +603,7 @@ integrationTest("ApiKeyService.getKeyCountForGroup returns 0 for empty group", a
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("test-group");
-    const count = await ctx.apiKeyService.getKeyCountForGroup(group!.id);
+    const count = await ctx.apiKeyService.getKeyCountForGroup(recordIdToString(group!.id));
     expect(count).toBe(0);
   } finally {
     await ctx.cleanup();
@@ -612,7 +619,7 @@ integrationTest("ApiKeyService.getKeyCountForGroup returns correct count", async
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("test-group");
-    const count = await ctx.apiKeyService.getKeyCountForGroup(group!.id);
+    const count = await ctx.apiKeyService.getKeyCountForGroup(recordIdToString(group!.id));
     expect(count).toBe(2);
   } finally {
     await ctx.cleanup();
@@ -642,7 +649,7 @@ integrationTest("ApiKeyService.updateKey updates name successfully", async () =>
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     await ctx.apiKeyService.updateKey(keyId, { name: "new-name" });
 
@@ -662,7 +669,7 @@ integrationTest("ApiKeyService.updateKey updates value and hash", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     await ctx.apiKeyService.updateKey(keyId, { value: "new-value" });
 
@@ -686,7 +693,7 @@ integrationTest("ApiKeyService.updateKey updates description", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     await ctx.apiKeyService.updateKey(keyId, { description: "New description" });
 
@@ -705,7 +712,7 @@ integrationTest("ApiKeyService.updateKey can clear description", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     await ctx.apiKeyService.updateKey(keyId, { description: "" });
 
@@ -737,7 +744,7 @@ integrationTest("ApiKeyService.updateKey throws for duplicate name in group", as
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const key2Id = keys!.find(k => k.name === "key-two")!.id;
+    const key2Id = recordIdToString(keys!.find(k => k.name === "key-two")!.id);
 
     // Try to rename key-two to key-one (which already exists)
     await expect(
@@ -756,7 +763,7 @@ integrationTest("ApiKeyService.updateKey allows same name on same key", async ()
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     // Update with same name should not throw
     await ctx.apiKeyService.updateKey(keyId, { name: "test-key", description: "Updated" });
@@ -777,7 +784,7 @@ integrationTest("ApiKeyService.updateKey with empty updates does nothing", async
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     // Empty update should not throw and not change anything
     await ctx.apiKeyService.updateKey(keyId, {});
@@ -799,7 +806,7 @@ integrationTest("ApiKeyService.updateKey throws for invalid name format", async 
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     await expect(
       ctx.apiKeyService.updateKey(keyId, { name: "Invalid Name!" })
@@ -817,7 +824,7 @@ integrationTest("ApiKeyService.updateKey can update multiple fields", async () =
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     await ctx.apiKeyService.updateKey(keyId, {
       name: "new-name",

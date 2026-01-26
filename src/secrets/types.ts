@@ -23,9 +23,9 @@ export interface Secret {
   name: string;
   value: string; // Decrypted value (empty string if decryption failed)
   decryptionError?: string; // Set if decryption failed
-  comment: string | null;
+  comment?: string; // Optional - NONE in SurrealDB
   scopeType: SecretScopeType;
-  scopeRef: RecordId | null; // Record reference or null for global
+  scopeRef?: RecordId; // Optional - NONE for global scope (undefined in JS)
   createdAt: string;
   updatedAt: string;
 }
@@ -38,9 +38,9 @@ export interface SecretRow {
   id: RecordId;
   name: string;
   value: string; // encrypted value
-  comment: string | null;
+  comment?: string; // Optional - NONE in SurrealDB
   scopeType: SecretScopeType;
-  scopeRef: RecordId | null;
+  scopeRef?: RecordId; // Optional - NONE for global scope (undefined in JS)
   createdAt: string;
   updatedAt: string;
 }

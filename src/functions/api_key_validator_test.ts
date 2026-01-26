@@ -6,6 +6,8 @@ import { ApiKeyValidator } from "./api_key_validator.ts";
 import type { ApiKeyExtractor, ApiKeyExtractResult } from "./extractors/mod.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
+import { RecordId } from "surrealdb";
 
 // Helper to create a mock context from a Request (same pattern as extractors_test.ts)
 async function createContext(request: Request): Promise<Context> {
@@ -35,13 +37,13 @@ function createMockExtractor(
 // Mock ApiKeyService with configurable behavior using group IDs
 // keyGroups maps groupId -> Map<keyValue, keyInfo>
 function createMockApiKeyService(
-  keyGroups: Map<string, Map<string, { keyId: string; groupId: string; keyName: string; groupName: string }>>
+  keyGroups: Map<string, Map<string, { keyId: RecordId; groupId: string; keyName: string; groupName: string }>>
 ): ApiKeyService {
   return {
     getKeyByValueInGroup: (
       groupId: string,
       keyValue: string
-    ): Promise<{ keyId: string; groupId: string; keyName: string; groupName: string } | null> => {
+    ): Promise<{ keyId: RecordId; groupId: string; keyName: string; groupName: string } | null> => {
       const groupKeys = keyGroups.get(groupId);
       if (!groupKeys) return Promise.resolve(null);
       return Promise.resolve(groupKeys.get(keyValue) ?? null);
@@ -116,7 +118,7 @@ integrationTest("ApiKeyValidator returns error when key exists in different grou
   const keyGroups = new Map([
     [
       "10",
-      new Map([["valid-key", { keyId: "1", groupId: "10", keyName: "test-key", groupName: "other-group" }]]),
+      new Map([["valid-key", { keyId: new RecordId("apiKey", "1"), groupId: "10", keyName: "test-key", groupName: "other-group" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -144,7 +146,7 @@ integrationTest("ApiKeyValidator validates key in first allowed group", async ()
   const keyGroups = new Map([
     [
       "100",
-      new Map([["my-api-key", { keyId: "42", groupId: "100", keyName: "prod-key", groupName: "group1" }]]),
+      new Map([["my-api-key", { keyId: new RecordId("apiKey", "42"), groupId: "100", keyName: "prod-key", groupName: "group1" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -172,7 +174,7 @@ integrationTest("ApiKeyValidator validates key in second allowed group", async (
   const keyGroups = new Map([
     [
       "200",
-      new Map([["my-api-key", { keyId: "5", groupId: "200", keyName: "backup-key", groupName: "group2" }]]),
+      new Map([["my-api-key", { keyId: new RecordId("apiKey", "5"), groupId: "200", keyName: "backup-key", groupName: "group2" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -199,11 +201,11 @@ integrationTest("ApiKeyValidator returns first matching group when key exists in
   const keyGroups = new Map([
     [
       "10",
-      new Map([["shared-key", { keyId: "1", groupId: "10", keyName: "key1", groupName: "group1" }]]),
+      new Map([["shared-key", { keyId: new RecordId("apiKey", "1"), groupId: "10", keyName: "key1", groupName: "group1" }]]),
     ],
     [
       "20",
-      new Map([["shared-key", { keyId: "2", groupId: "20", keyName: "key2", groupName: "group2" }]]),
+      new Map([["shared-key", { keyId: new RecordId("apiKey", "2"), groupId: "20", keyName: "key2", groupName: "group2" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -231,7 +233,7 @@ integrationTest("ApiKeyValidator uses first extractor that finds a key", async (
   const keyGroups = new Map([
     [
       "1",
-      new Map([["first-key", { keyId: "1", groupId: "1", keyName: "first", groupName: "mygroup" }]]),
+      new Map([["first-key", { keyId: new RecordId("apiKey", "1"), groupId: "1", keyName: "first", groupName: "mygroup" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -255,7 +257,7 @@ integrationTest("ApiKeyValidator falls back to second extractor when first retur
   const keyGroups = new Map([
     [
       "2",
-      new Map([["second-key", { keyId: "2", groupId: "2", keyName: "second", groupName: "mygroup" }]]),
+      new Map([["second-key", { keyId: new RecordId("apiKey", "2"), groupId: "2", keyName: "second", groupName: "mygroup" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -283,7 +285,7 @@ integrationTest("ApiKeyValidator uses default extractors when none provided", as
   const keyGroups = new Map([
     [
       "5",
-      new Map([["header-key-123", { keyId: "10", groupId: "5", keyName: "header-key", groupName: "api-keys" }]]),
+      new Map([["header-key-123", { keyId: new RecordId("apiKey", "10"), groupId: "5", keyName: "header-key", groupName: "api-keys" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -309,7 +311,7 @@ integrationTest("ApiKeyValidator default extractors work with Authorization Bear
   const keyGroups = new Map([
     [
       "8",
-      new Map([["bearer-token-xyz", { keyId: "20", groupId: "8", keyName: "bearer", groupName: "tokens" }]]),
+      new Map([["bearer-token-xyz", { keyId: new RecordId("apiKey", "20"), groupId: "8", keyName: "bearer", groupName: "tokens" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -333,7 +335,7 @@ integrationTest("ApiKeyValidator default extractors work with query parameter", 
   const keyGroups = new Map([
     [
       "15",
-      new Map([["query-key-abc", { keyId: "30", groupId: "15", keyName: "query", groupName: "query-keys" }]]),
+      new Map([["query-key-abc", { keyId: new RecordId("apiKey", "30"), groupId: "15", keyName: "query", groupName: "query-keys" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);
@@ -365,7 +367,7 @@ integrationTest("ApiKeyValidator integration with real ApiKeyService", async () 
     // Get the group ID for validation
     const productionGroup = await ctx.apiKeyService.getGroupByName("production");
     expect(productionGroup).not.toBeNull();
-    const groupId = productionGroup!.id;
+    const groupId = recordIdToString(productionGroup!.id);
 
     const validator = new ApiKeyValidator({
       apiKeyService: ctx.apiKeyService,
@@ -414,7 +416,7 @@ integrationTest("ApiKeyValidator integration rejects key from wrong group", asyn
     // Get the user group ID (we'll only allow user group)
     const userGroup = await ctx.apiKeyService.getGroupByName("user");
     expect(userGroup).not.toBeNull();
-    const userGroupId = userGroup!.id;
+    const userGroupId = recordIdToString(userGroup!.id);
 
     const validator = new ApiKeyValidator({
       apiKeyService: ctx.apiKeyService,
@@ -459,7 +461,7 @@ integrationTest("ApiKeyValidator integration with multiple allowed groups", asyn
         headers: { "X-API-Key": "secondary-key-value" },
       })
     );
-    const result = await validator.validate(c, [primaryGroup!.id, secondaryGroup!.id]);
+    const result = await validator.validate(c, [recordIdToString(primaryGroup!.id), recordIdToString(secondaryGroup!.id)]);
 
     expect(result.valid).toBe(true);
     expect(result.keyGroup).toBe("secondary");
@@ -476,7 +478,7 @@ integrationTest("ApiKeyValidator rejects when allowed groups list is empty", asy
   const keyGroups = new Map([
     [
       "1",
-      new Map([["my-key", { keyId: "1", groupId: "1", keyName: "key", groupName: "somegroup" }]]),
+      new Map([["my-key", { keyId: new RecordId("apiKey", "1"), groupId: "1", keyName: "key", groupName: "somegroup" }]]),
     ],
   ]);
   const mockApiKeyService = createMockApiKeyService(keyGroups);

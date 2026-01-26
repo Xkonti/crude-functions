@@ -16,6 +16,7 @@ import {
   getCsrfToken,
 } from "./templates.ts";
 import { csrfInput } from "../csrf/csrf_helpers.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 export interface SettingsPagesOptions {
   settingsService: SettingsService;
@@ -279,13 +280,16 @@ function renderSettingsForm(
         } else {
           inputHtml = `
             <fieldset>
-              ${availableGroups.map((group) => `
+              ${availableGroups.map((group) => {
+                const groupIdStr = recordIdToString(group.id);
+                return `
                 <label>
-                  <input type="checkbox" name="${escapeHtml(name)}" value="${group.id}"
-                         ${selectedIds.includes(group.id) ? "checked" : ""}>
+                  <input type="checkbox" name="${escapeHtml(name)}" value="${groupIdStr}"
+                         ${selectedIds.includes(groupIdStr) ? "checked" : ""}>
                   <strong>${escapeHtml(group.name)}</strong>${group.description ? `: ${escapeHtml(group.description)}` : ""}
                 </label>
-              `).join("")}
+              `;
+              }).join("")}
             </fieldset>
           `;
         }
@@ -327,8 +331,8 @@ function parseAndValidateSettings(
   const updates: Record<string, string> = {};
   const errors: string[] = [];
 
-  // Get valid group IDs for validation
-  const validGroupIds = new Set(availableGroups.map((g) => g.id));
+  // Get valid group IDs for validation (convert to strings for comparison with form values)
+  const validGroupIds = new Set(availableGroups.map((g) => recordIdToString(g.id)));
 
   for (const name of Object.values(SettingNames)) {
     const metadata = SettingsMetadata[name];

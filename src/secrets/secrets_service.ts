@@ -118,18 +118,25 @@ export class SecretsService {
 
     const encryptedValue = await this.encryptionService.encrypt(value);
 
-    return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      const [rows] = await db.query<[{ id: RecordId }[]]>(
-        `CREATE secret SET
-          name = $name,
-          value = $value,
-          comment = $comment,
-          scopeType = "global",
-          scopeRef = NONE`,
-        { name, value: encryptedValue, comment: comment ?? null }
-      );
-      return rows[0].id;
-    });
+    try {
+      return await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const [rows] = await db.query<[{ id: RecordId }[]]>(
+          `CREATE secret SET
+            name = $name,
+            value = $value,
+            comment = $comment,
+            scopeType = "global",
+            scopeRef = NONE`,
+          { name, value: encryptedValue, comment }
+        );
+        return rows[0].id;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("unique_secret_name_scope")) {
+        throw new Error(`A global secret with name '${name}' already exists`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -157,7 +164,7 @@ export class SecretsService {
           value = $value,
           comment = $comment,
           updatedAt = time::now()`,
-        { recordId, value: encryptedValue, comment: comment ?? null }
+        { recordId, value: encryptedValue, comment }
       );
     });
   }
@@ -237,18 +244,25 @@ export class SecretsService {
     const encryptedValue = await this.encryptionService.encrypt(value);
     const scopeRef = new RecordId("function", String(functionId));
 
-    return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      const [rows] = await db.query<[{ id: RecordId }[]]>(
-        `CREATE secret SET
-          name = $name,
-          value = $value,
-          comment = $comment,
-          scopeType = "function",
-          scopeRef = $scopeRef`,
-        { name, value: encryptedValue, comment: comment ?? null, scopeRef }
-      );
-      return rows[0].id;
-    });
+    try {
+      return await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const [rows] = await db.query<[{ id: RecordId }[]]>(
+          `CREATE secret SET
+            name = $name,
+            value = $value,
+            comment = $comment,
+            scopeType = "function",
+            scopeRef = $scopeRef`,
+          { name, value: encryptedValue, comment, scopeRef }
+        );
+        return rows[0].id;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("unique_secret_name_scope")) {
+        throw new Error(`A secret with name '${name}' already exists for this function`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -277,7 +291,7 @@ export class SecretsService {
           value = $value,
           comment = $comment,
           updatedAt = time::now()`,
-        { recordId, value: encryptedValue, comment: comment ?? null }
+        { recordId, value: encryptedValue, comment }
       );
     });
   }
@@ -378,18 +392,25 @@ export class SecretsService {
     const encryptedValue = await this.encryptionService.encrypt(value);
     const scopeRef = new RecordId("apiKeyGroup", groupId);
 
-    return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      const [rows] = await db.query<[{ id: RecordId }[]]>(
-        `CREATE secret SET
-          name = $name,
-          value = $value,
-          comment = $comment,
-          scopeType = "group",
-          scopeRef = $scopeRef`,
-        { name, value: encryptedValue, comment: comment ?? null, scopeRef }
-      );
-      return rows[0].id;
-    });
+    try {
+      return await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const [rows] = await db.query<[{ id: RecordId }[]]>(
+          `CREATE secret SET
+            name = $name,
+            value = $value,
+            comment = $comment,
+            scopeType = "group",
+            scopeRef = $scopeRef`,
+          { name, value: encryptedValue, comment, scopeRef }
+        );
+        return rows[0].id;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("unique_secret_name_scope")) {
+        throw new Error(`A secret with name '${name}' already exists for this group`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -418,7 +439,7 @@ export class SecretsService {
           value = $value,
           comment = $comment,
           updatedAt = time::now()`,
-        { recordId, value: encryptedValue, comment: comment ?? null }
+        { recordId, value: encryptedValue, comment }
       );
     });
   }
@@ -499,18 +520,25 @@ export class SecretsService {
     const encryptedValue = await this.encryptionService.encrypt(value);
     const scopeRef = new RecordId("apiKey", keyId);
 
-    return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      const [rows] = await db.query<[{ id: RecordId }[]]>(
-        `CREATE secret SET
-          name = $name,
-          value = $value,
-          comment = $comment,
-          scopeType = "key",
-          scopeRef = $scopeRef`,
-        { name, value: encryptedValue, comment: comment ?? null, scopeRef }
-      );
-      return rows[0].id;
-    });
+    try {
+      return await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const [rows] = await db.query<[{ id: RecordId }[]]>(
+          `CREATE secret SET
+            name = $name,
+            value = $value,
+            comment = $comment,
+            scopeType = "key",
+            scopeRef = $scopeRef`,
+          { name, value: encryptedValue, comment, scopeRef }
+        );
+        return rows[0].id;
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("unique_secret_name_scope")) {
+        throw new Error(`A secret with name '${name}' already exists for this key`);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -539,7 +567,7 @@ export class SecretsService {
           value = $value,
           comment = $comment,
           updatedAt = time::now()`,
-        { recordId, value: encryptedValue, comment: comment ?? null }
+        { recordId, value: encryptedValue, comment }
       );
     });
   }
@@ -574,15 +602,14 @@ export class SecretsService {
   private async getSecretValueByNameAndScope(
     name: string,
     scopeType: SecretScopeType,
-    scopeRef: RecordId | null
+    scopeRef: RecordId | undefined
   ): Promise<string | undefined> {
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      const [rows] = await db.query<[{ value: string }[]]>(
-        `SELECT value FROM secret
-         WHERE name = $name AND scopeType = $scopeType AND scopeRef = $scopeRef
-         LIMIT 1`,
-        { name, scopeType, scopeRef }
-      );
+      // Handle global scope (NONE) differently - can't compare null with NONE directly
+      const query = scopeRef === null
+        ? `SELECT * FROM secret WHERE name = $name AND scopeType = $scopeType AND scopeRef IS NONE LIMIT 1`
+        : `SELECT * FROM secret WHERE name = $name AND scopeType = $scopeType AND scopeRef = $scopeRef LIMIT 1`;
+      const [rows] = await db.query<[SecretRow[]]>(query, { name, scopeType, scopeRef });
       const row = rows?.[0];
       if (!row) return undefined;
       return await this.encryptionService.decrypt(row.value);
@@ -606,11 +633,11 @@ export class SecretsService {
     apiGroupId?: string,
     apiKeyId?: string
   ): Promise<string | undefined> {
-    let scopeRef: RecordId | null;
+    let scopeRef: RecordId | undefined;
 
     switch (scopeType) {
       case "global":
-        scopeRef = null;
+        scopeRef = undefined;
         break;
       case "function":
         if (functionId === undefined) return undefined;
@@ -664,7 +691,7 @@ export class SecretsService {
     if (functionSecret !== undefined) return functionSecret;
 
     // 4. Global scope (least specific)
-    return await this.getSecretValueByNameAndScope(name, "global", null);
+    return await this.getSecretValueByNameAndScope(name, "global", undefined);
   }
 
   /**
@@ -706,7 +733,7 @@ export class SecretsService {
     } = {};
 
     // 1. Global scope
-    const globalSecret = await this.getSecretValueByNameAndScope(name, "global", null);
+    const globalSecret = await this.getSecretValueByNameAndScope(name, "global", undefined);
     if (globalSecret !== undefined) {
       result.global = globalSecret;
       hasAnySecret = true;
@@ -847,26 +874,38 @@ export class SecretsService {
       }
 
       // Get key-level secrets for this group
+      // First get all API keys in the group
       const groupRecordId = new RecordId("apiKeyGroup", groupId);
       const keySecrets = await this.surrealFactory.withSystemConnection({}, async (db) => {
-        const [rows] = await db.query<[{
+        // Get keys in this group
+        const [keys] = await db.query<[{ id: RecordId; name: string }[]]>(
+          `SELECT id, name FROM apiKey WHERE groupId = $groupRecordId`,
+          { groupRecordId }
+        );
+
+        const results: {
           secretName: string;
           secretValue: string;
           keyId: RecordId;
           keyName: string;
-        }[]]>(
-          `SELECT
-            secret.name as secretName,
-            secret.value as secretValue,
-            apiKey.id as keyId,
-            apiKey.name as keyName
-          FROM apiKey
-          WHERE groupId = $groupRecordId
-          LET secret = (SELECT * FROM secret WHERE scopeType = "key" AND scopeRef = $parent.id)
-          SPLIT secret`,
-          { groupRecordId }
-        );
-        return rows ?? [];
+        }[] = [];
+
+        // Get secrets for each key
+        for (const key of (keys ?? [])) {
+          const [secrets] = await db.query<[SecretRow[]]>(
+            `SELECT * FROM secret WHERE scopeType = "key" AND scopeRef = $keyId`,
+            { keyId: key.id }
+          );
+          for (const secret of (secrets ?? [])) {
+            results.push({
+              secretName: secret.name,
+              secretValue: secret.value,
+              keyId: key.id,
+              keyName: key.name,
+            });
+          }
+        }
+        return results;
       });
 
       for (const row of keySecrets) {

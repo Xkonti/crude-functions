@@ -89,31 +89,32 @@ Deno.test("validateSettingValue - accepts single ID for checkboxGroup", () => {
 });
 
 Deno.test("validateSettingValue - accepts multiple IDs for checkboxGroup", () => {
-  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "1,3,5");
+  // Accepts both numeric and alphanumeric IDs
+  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "abc123,def456,xyz");
   expect(result.valid).toBe(true);
 });
 
-Deno.test("validateSettingValue - rejects invalid checkboxGroup format with letters", () => {
-  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "1,a,5");
-  expect(result.valid).toBe(false);
-  if (!result.valid) {
-    expect(result.error).toContain("comma-separated numeric IDs");
-  }
+Deno.test("validateSettingValue - accepts alphanumeric IDs for checkboxGroup", () => {
+  // SurrealDB uses string IDs, so letters are now valid
+  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "abc,def,xyz123");
+  expect(result.valid).toBe(true);
 });
 
 Deno.test("validateSettingValue - rejects invalid checkboxGroup format with spaces", () => {
-  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "1, 3");
+  // Spaces are not allowed in alphanumeric IDs
+  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "abc, def");
   expect(result.valid).toBe(false);
   if (!result.valid) {
-    expect(result.error).toContain("comma-separated numeric IDs");
+    expect(result.error).toContain("comma-separated alphanumeric IDs");
   }
 });
 
 Deno.test("validateSettingValue - rejects invalid checkboxGroup format with trailing comma", () => {
-  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "1,3,");
+  // Trailing comma is not valid format
+  const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "abc,def,");
   expect(result.valid).toBe(false);
   if (!result.valid) {
-    expect(result.error).toContain("comma-separated numeric IDs");
+    expect(result.error).toContain("comma-separated alphanumeric IDs");
   }
 });
 

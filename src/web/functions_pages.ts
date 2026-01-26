@@ -1157,13 +1157,16 @@ function renderFunctionForm(
           availableGroups.length === 0
             ? '<p><em>No API key groups defined. <a href="/web/keys/create-group">Create a group</a> first.</em></p>'
             : availableGroups.map(
-                (group) => `
+                (group) => {
+                  const groupIdStr = recordIdToString(group.id);
+                  return `
                 <label>
-                  <input type="checkbox" name="keys" value="${group.id}"
-                         ${selectedKeys.includes(group.id) ? "checked" : ""}>
+                  <input type="checkbox" name="keys" value="${groupIdStr}"
+                         ${selectedKeys.includes(groupIdStr) ? "checked" : ""}>
                   <strong>${escapeHtml(group.name)}</strong>${group.description ? `: ${escapeHtml(group.description)}` : ""}
                 </label>
-              `
+              `;
+                }
               ).join("")
         }
       </fieldset>

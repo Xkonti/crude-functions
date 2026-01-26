@@ -390,7 +390,8 @@ export function createKeysPages(
       }
 
       try {
-        groupId = await apiKeyService.createGroup(newGroupName);
+        const recordId = await apiKeyService.createGroup(newGroupName);
+        groupId = recordIdToString(recordId);
         groupName = newGroupName;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create group";

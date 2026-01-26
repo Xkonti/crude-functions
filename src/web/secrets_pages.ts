@@ -410,7 +410,7 @@ function renderCreateForm(
  */
 function renderEditForm(
   action: string,
-  secret: { name: string; value: string; comment: string | null; decryptionError?: string },
+  secret: { name: string; value: string; comment?: string; decryptionError?: string },
   error?: string,
   csrfToken: string = ""
 ): string {
