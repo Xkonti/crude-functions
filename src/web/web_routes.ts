@@ -40,7 +40,7 @@ export interface WebRoutesOptions {
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { auth, db, surrealFactory, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService } = options;
+  const { auth, surrealFactory, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
