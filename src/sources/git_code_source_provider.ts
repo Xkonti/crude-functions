@@ -206,8 +206,6 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
    * - If not cloned: performs initial clone
    * - If URL changed: deletes directory and re-clones
    * - Otherwise: fetches and resets to target ref
-   *
-   * Note: authToken is decrypted before use since it's stored encrypted in DB.
    */
   async sync(
     source: CodeSource,
@@ -215,10 +213,8 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
   ): Promise<SyncResult> {
     const startTime = Date.now();
     const dirPath = join(this.codeDirectory, source.name);
-    // Decrypt sensitive fields before use
-    const settings = await this.decryptSensitiveFields(
-      source.typeSettings,
-    ) as GitTypeSettings;
+    // typeSettings already decrypted by CodeSourceService.rowToSource()
+    const settings = source.typeSettings as GitTypeSettings;
 
     try {
       token.throwIfCancelled();
