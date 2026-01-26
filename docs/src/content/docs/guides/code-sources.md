@@ -9,7 +9,8 @@ Code sources are the foundation of how Crude Functions organizes code files. Eac
 
 A code source represents a collection of related files stored in a subdirectory within `code` directory of the Docker container. Each source has:
 
-- **Name** - Unique identifier (also the directory name)
+- **ID** - Auto-generated unique identifier used in API endpoints
+- **Name** - Human-readable unique name (used as the directory name)
 - **Type** - Either "manual" or "git" (more types coming soon)
 - **Files** - Handler scripts and shared utilities
 - **Sync Settings** - Configuration for automatic updates (git sources only)
@@ -108,7 +109,8 @@ Trigger sync on-demand via web UI or API call.
 **Via API:**
 
 ```bash
-curl -X POST http://localhost:9000/api/sources/1/sync \
+# Replace 'SOURCE_ID' with your source's ID (from creation response or source listing)
+curl -X POST http://localhost:9000/api/sources/SOURCE_ID/sync \
   -H "X-API-Key: your-management-api-key"
 ```
 
@@ -134,7 +136,8 @@ Webhooks accept an optional **secret** - when set, Crude Functions will look for
 **GitHub Example:**
 
 - Go to repository Settings → Webhooks → Add webhook
-- **Payload URL**: `https://your-server.com/api/sources/1/webhook?secret=your-secure-random-string`
+- **Payload URL**: `https://your-server.com/api/sources/SOURCE_ID/webhook?secret=your-secure-random-string`
+  - Replace `SOURCE_ID` with your source's ID (found in web UI or from creation response)
 - **Content type**: `application/json`
 - **Events**: Just the push event
 - **Active**: ✓
@@ -142,7 +145,8 @@ Webhooks accept an optional **secret** - when set, Crude Functions will look for
 **GitLab Example:**
 
 - Go to repository Settings → Webhooks
-- **URL**: `https://your-server.com/api/sources/1/webhook`
+- **URL**: `https://your-server.com/api/sources/SOURCE_ID/webhook`
+  - Replace `SOURCE_ID` with your source's ID
 - **Secret token**: `your-secure-random-string`
 - **Trigger**: Push events
 - **Enable**: ✓
