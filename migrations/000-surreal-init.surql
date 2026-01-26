@@ -130,3 +130,39 @@ DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE codeSource TYPE datetime VALUE tim
 DEFINE INDEX IF NOT EXISTS unique_codeSource_name ON codeSource FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_codeSource_enabled ON codeSource FIELDS enabled;
 DEFINE INDEX IF NOT EXISTS idx_codeSource_type ON codeSource FIELDS type;
+
+--------------------------------------------------------------------------------
+-- API Key Groups
+--------------------------------------------------------------------------------
+
+-- API key groups table - organizes API keys into groups
+DEFINE TABLE IF NOT EXISTS apiKeyGroup SCHEMAFULL TYPE NORMAL;
+
+DEFINE FIELD IF NOT EXISTS name ON TABLE apiKeyGroup TYPE string;
+DEFINE FIELD IF NOT EXISTS description ON TABLE apiKeyGroup TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE apiKeyGroup TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE apiKeyGroup TYPE datetime VALUE time::now();
+
+-- Unique name constraint
+DEFINE INDEX IF NOT EXISTS unique_apiKeyGroup_name ON apiKeyGroup FIELDS name UNIQUE;
+
+--------------------------------------------------------------------------------
+-- API Keys
+--------------------------------------------------------------------------------
+
+-- API keys table - stores encrypted API keys
+DEFINE TABLE IF NOT EXISTS apiKey SCHEMAFULL TYPE NORMAL;
+
+DEFINE FIELD IF NOT EXISTS groupId ON TABLE apiKey TYPE record<apiKeyGroup>;
+DEFINE FIELD IF NOT EXISTS name ON TABLE apiKey TYPE string;
+DEFINE FIELD IF NOT EXISTS value ON TABLE apiKey TYPE string;  -- encrypted
+DEFINE FIELD IF NOT EXISTS valueHash ON TABLE apiKey TYPE string;  -- for O(1) lookup
+DEFINE FIELD IF NOT EXISTS description ON TABLE apiKey TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE apiKey TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE apiKey TYPE datetime VALUE time::now();
+
+-- Unique constraint: name must be unique within a group
+DEFINE INDEX IF NOT EXISTS unique_apiKey_group_name ON apiKey FIELDS groupId, name UNIQUE;
+
+-- Index for hash-based lookups (O(1) key validation)
+DEFINE INDEX IF NOT EXISTS idx_apiKey_group_hash ON apiKey FIELDS groupId, valueHash;

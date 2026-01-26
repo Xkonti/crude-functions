@@ -199,7 +199,7 @@ interface TestRoute {
   route: string;
   methods: string[];
   description?: string;
-  keys?: number[];
+  keys?: string[];
 }
 
 interface TestContext {
@@ -257,7 +257,8 @@ async function createTestApp(
   const hashService = new HashService({
     hashKey: TEST_HASH_KEY,
   });
-  const apiKeyService = new ApiKeyService({ db, encryptionService, hashService });
+  const apiKeyService = new ApiKeyService({ surrealFactory: surrealTestContext.factory, encryptionService, hashService });
+  await apiKeyService.bootstrapManagementGroup();
 
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");

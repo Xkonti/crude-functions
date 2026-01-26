@@ -89,7 +89,8 @@ integrationTest("ApiKeyService.addKey adds key to database", async () => {
     expect(keys![0].name).toBe("email-key");
     expect(keys![0].value).toBe("newkey");
     expect(keys![0].description).toBe("test description");
-    expect(keys![0].id).toBeGreaterThan(0);
+    expect(typeof keys![0].id).toBe("string");
+    expect(keys![0].id.length).toBeGreaterThan(0);
   } finally {
     await ctx.cleanup();
   }
@@ -237,7 +238,8 @@ integrationTest("ApiKeyService.createGroup creates a new group", async () => {
 
     const id = await ctx.apiKeyService.createGroup("email", "Email service keys");
 
-    expect(id).toBeGreaterThan(0);
+    expect(typeof id).toBe("string");
+    expect(id.length).toBeGreaterThan(0);
 
     const groups = await ctx.apiKeyService.getGroups();
     expect(groups.length).toBe(initialCount + 1);
@@ -342,7 +344,8 @@ integrationTest("ApiKeyService.getOrCreateGroup creates group if not exists", as
 
   try {
     const id1 = await ctx.apiKeyService.getOrCreateGroup("email");
-    expect(id1).toBeGreaterThan(0);
+    expect(typeof id1).toBe("string");
+    expect(id1.length).toBeGreaterThan(0);
 
     // Second call should return same ID
     const id2 = await ctx.apiKeyService.getOrCreateGroup("email");
@@ -378,15 +381,18 @@ integrationTest("ApiKeyService - Encryption at rest", async (t) => {
     try {
       await ctx.apiKeyService.addKey("test-group", "test-key", "my-secret-key", "Test key");
 
-      // Query raw database value
-      const row = await ctx.db.queryOne<{ value: string }>(
-        "SELECT value FROM apiKeys LIMIT 1"
-      );
+      // Query raw database value from SurrealDB
+      const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+        const [result] = await db.query<[{ value: string }[]]>(
+          "SELECT value FROM apiKey LIMIT 1"
+        );
+        return result;
+      });
 
       // Should NOT be plaintext
-      expect(row!.value).not.toBe("my-secret-key");
+      expect(rows[0].value).not.toBe("my-secret-key");
       // Should be base64 (encrypted format)
-      expect(row!.value).toMatch(/^[A-Za-z0-9+/=]+$/);
+      expect(rows[0].value).toMatch(/^[A-Za-z0-9+/=]+$/);
     } finally {
       await ctx.cleanup();
     }
@@ -452,13 +458,16 @@ integrationTest("ApiKeyService - Hash stored on addKey", async () => {
   try {
     await ctx.apiKeyService.addKey("test", "key1", "mykey123");
 
-    const row = await ctx.db.queryOne<{ valueHash: string }>(
-      "SELECT valueHash FROM apiKeys WHERE name = 'key1'"
-    );
+    const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[{ valueHash: string }[]]>(
+        "SELECT valueHash FROM apiKey WHERE name = 'key1'"
+      );
+      return result;
+    });
 
-    expect(row).not.toBeNull();
-    expect(row!.valueHash).not.toBeNull();
-    expect(row!.valueHash.length).toBeGreaterThan(20); // Base64 hash
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows[0].valueHash).not.toBeNull();
+    expect(rows[0].valueHash.length).toBeGreaterThan(20); // Base64 hash
   } finally {
     await ctx.cleanup();
   }
@@ -471,14 +480,17 @@ integrationTest("ApiKeyService - Different keys produce different hashes", async
     await ctx.apiKeyService.addKey("test", "key1", "value1");
     await ctx.apiKeyService.addKey("test", "key2", "value2");
 
-    const row1 = await ctx.db.queryOne<{ valueHash: string }>(
-      "SELECT valueHash FROM apiKeys WHERE name = 'key1'"
-    );
-    const row2 = await ctx.db.queryOne<{ valueHash: string }>(
-      "SELECT valueHash FROM apiKeys WHERE name = 'key2'"
-    );
+    const [rows1, rows2] = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result1] = await db.query<[{ valueHash: string }[]]>(
+        "SELECT valueHash FROM apiKey WHERE name = 'key1'"
+      );
+      const [result2] = await db.query<[{ valueHash: string }[]]>(
+        "SELECT valueHash FROM apiKey WHERE name = 'key2'"
+      );
+      return [result1, result2];
+    });
 
-    expect(row1!.valueHash).not.toBe(row2!.valueHash);
+    expect(rows1[0].valueHash).not.toBe(rows2[0].valueHash);
   } finally {
     await ctx.cleanup();
   }
@@ -611,7 +623,7 @@ integrationTest("ApiKeyService.getKeyCountForGroup returns 0 for non-existent gr
   const ctx = await TestSetupBuilder.create().withApiKeys().build();
 
   try {
-    const count = await ctx.apiKeyService.getKeyCountForGroup(99999);
+    const count = await ctx.apiKeyService.getKeyCountForGroup("nonexistent-id-99999");
     expect(count).toBe(0);
   } finally {
     await ctx.cleanup();
@@ -709,8 +721,8 @@ integrationTest("ApiKeyService.updateKey throws for non-existent key", async () 
 
   try {
     await expect(
-      ctx.apiKeyService.updateKey(99999, { name: "new-name" })
-    ).rejects.toThrow("API key with id 99999 not found");
+      ctx.apiKeyService.updateKey("nonexistent-id-99999", { name: "new-name" })
+    ).rejects.toThrow("API key with id nonexistent-id-99999 not found");
   } finally {
     await ctx.cleanup();
   }

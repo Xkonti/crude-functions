@@ -115,8 +115,8 @@ export class FunctionRouter {
 
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
-      let keyGroupId: number | undefined;
-      let keyId: number | undefined;
+      let keyGroupId: string | undefined;
+      let keyId: string | undefined;
 
       if (route.keys && route.keys.length > 0) {
         const validation = await this.apiKeyValidator.validate(c, route.keys);

@@ -1,7 +1,6 @@
 import { Hono } from "@hono/hono";
 import { ApiKeyService } from "./api_key_service.ts";
 import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
-import { validateId } from "../validation/common.ts";
 
 /**
  * Generate a URL-safe base64-encoded UUID for API keys.
@@ -9,6 +8,14 @@ import { validateId } from "../validation/common.ts";
 function generateApiKey(): string {
   const uuid = crypto.randomUUID().replace(/-/g, "");
   return btoa(uuid).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+/**
+ * Validate a SurrealDB record ID (string).
+ * Must be non-empty and contain only alphanumeric characters, dashes, and underscores.
+ */
+function isValidSurrealId(id: string | undefined): id is string {
+  return !!id && id.length > 0 && /^[a-zA-Z0-9_-]+$/.test(id);
 }
 
 /**
@@ -54,8 +61,8 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
 
   // GET /api/key-groups/:groupId - Get a group by ID
   routes.get("/:groupId", async (c) => {
-    const groupId = validateId(c.req.param("groupId"));
-    if (groupId === null) {
+    const groupId = c.req.param("groupId");
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid group ID" }, 400);
     }
 
@@ -69,8 +76,8 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
 
   // PUT /api/key-groups/:groupId - Update a group
   routes.put("/:groupId", async (c) => {
-    const groupId = validateId(c.req.param("groupId"));
-    if (groupId === null) {
+    const groupId = c.req.param("groupId");
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid group ID" }, 400);
     }
 
@@ -92,8 +99,8 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
 
   // DELETE /api/key-groups/:groupId - Delete a group (must be empty)
   routes.delete("/:groupId", async (c) => {
-    const groupId = validateId(c.req.param("groupId"));
-    if (groupId === null) {
+    const groupId = c.req.param("groupId");
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid group ID" }, 400);
     }
 
@@ -132,13 +139,13 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
   // GET /api/keys - List all keys (optional ?groupId= filter)
   routes.get("/", async (c) => {
     const groupIdParam = c.req.query("groupId");
-    let groupId: number | undefined;
+    let groupId: string | undefined;
 
     if (groupIdParam) {
-      groupId = validateId(groupIdParam) ?? undefined;
-      if (groupId === undefined) {
+      if (!isValidSurrealId(groupIdParam)) {
         return c.json({ error: "Invalid groupId parameter" }, 400);
       }
+      groupId = groupIdParam;
 
       // Verify group exists
       const group = await service.getGroupById(groupId);
@@ -153,7 +160,7 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // POST /api/keys - Create a new key
   routes.post("/", async (c) => {
-    let body: { groupId?: number; name?: string; value?: string; description?: string };
+    let body: { groupId?: string; name?: string; value?: string; description?: string };
     try {
       body = await c.req.json();
     } catch {
@@ -165,8 +172,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
       return c.json({ error: "Missing required field: groupId" }, 400);
     }
 
-    const groupId = validateId(String(body.groupId));
-    if (groupId === null) {
+    const groupId = body.groupId;
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid groupId" }, 400);
     }
 
@@ -207,8 +214,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // GET /api/keys/:keyId - Get a key by ID
   routes.get("/:keyId", async (c) => {
-    const keyId = validateId(c.req.param("keyId"));
-    if (keyId === null) {
+    const keyId = c.req.param("keyId");
+    if (!isValidSurrealId(keyId)) {
       return c.json({ error: "Invalid key ID" }, 400);
     }
 
@@ -222,8 +229,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // PUT /api/keys/:keyId - Update a key
   routes.put("/:keyId", async (c) => {
-    const keyId = validateId(c.req.param("keyId"));
-    if (keyId === null) {
+    const keyId = c.req.param("keyId");
+    if (!isValidSurrealId(keyId)) {
       return c.json({ error: "Invalid key ID" }, 400);
     }
 
@@ -266,8 +273,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // DELETE /api/keys/:keyId - Delete a key
   routes.delete("/:keyId", async (c) => {
-    const keyId = validateId(c.req.param("keyId"));
-    if (keyId === null) {
+    const keyId = c.req.param("keyId");
+    if (!isValidSurrealId(keyId)) {
       return c.json({ error: "Invalid key ID" }, 400);
     }
 

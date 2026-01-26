@@ -417,8 +417,9 @@ export class SecretsService {
 
   /**
    * Get all secrets for a specific API key group (with decrypted values)
+   * NOTE: Group-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
-  async getGroupSecrets(groupId: number): Promise<Secret[]> {
+  async getGroupSecrets(groupId: string): Promise<Secret[]> {
     const rows = await this.db.queryAll<{
       id: number;
       name: string;
@@ -471,9 +472,10 @@ export class SecretsService {
 
   /**
    * Get a group secret by ID (with decrypted value)
+   * NOTE: Group-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async getGroupSecretById(
-    groupId: number,
+    groupId: string,
     secretId: number
   ): Promise<Secret | null> {
     const row = await this.db.queryOne<{
@@ -525,9 +527,10 @@ export class SecretsService {
   /**
    * Create a new group secret
    * @throws Error if name is invalid or already exists for this group
+   * NOTE: Group-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async createGroupSecret(
-    groupId: number,
+    groupId: string,
     name: string,
     value: string,
     comment?: string
@@ -557,9 +560,10 @@ export class SecretsService {
   /**
    * Update a group secret's value and/or comment
    * @throws Error if secret not found
+   * NOTE: Group-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async updateGroupSecret(
-    groupId: number,
+    groupId: string,
     secretId: number,
     value: string,
     comment?: string
@@ -593,9 +597,10 @@ export class SecretsService {
   /**
    * Delete a group secret
    * @throws Error if secret not found
+   * NOTE: Group-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async deleteGroupSecret(
-    groupId: number,
+    groupId: string,
     secretId: number
   ): Promise<void> {
     const result = await this.db.execute(
@@ -615,8 +620,9 @@ export class SecretsService {
 
   /**
    * Get all secrets for a specific API key (with decrypted values)
+   * NOTE: Key-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
-  async getKeySecrets(keyId: number): Promise<Secret[]> {
+  async getKeySecrets(keyId: string): Promise<Secret[]> {
     const rows = await this.db.queryAll<{
       id: number;
       name: string;
@@ -669,9 +675,10 @@ export class SecretsService {
 
   /**
    * Get a key secret by ID (with decrypted value)
+   * NOTE: Key-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async getKeySecretById(
-    keyId: number,
+    keyId: string,
     secretId: number
   ): Promise<Secret | null> {
     const row = await this.db.queryOne<{
@@ -723,9 +730,10 @@ export class SecretsService {
   /**
    * Create a new key secret
    * @throws Error if name is invalid or already exists for this key
+   * NOTE: Key-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async createKeySecret(
-    keyId: number,
+    keyId: string,
     name: string,
     value: string,
     comment?: string
@@ -755,9 +763,10 @@ export class SecretsService {
   /**
    * Update a key secret's value and/or comment
    * @throws Error if secret not found
+   * NOTE: Key-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async updateKeySecret(
-    keyId: number,
+    keyId: string,
     secretId: number,
     value: string,
     comment?: string
@@ -791,9 +800,10 @@ export class SecretsService {
   /**
    * Delete a key secret
    * @throws Error if secret not found
+   * NOTE: Key-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async deleteKeySecret(
-    keyId: number,
+    keyId: string,
     secretId: number
   ): Promise<void> {
     const result = await this.db.execute(
@@ -860,7 +870,7 @@ export class SecretsService {
    * Check if a group secret with the given name already exists
    */
   private async checkDuplicateGroup(
-    groupId: number,
+    groupId: string,
     name: string
   ): Promise<boolean> {
     const row = await this.db.queryOne<{ count: number }>(
@@ -877,7 +887,7 @@ export class SecretsService {
    * Check if a key secret with the given name already exists
    */
   private async checkDuplicateKey(
-    keyId: number,
+    keyId: string,
     name: string
   ): Promise<boolean> {
     const row = await this.db.queryOne<{ count: number }>(
@@ -896,10 +906,11 @@ export class SecretsService {
    * Get all secrets available to a function for preview purposes.
    * Returns secrets grouped by name with their sources across all scopes.
    * Only includes group/key secrets from groups the function accepts.
+   * NOTE: Group/key-scoped secrets are temporarily non-functional until secrets migration to SurrealDB
    */
   async getSecretsPreviewForFunction(
     functionId: number,
-    acceptedGroupIds: number[]
+    acceptedGroupIds: string[]
   ): Promise<SecretPreview[]> {
     const previewMap = new Map<string, SecretPreview>();
 
@@ -944,7 +955,7 @@ export class SecretsService {
 
       for (const group of groups) {
         // Get group-level secrets
-        const groupSecrets = await this.getGroupSecrets(group.id);
+        const groupSecrets = await this.getGroupSecrets(String(group.id));
         for (const secret of groupSecrets) {
           if (!previewMap.has(secret.name)) {
             previewMap.set(secret.name, { name: secret.name, sources: [] });
@@ -953,7 +964,7 @@ export class SecretsService {
             scope: 'group',
             value: secret.value,
             decryptionError: secret.decryptionError,
-            groupId: group.id,
+            groupId: String(group.id),
             groupName: group.name,
           });
         }
@@ -990,9 +1001,9 @@ export class SecretsService {
             scope: 'key',
             value: decryptedValue,
             decryptionError,
-            groupId: group.id,
+            groupId: String(group.id),
             groupName: group.name,
-            keyId: row.apiKeyId,
+            keyId: String(row.apiKeyId),
             keyName: row.key_name,
           });
         }
@@ -1021,8 +1032,8 @@ export class SecretsService {
     name: string,
     scope: SecretScope,
     functionId?: number,
-    apiGroupId?: number,
-    apiKeyId?: number
+    apiGroupId?: string,
+    apiKeyId?: string
   ): Promise<string | undefined> {
     let query: string;
     let params: (string | number)[];
@@ -1070,8 +1081,8 @@ export class SecretsService {
   async getSecretHierarchical(
     name: string,
     functionId: number,
-    apiGroupId?: number,
-    apiKeyId?: number
+    apiGroupId?: string,
+    apiKeyId?: string
   ): Promise<string | undefined> {
     // 1. Key scope (most specific)
     if (apiKeyId !== undefined) {
@@ -1129,18 +1140,18 @@ export class SecretsService {
   async getCompleteSecret(
     name: string,
     functionId: number,
-    apiGroupId?: number,
-    apiKeyId?: number
+    apiGroupId?: string,
+    apiKeyId?: string
   ): Promise<
     | {
         global?: string;
         function?: string;
-        group?: { value: string; groupId: number; groupName: string };
+        group?: { value: string; groupId: string; groupName: string };
         key?: {
           value: string;
-          groupId: number;
+          groupId: string;
           groupName: string;
-          keyId: number;
+          keyId: string;
           keyName: string;
         };
       }
@@ -1150,12 +1161,12 @@ export class SecretsService {
     const result: {
       global?: string;
       function?: string;
-      group?: { value: string; groupId: number; groupName: string };
+      group?: { value: string; groupId: string; groupName: string };
       key?: {
         value: string;
-        groupId: number;
+        groupId: string;
         groupName: string;
-        keyId: number;
+        keyId: string;
         keyName: string;
       };
     } = {};
@@ -1201,7 +1212,7 @@ export class SecretsService {
         );
         result.group = {
           value: decryptedValue,
-          groupId: groupRow.group_id,
+          groupId: String(groupRow.group_id),
           groupName: groupRow.group_name,
         };
         hasAnySecret = true;
@@ -1232,9 +1243,9 @@ export class SecretsService {
         );
         result.key = {
           value: decryptedSecretValue,
-          groupId: keyRow.group_id,
+          groupId: String(keyRow.group_id),
           groupName: keyRow.group_name,
-          keyId: keyRow.key_id,
+          keyId: String(keyRow.key_id),
           keyName: keyRow.key_name,
         };
         hasAnySecret = true;
@@ -1499,8 +1510,8 @@ export class SecretsService {
     comment?: string;
     scope: string;
     functionId?: number;
-    groupId?: number;
-    keyId?: number;
+    groupId?: string;
+    keyId?: string;
   }): Promise<number> {
     const { name, value, comment, scope, functionId, groupId, keyId } = data;
 

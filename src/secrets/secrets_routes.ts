@@ -184,8 +184,8 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       comment?: string;
       scope?: string;
       functionId?: number;
-      groupId?: number;
-      keyId?: number;
+      groupId?: string;
+      keyId?: string;
     };
 
     try {

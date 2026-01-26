@@ -78,7 +78,8 @@ integrationTest("POST /api/key-groups creates new group", async () => {
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.id).toBeGreaterThan(0);
+    expect(typeof json.id).toBe("string");
+    expect(json.id.length).toBeGreaterThan(0);
     expect(json.name).toBe("email");
 
     const group = await ctx.apiKeyService.getGroupByName("email");
@@ -188,14 +189,15 @@ integrationTest("GET /api/key-groups/:groupId returns 404 for nonexistent", asyn
   }
 });
 
-integrationTest("GET /api/key-groups/:groupId returns 400 for invalid ID", async () => {
+integrationTest("GET /api/key-groups/:groupId returns 400 for invalid ID characters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/key-groups/notanumber");
+    // SurrealDB IDs must be alphanumeric with dashes/underscores only
+    const res = await app.request("/api/key-groups/invalid.id");
     expect(res.status).toBe(400);
   } finally {
     await ctx.cleanup();
@@ -460,7 +462,7 @@ integrationTest("GET /api/keys returns 404 for nonexistent groupId", async () =>
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/keys?groupId=999");
+    const res = await app.request("/api/keys?groupId=nonexistent-999");
     expect(res.status).toBe(404);
   } finally {
     await ctx.cleanup();
@@ -486,7 +488,8 @@ integrationTest("POST /api/keys creates key with groupId in body", async () => {
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.id).toBeGreaterThan(0);
+    expect(typeof json.id).toBe("string");
+    expect(json.id.length).toBeGreaterThan(0);
     expect(json.name).toBe("new-key");
     expect(json.value).toBe("new-value");
 
@@ -515,7 +518,8 @@ integrationTest("POST /api/keys generates value when not provided", async () => 
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.id).toBeGreaterThan(0);
+    expect(typeof json.id).toBe("string");
+    expect(json.id.length).toBeGreaterThan(0);
     expect(json.name).toBe("auto-key");
     expect(json.value).toBeDefined();
     expect(json.value.length).toBeGreaterThan(10);
@@ -546,17 +550,18 @@ integrationTest("POST /api/keys rejects missing groupId", async () => {
   }
 });
 
-integrationTest("POST /api/keys rejects invalid groupId", async () => {
+integrationTest("POST /api/keys rejects invalid groupId characters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
+    // SurrealDB IDs must be alphanumeric with dashes/underscores only
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: "notanumber", name: "new-key" }),
+      body: JSON.stringify({ groupId: "invalid.id", name: "new-key" }),
     });
 
     expect(res.status).toBe(400);
@@ -575,7 +580,7 @@ integrationTest("POST /api/keys rejects nonexistent groupId", async () => {
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: 999, name: "new-key" }),
+      body: JSON.stringify({ groupId: "nonexistent-999", name: "new-key" }),
     });
 
     expect(res.status).toBe(404);

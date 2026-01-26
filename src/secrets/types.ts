@@ -50,9 +50,9 @@ export interface SecretPreviewSource {
   scope: 'global' | 'function' | 'group' | 'key';
   value: string;
   decryptionError?: string; // Set if decryption failed
-  groupId?: number;
+  groupId?: string;
   groupName?: string;
-  keyId?: number;
+  keyId?: string;
   keyName?: string;
 }
 

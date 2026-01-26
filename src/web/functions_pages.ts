@@ -1253,10 +1253,10 @@ function parseFormData(formData: FormData): {
   // Handle methods - use getAll for multiple checkbox values
   const methods = formData.getAll("methods").map((m) => m.toString());
 
-  // Handle keys - use getAll for multiple checkbox values (values are group IDs)
+  // Handle keys - use getAll for multiple checkbox values (values are string group IDs)
   const keysArray = formData.getAll("keys")
-    .map((k) => parseInt(k.toString(), 10))
-    .filter((id) => !isNaN(id) && id > 0);
+    .map((k) => k.toString().trim())
+    .filter((id) => id.length > 0);
 
   // Validation
   if (!validateRouteName(name)) {
@@ -1441,7 +1441,7 @@ export function createFunctionsPages(
   const routes = new Hono();
 
   // Helper function to render key group names for a function route
-  async function renderKeyGroupNames(keyIds: number[] | undefined): Promise<string> {
+  async function renderKeyGroupNames(keyIds: string[] | undefined): Promise<string> {
     if (!keyIds || keyIds.length === 0) {
       return "<em>none</em>";
     }

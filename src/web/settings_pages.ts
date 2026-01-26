@@ -267,9 +267,9 @@ function renderSettingsForm(
 
         inputHtml = `<input ${attrs} />`;
       } else if (metadata.inputType === "checkboxGroup") {
-        // Parse currently selected IDs from comma-separated string
+        // Parse currently selected string IDs from comma-separated string
         const selectedIds = value
-          ? value.split(",").map((id) => parseInt(id.trim(), 10)).filter((id) => !isNaN(id))
+          ? value.split(",").map((id) => id.trim()).filter((id) => id.length > 0)
           : [];
 
         if (availableGroups.length === 0) {
@@ -334,11 +334,9 @@ function parseAndValidateSettings(
     const metadata = SettingsMetadata[name];
 
     if (metadata.inputType === "checkboxGroup") {
-      // Handle checkbox groups - getAll for multiple values
+      // Handle checkbox groups - getAll for multiple values (string IDs)
       const selectedValues = formData.getAll(name).map((v) => v.toString().trim());
-      const selectedIds = selectedValues
-        .map((v) => parseInt(v, 10))
-        .filter((id) => !isNaN(id) && validGroupIds.has(id));
+      const selectedIds = selectedValues.filter((id) => id.length > 0 && validGroupIds.has(id));
 
       // Checkbox groups are optional (empty = no groups selected)
       updates[name] = selectedIds.join(",");

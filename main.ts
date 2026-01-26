@@ -378,16 +378,19 @@ console.log("✓ Code source service initialized (manual, git)");
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
-  db,
+  surrealFactory,
   encryptionService,
   hashService,
 });
 
-// Ensure management group exists and set default access groups
-const mgmtGroupId = await apiKeyService.getOrCreateGroup("management", "Management API keys");
+// Bootstrap management group (creates if not exists)
+await apiKeyService.bootstrapManagementGroup();
+
+// Ensure default access groups setting is set
+const mgmtGroup = await apiKeyService.getGroupByName("management");
 const currentAccessGroups = await settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
-if (!currentAccessGroups) {
-  await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+if (!currentAccessGroups && mgmtGroup) {
+  await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, mgmtGroup.id);
   console.log("✓ Default API access group set to management");
 }
 

@@ -207,12 +207,11 @@ export function createKeysPages(
 
   // Edit group form
   routes.get("/edit-group/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = c.req.param("id");
     const error = c.req.query("error");
     const csrfToken = getCsrfToken(c);
 
-    if (isNaN(id)) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
@@ -246,10 +245,9 @@ export function createKeysPages(
 
   // Handle edit group
   routes.post("/edit-group/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = c.req.param("id");
 
-    if (isNaN(id)) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
@@ -278,14 +276,11 @@ export function createKeysPages(
 
   // Create key form
   routes.get("/create", async (c) => {
-    const preselectedGroupIdStr = c.req.query("group") ?? "";
+    const preselectedGroupId = c.req.query("group") ?? "";
     let preselectedGroup: ApiKeyGroup | null = null;
 
-    if (preselectedGroupIdStr) {
-      const groupId = parseInt(preselectedGroupIdStr, 10);
-      if (!isNaN(groupId)) {
-        preselectedGroup = await apiKeyService.getGroupById(groupId);
-      }
+    if (preselectedGroupId) {
+      preselectedGroup = await apiKeyService.getGroupById(preselectedGroupId);
     }
 
     const error = c.req.query("error");
@@ -378,7 +373,7 @@ export function createKeysPages(
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
 
-    let groupId: number;
+    let groupId: string;
     let groupName: string;
 
     // Handle "create new group" option
@@ -402,17 +397,16 @@ export function createKeysPages(
       }
     } else {
       // Use existing group
-      const parsedGroupId = parseInt(groupIdStr, 10);
-      if (isNaN(parsedGroupId)) {
+      if (!groupIdStr) {
         return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid group selection"));
       }
 
-      const group = await apiKeyService.getGroupById(parsedGroupId);
+      const group = await apiKeyService.getGroupById(groupIdStr);
       if (!group) {
         return c.redirect("/web/keys/create?error=" + encodeURIComponent("Selected group not found"));
       }
 
-      groupId = parsedGroupId;
+      groupId = groupIdStr;
       groupName = group.name;
     }
 
@@ -459,15 +453,10 @@ export function createKeysPages(
 
   // Delete key by ID confirmation
   routes.get("/delete", (c) => {
-    const idStr = c.req.query("id");
+    const id = c.req.query("id");
 
-    if (!idStr) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No key ID specified"));
-    }
-
-    const id = parseInt(idStr, 10);
-    if (isNaN(id)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
     }
 
     return c.html(
@@ -485,15 +474,10 @@ export function createKeysPages(
 
   // Handle delete by ID
   routes.post("/delete", async (c) => {
-    const idStr = c.req.query("id");
+    const id = c.req.query("id");
 
-    if (!idStr) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No key ID specified"));
-    }
-
-    const id = parseInt(idStr, 10);
-    if (isNaN(id)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
     }
 
     try {
@@ -507,15 +491,10 @@ export function createKeysPages(
 
   // Delete group confirmation
   routes.get("/delete-group", async (c) => {
-    const groupIdStr = c.req.query("id");
+    const groupId = c.req.query("id");
 
-    if (!groupIdStr) {
+    if (!groupId) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No group ID specified"));
-    }
-
-    const groupId = parseInt(groupIdStr, 10);
-    if (isNaN(groupId)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
     const group = await apiKeyService.getGroupById(groupId);
@@ -552,15 +531,10 @@ export function createKeysPages(
 
   // Handle delete group
   routes.post("/delete-group", async (c) => {
-    const groupIdStr = c.req.query("id");
+    const groupId = c.req.query("id");
 
-    if (!groupIdStr) {
+    if (!groupId) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No group ID specified"));
-    }
-
-    const groupId = parseInt(groupIdStr, 10);
-    if (isNaN(groupId)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
     const group = await apiKeyService.getGroupById(groupId);
@@ -597,10 +571,9 @@ export function createKeysPages(
 
   // GET /secrets/:groupId - List secrets for group
   routes.get("/secrets/:groupId", async (c) => {
-    const idParam = c.req.param("groupId");
-    const groupId = parseInt(idParam);
+    const groupId = c.req.param("groupId");
 
-    if (isNaN(groupId)) {
+    if (!groupId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid group ID")
       );
@@ -648,10 +621,9 @@ export function createKeysPages(
 
   // GET /secrets/:groupId/create - Create secret form
   routes.get("/secrets/:groupId/create", async (c) => {
-    const idParam = c.req.param("groupId");
-    const groupId = parseInt(idParam);
+    const groupId = c.req.param("groupId");
 
-    if (isNaN(groupId)) {
+    if (!groupId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid group ID")
       );
@@ -684,10 +656,9 @@ export function createKeysPages(
 
   // POST /secrets/:groupId/create - Handle secret creation
   routes.post("/secrets/:groupId/create", async (c) => {
-    const idParam = c.req.param("groupId");
-    const groupId = parseInt(idParam);
+    const groupId = c.req.param("groupId");
 
-    if (isNaN(groupId)) {
+    if (!groupId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid group ID")
       );
@@ -763,12 +734,11 @@ export function createKeysPages(
 
   // GET /secrets/:groupId/edit/:secretId - Edit secret form
   routes.get("/secrets/:groupId/edit/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
+    const groupId = c.req.param("groupId");
     const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -812,12 +782,11 @@ export function createKeysPages(
 
   // POST /secrets/:groupId/edit/:secretId - Handle secret update
   routes.post("/secrets/:groupId/edit/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
+    const groupId = c.req.param("groupId");
     const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -914,12 +883,11 @@ export function createKeysPages(
 
   // GET /secrets/:groupId/delete/:secretId - Delete confirmation
   routes.get("/secrets/:groupId/delete/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
+    const groupId = c.req.param("groupId");
     const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -958,12 +926,11 @@ export function createKeysPages(
 
   // POST /secrets/:groupId/delete/:secretId - Handle deletion
   routes.post("/secrets/:groupId/delete/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
+    const groupId = c.req.param("groupId");
     const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1007,10 +974,9 @@ export function createKeysPages(
 
   // GET /:keyId/secrets - List secrets for an API key
   routes.get("/:keyId/secrets", async (c) => {
-    const idParam = c.req.param("keyId");
-    const keyId = parseInt(idParam);
+    const keyId = c.req.param("keyId");
 
-    if (isNaN(keyId)) {
+    if (!keyId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid key ID")
       );
@@ -1061,10 +1027,9 @@ export function createKeysPages(
 
   // GET /:keyId/secrets/create - Create secret form
   routes.get("/:keyId/secrets/create", async (c) => {
-    const idParam = c.req.param("keyId");
-    const keyId = parseInt(idParam);
+    const keyId = c.req.param("keyId");
 
-    if (isNaN(keyId)) {
+    if (!keyId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid key ID")
       );
@@ -1099,10 +1064,9 @@ export function createKeysPages(
 
   // POST /:keyId/secrets/create - Handle secret creation
   routes.post("/:keyId/secrets/create", async (c) => {
-    const idParam = c.req.param("keyId");
-    const keyId = parseInt(idParam);
+    const keyId = c.req.param("keyId");
 
-    if (isNaN(keyId)) {
+    if (!keyId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid key ID")
       );
@@ -1171,12 +1135,11 @@ export function createKeysPages(
 
   // GET /:keyId/secrets/edit/:secretId - Edit secret form
   routes.get("/:keyId/secrets/edit/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
+    const keyId = c.req.param("keyId");
     const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1217,12 +1180,11 @@ export function createKeysPages(
 
   // POST /:keyId/secrets/edit/:secretId - Handle secret update
   routes.post("/:keyId/secrets/edit/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
+    const keyId = c.req.param("keyId");
     const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1297,12 +1259,11 @@ export function createKeysPages(
 
   // GET /:keyId/secrets/delete/:secretId - Delete confirmation
   routes.get("/:keyId/secrets/delete/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
+    const keyId = c.req.param("keyId");
     const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1340,12 +1301,11 @@ export function createKeysPages(
 
   // POST /:keyId/secrets/delete/:secretId - Handle secret deletion
   routes.post("/:keyId/secrets/delete/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
+    const keyId = c.req.param("keyId");
     const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
     const secretId = parseInt(secretIdParam);
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || isNaN(secretId)) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1392,7 +1352,7 @@ export function createKeysPages(
 /**
  * Renders the secrets table with show/hide and copy functionality
  */
-function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
+function renderGroupSecretsTable(secrets: Secret[], groupId: string): string {
   return `
     <table>
       <thead>
@@ -1453,7 +1413,7 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
  * Renders the create secret form for a group
  */
 function renderGroupSecretCreateForm(
-  groupId: number,
+  groupId: string,
   data: { name?: string; value?: string; comment?: string } = {},
   error?: string,
   csrfToken: string = ""
@@ -1497,7 +1457,7 @@ function renderGroupSecretCreateForm(
  * Renders the edit secret form for a group
  */
 function renderGroupSecretEditForm(
-  groupId: number,
+  groupId: string,
   secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string,
   csrfToken: string = ""
@@ -1540,7 +1500,7 @@ function renderGroupSecretEditForm(
 /**
  * Renders the secrets table for an individual API key with show/hide and copy functionality
  */
-function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
+function renderKeySecretsTable(secrets: Secret[], keyId: string): string {
   return `
     <table>
       <thead>
@@ -1601,7 +1561,7 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
  * Renders the create secret form for an API key
  */
 function renderKeySecretCreateForm(
-  keyId: number,
+  keyId: string,
   data: { name?: string; value?: string; comment?: string } = {},
   error?: string,
   csrfToken: string = ""
@@ -1645,7 +1605,7 @@ function renderKeySecretCreateForm(
  * Renders the edit secret form for an API key
  */
 function renderKeySecretEditForm(
-  keyId: number,
+  keyId: string,
   secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
   error?: string,
   csrfToken: string = ""

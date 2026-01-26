@@ -263,15 +263,15 @@ export function createFileService(codeDir: string): FileService {
 
 /**
  * Creates the ApiKeyService.
- * Requires database, encryption service, and hash service.
+ * Requires SurrealDB connection factory, encryption service, and hash service.
  */
 export function createApiKeyService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   encryptionService: VersionedEncryptionService,
   hashService: HashService
 ): ApiKeyService {
   return new ApiKeyService({
-    db,
+    surrealFactory,
     encryptionService,
     hashService,
   });

@@ -58,14 +58,14 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       return c.json({ error: "Invalid or missing methods" }, 400);
     }
 
-    // Validate keys are array of integers (group IDs) if provided
+    // Validate keys are array of string IDs (group IDs) if provided
     if (body.keys !== undefined && body.keys !== null) {
       if (!Array.isArray(body.keys)) {
         return c.json({ error: "keys must be an array of group IDs" }, 400);
       }
       for (const keyId of body.keys) {
-        if (typeof keyId !== "number" || !Number.isInteger(keyId) || keyId < 1) {
-          return c.json({ error: "keys must be an array of positive integer group IDs" }, 400);
+        if (typeof keyId !== "string" || keyId.length === 0 || !/^[a-zA-Z0-9_-]+$/.test(keyId)) {
+          return c.json({ error: "keys must be an array of valid string group IDs" }, 400);
         }
       }
     }
@@ -118,14 +118,14 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       return c.json({ error: "Invalid or missing methods" }, 400);
     }
 
-    // Validate keys are array of integers (group IDs) if provided
+    // Validate keys are array of string IDs (group IDs) if provided
     if (body.keys !== undefined && body.keys !== null) {
       if (!Array.isArray(body.keys)) {
         return c.json({ error: "keys must be an array of group IDs" }, 400);
       }
       for (const keyId of body.keys) {
-        if (typeof keyId !== "number" || !Number.isInteger(keyId) || keyId < 1) {
-          return c.json({ error: "keys must be an array of positive integer group IDs" }, 400);
+        if (typeof keyId !== "string" || keyId.length === 0 || !/^[a-zA-Z0-9_-]+$/.test(keyId)) {
+          return c.json({ error: "keys must be an array of valid string group IDs" }, 400);
         }
       }
     }

@@ -10,9 +10,9 @@ export interface ApiKeyValidationResult {
   /** Which key group matched (e.g., "api-key", "admin") */
   keyGroup?: string;
   /** The API key group ID (database ID) */
-  keyGroupId?: number;
-  /** The API key ID (database ID, -1 for env management key) */
-  keyId?: number;
+  keyGroupId?: string;
+  /** The API key ID (database ID) */
+  keyId?: string;
   /** Where the API key was found (e.g., "X-API-Key header", "Authorization Bearer") */
   source?: string;
   /** Error message if validation failed */
@@ -46,7 +46,7 @@ export class ApiKeyValidator {
    */
   async validate(
     c: Context,
-    allowedGroupIds: number[]
+    allowedGroupIds: string[]
   ): Promise<ApiKeyValidationResult> {
     // Try each extractor in order until one finds a key
     let apiKey: string | null = null;
