@@ -16,6 +16,7 @@ import {
   getCsrfToken,
 } from "./templates.ts";
 import { csrfInput } from "../csrf/csrf_helpers.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 export interface SettingsPagesOptions {
   settingsService: SettingsService;
@@ -267,9 +268,9 @@ function renderSettingsForm(
 
         inputHtml = `<input ${attrs} />`;
       } else if (metadata.inputType === "checkboxGroup") {
-        // Parse currently selected IDs from comma-separated string
+        // Parse currently selected string IDs from comma-separated string
         const selectedIds = value
-          ? value.split(",").map((id) => parseInt(id.trim(), 10)).filter((id) => !isNaN(id))
+          ? value.split(",").map((id) => id.trim()).filter((id) => id.length > 0)
           : [];
 
         if (availableGroups.length === 0) {
@@ -279,13 +280,16 @@ function renderSettingsForm(
         } else {
           inputHtml = `
             <fieldset>
-              ${availableGroups.map((group) => `
+              ${availableGroups.map((group) => {
+                const groupIdStr = recordIdToString(group.id);
+                return `
                 <label>
-                  <input type="checkbox" name="${escapeHtml(name)}" value="${group.id}"
-                         ${selectedIds.includes(group.id) ? "checked" : ""}>
+                  <input type="checkbox" name="${escapeHtml(name)}" value="${groupIdStr}"
+                         ${selectedIds.includes(groupIdStr) ? "checked" : ""}>
                   <strong>${escapeHtml(group.name)}</strong>${group.description ? `: ${escapeHtml(group.description)}` : ""}
                 </label>
-              `).join("")}
+              `;
+              }).join("")}
             </fieldset>
           `;
         }
@@ -327,18 +331,16 @@ function parseAndValidateSettings(
   const updates: Record<string, string> = {};
   const errors: string[] = [];
 
-  // Get valid group IDs for validation
-  const validGroupIds = new Set(availableGroups.map((g) => g.id));
+  // Get valid group IDs for validation (convert to strings for comparison with form values)
+  const validGroupIds = new Set(availableGroups.map((g) => recordIdToString(g.id)));
 
   for (const name of Object.values(SettingNames)) {
     const metadata = SettingsMetadata[name];
 
     if (metadata.inputType === "checkboxGroup") {
-      // Handle checkbox groups - getAll for multiple values
+      // Handle checkbox groups - getAll for multiple values (string IDs)
       const selectedValues = formData.getAll(name).map((v) => v.toString().trim());
-      const selectedIds = selectedValues
-        .map((v) => parseInt(v, 10))
-        .filter((id) => !isNaN(id) && validGroupIds.has(id));
+      const selectedIds = selectedValues.filter((id) => id.length > 0 && validGroupIds.has(id));
 
       // Checkbox groups are optional (empty = no groups selected)
       updates[name] = selectedIds.join(",");

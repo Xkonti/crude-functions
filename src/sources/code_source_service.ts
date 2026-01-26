@@ -197,7 +197,7 @@ export class CodeSourceService {
       {},
       async (db) => {
         const [result] = await db.query<[{ count: number }[]]>(
-          `SELECT count() as count FROM codeSource WHERE name = $name`,
+          `SELECT count() as count FROM codeSource WHERE name = $name GROUP ALL`,
           { name },
         );
         return (result?.[0]?.count ?? 0) > 0;

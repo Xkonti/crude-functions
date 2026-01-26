@@ -102,7 +102,7 @@ integrationTest("RoutesService.addRoute creates route with all fields", async ()
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     // Use dummy group ID (no FK constraint in routes table)
-    const testGroupId = 999;
+    const testGroupId = "999";
     await ctx.routesService.addRoute({
       name: "test",
       description: "Test route",

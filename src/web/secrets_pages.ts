@@ -1,8 +1,10 @@
 import { Hono } from "@hono/hono";
-import type { DatabaseService } from "../database/database_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
+import type { Secret } from "../secrets/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 import {
   layout,
   escapeHtml,
@@ -24,7 +26,7 @@ import { csrfInput } from "../csrf/csrf_helpers.ts";
  * Options for creating the secrets pages router.
  */
 export interface SecretsPagesOptions {
-  db: DatabaseService;
+  surrealFactory: SurrealConnectionFactory;
   encryptionService: IEncryptionService;
   settingsService: SettingsService;
 }
@@ -35,11 +37,11 @@ export interface SecretsPagesOptions {
  * Provides CRUD operations for global-scope secrets with encryption.
  */
 export function createSecretsPages(options: SecretsPagesOptions): Hono {
-  const { db, encryptionService, settingsService } = options;
+  const { surrealFactory, encryptionService, settingsService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
-  const secretsService = new SecretsService({ db, encryptionService });
+  const secretsService = new SecretsService({ surrealFactory, encryptionService });
 
   // GET / - List all global secrets
   routes.get("/", async (c) => {
@@ -47,7 +49,7 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     const error = c.req.query("error");
 
     // Load all secrets with decrypted values for show/hide functionality
-    const secrets = await secretsService.getGlobalSecretsWithValues();
+    const secrets = await secretsService.getGlobalSecrets();
 
     const content = `
       <h1>Global Secrets</h1>
@@ -73,7 +75,9 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
           <tbody>
             ${secrets
               .map(
-                (secret) => `
+                (secret: Secret) => {
+                  const secretId = recordIdToString(secret.id);
+                  return `
               <tr>
                 <td><code>${escapeHtml(secret.name)}</code></td>
                 <td class="secret-value">
@@ -100,11 +104,12 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
                 <td>${formatDate(new Date(secret.createdAt))}</td>
                 <td>${formatDate(new Date(secret.updatedAt))}</td>
                 <td class="actions">
-                  ${secret.decryptionError ? "" : `<a href="/web/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
-                  <a href="/web/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+                  ${secret.decryptionError ? "" : `<a href="/web/secrets/edit/${secretId}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
+                  <a href="/web/secrets/delete/${secretId}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                 </td>
               </tr>
-            `
+            `;
+                }
               )
               .join("")}
           </tbody>
@@ -183,10 +188,9 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
 
   // GET /edit/:id - Edit secret form
   routes.get("/edit/:id", async (c) => {
-    const idParam = c.req.param("id");
-    const id = parseInt(idParam);
+    const id = c.req.param("id");
 
-    if (isNaN(id)) {
+    if (!id || id.trim() === "") {
       return c.redirect(
         "/web/secrets?error=" + encodeURIComponent("Invalid secret ID")
       );
@@ -214,10 +218,9 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
 
   // POST /edit/:id - Handle secret update
   routes.post("/edit/:id", async (c) => {
-    const idParam = c.req.param("id");
-    const id = parseInt(idParam);
+    const id = c.req.param("id");
 
-    if (isNaN(id)) {
+    if (!id || id.trim() === "") {
       return c.redirect(
         "/web/secrets?error=" + encodeURIComponent("Invalid secret ID")
       );
@@ -293,10 +296,9 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
 
   // GET /delete/:id - Delete confirmation
   routes.get("/delete/:id", async (c) => {
-    const idParam = c.req.param("id");
-    const id = parseInt(idParam);
+    const id = c.req.param("id");
 
-    if (isNaN(id)) {
+    if (!id || id.trim() === "") {
       return c.redirect(
         "/web/secrets?error=" + encodeURIComponent("Invalid secret ID")
       );
@@ -325,10 +327,9 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
 
   // POST /delete/:id - Handle deletion
   routes.post("/delete/:id", async (c) => {
-    const idParam = c.req.param("id");
-    const id = parseInt(idParam);
+    const id = c.req.param("id");
 
-    if (isNaN(id)) {
+    if (!id || id.trim() === "") {
       return c.redirect(
         "/web/secrets?error=" + encodeURIComponent("Invalid secret ID")
       );
@@ -409,7 +410,7 @@ function renderCreateForm(
  */
 function renderEditForm(
   action: string,
-  secret: { name: string; value: string; comment: string | null; decryptionError?: string },
+  secret: { name: string; value: string; comment?: string; decryptionError?: string },
   error?: string,
   csrfToken: string = ""
 ): string {

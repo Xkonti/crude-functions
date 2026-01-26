@@ -15,7 +15,7 @@ export interface RouteInfo {
   /** Allowed HTTP methods */
   methods: string[];
   /** Required API key group IDs (if any) */
-  keys?: number[];
+  keys?: string[];
 }
 
 /**
@@ -57,12 +57,12 @@ export interface FunctionContext {
     | {
         global?: string;
         function?: string;
-        group?: { value: string; groupId: number; groupName: string };
+        group?: { value: string; groupId: string; groupName: string };
         key?: {
           value: string;
-          groupId: number;
+          groupId: string;
           groupName: string;
-          keyId: number;
+          keyId: string;
           keyName: string;
         };
       }

@@ -12,6 +12,7 @@ import { SettingsService } from "../settings/settings_service.ts";
 import { UserService } from "../users/user_service.ts";
 import { SharedSurrealManager, type SharedSurrealTestContext } from "../test/shared_surreal_manager.ts";
 import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 import type { Auth } from "../auth/auth.ts";
 import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
@@ -199,7 +200,7 @@ interface TestRoute {
   route: string;
   methods: string[];
   description?: string;
-  keys?: number[];
+  keys?: string[];
 }
 
 interface TestContext {
@@ -257,7 +258,8 @@ async function createTestApp(
   const hashService = new HashService({
     hashKey: TEST_HASH_KEY,
   });
-  const apiKeyService = new ApiKeyService({ db, encryptionService, hashService });
+  const apiKeyService = new ApiKeyService({ surrealFactory: surrealTestContext.factory, encryptionService, hashService });
+  await apiKeyService.bootstrapManagementGroup();
 
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
@@ -283,7 +285,7 @@ async function createTestApp(
   const userService = new UserService({ surrealFactory: surrealTestContext.factory, auth });
   app.route(
     "/web",
-    createWebRoutes({ auth, db, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService })
+    createWebRoutes({ auth, db, surrealFactory: surrealTestContext.factory, userService, routesService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService })
   );
 
   return { app, tempDir, db, surrealTestContext, apiKeyService, routesService, codeSourceService, sourceFileService, consoleLogService, executionMetricsService, settingsService };
@@ -624,7 +626,8 @@ Deno.test({ name: "GET /web/keys/create with group param prefills form", sanitiz
   const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     // Create a group and get its ID
-    const groupId = await apiKeyService.createGroup("mykey");
+    const groupRecordId = await apiKeyService.createGroup("mykey");
+    const groupId = recordIdToString(groupRecordId);
 
     const res = await app.request(`/web/keys/create?group=${groupId}`);
     expect(res.status).toBe(200);
@@ -640,10 +643,11 @@ Deno.test({ name: "POST /web/keys/create creates key", sanitizeResources: false,
   const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     // Create group first and get its ID
-    const groupId = await apiKeyService.createGroup("newkey");
+    const groupRecordId = await apiKeyService.createGroup("newkey");
+    const groupId = recordIdToString(groupRecordId);
 
     const formData = new FormData();
-    formData.append("groupId", String(groupId));
+    formData.append("groupId", groupId);
     formData.append("name", "newkey-name");
     formData.append("value", "newvalue123");
     formData.append("description", "test description");
@@ -671,8 +675,9 @@ Deno.test({ name: "POST /web/keys/delete removes key by ID", sanitizeResources: 
 
     const keys = await apiKeyService.getKeys("mykey");
     const val1Key = keys!.find((k) => k.value === "val1")!;
+    const val1KeyId = recordIdToString(val1Key.id);
 
-    const res = await app.request(`/web/keys/delete?id=${val1Key.id}`, {
+    const res = await app.request(`/web/keys/delete?id=${val1KeyId}`, {
       method: "POST",
     });
     expect(res.status).toBe(302);
@@ -693,8 +698,9 @@ Deno.test({ name: "POST /web/keys/delete-group removes empty group", sanitizeRes
     // Create empty group (no keys)
     await apiKeyService.createGroup("toremove", "Group to remove");
     const group = await apiKeyService.getGroupByName("toremove");
+    const groupId = recordIdToString(group!.id);
 
-    const res = await app.request(`/web/keys/delete-group?id=${group!.id}`, {
+    const res = await app.request(`/web/keys/delete-group?id=${groupId}`, {
       method: "POST",
     });
     expect(res.status).toBe(302);
@@ -713,8 +719,9 @@ Deno.test({ name: "POST /web/keys/delete-group rejects group with keys", sanitiz
   try {
     await apiKeyService.addKey("haskeys", "key-1", "val1");
     const group = await apiKeyService.getGroupByName("haskeys");
+    const groupId = recordIdToString(group!.id);
 
-    const res = await app.request(`/web/keys/delete-group?id=${group!.id}`, {
+    const res = await app.request(`/web/keys/delete-group?id=${groupId}`, {
       method: "POST",
     });
     expect(res.status).toBe(302);
@@ -764,7 +771,8 @@ Deno.test({ name: "GET /web/keys/delete-group blocks deleting management group",
   const { app, db, tempDir, surrealTestContext, consoleLogService, apiKeyService } = await createTestApp();
   try {
     const group = await apiKeyService.getGroupByName("management");
-    const res = await app.request(`/web/keys/delete-group?id=${group!.id}`);
+    const groupId = recordIdToString(group!.id);
+    const res = await app.request(`/web/keys/delete-group?id=${groupId}`);
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("error=");
     expect(res.headers.get("Location")).toContain("management");

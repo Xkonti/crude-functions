@@ -11,7 +11,7 @@ interface TestFunction {
   route: string;
   methods: string[];
   description?: string;
-  keys?: (number | string)[];
+  keys?: string[];
 }
 
 function createTestApp(ctx: BaseTestContext & RoutesContext): Hono {

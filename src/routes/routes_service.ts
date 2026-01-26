@@ -1,5 +1,6 @@
 import { Mutex } from "@core/asyncutil/mutex";
 import type { DatabaseService } from "../database/database_service.ts";
+import type { SecretsService } from "../secrets/secrets_service.ts";
 
 export interface FunctionRoute {
   id: number;
@@ -8,7 +9,7 @@ export interface FunctionRoute {
   handler: string;
   route: string;
   methods: string[];
-  keys?: number[];
+  keys?: string[];
   enabled: boolean;
 }
 
@@ -17,6 +18,8 @@ export type NewFunctionRoute = Omit<FunctionRoute, "id" | "enabled">;
 
 export interface RoutesServiceOptions {
   db: DatabaseService;
+  /** Optional - when provided, function-scoped secrets are cascade deleted with routes */
+  secretsService?: SecretsService;
 }
 
 // Row type for database queries
@@ -42,11 +45,13 @@ interface RouteRow {
  */
 export class RoutesService {
   private readonly db: DatabaseService;
+  private readonly secretsService?: SecretsService;
   private readonly rebuildMutex = new Mutex();
   private dirty = true; // Start dirty to force initial build
 
   constructor(options: RoutesServiceOptions) {
     this.db = options.db;
+    this.secretsService = options.secretsService;
   }
 
   // ============== Change Detection & Rebuild Coordination ==============
@@ -152,10 +157,10 @@ export class RoutesService {
     }
 
     // Parse keys with error handling
-    let keys: number[] | undefined;
+    let keys: string[] | undefined;
     if (row.keys) {
       try {
-        keys = JSON.parse(row.keys) as number[];
+        keys = JSON.parse(row.keys) as string[];
       } catch (error) {
         globalThis.console.error(
           `[RoutesService] Failed to parse keys for route ${row.id}: ${row.keys}`,
@@ -258,10 +263,22 @@ export class RoutesService {
   /**
    * Remove a route by name.
    * Waits for any in-progress rebuild to complete before modifying.
+   * If secretsService is configured, cascade deletes function-scoped secrets.
    */
   async removeRoute(name: string): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
+
+    // Get the route ID first for cascade delete (if secretsService is configured)
+    if (this.secretsService) {
+      const route = await this.db.queryOne<{ id: number }>(
+        "SELECT id FROM routes WHERE name = ?",
+        [name]
+      );
+      if (route) {
+        await this.secretsService.deleteFunctionSecretsByFunctionId(route.id);
+      }
+    }
 
     const result = await this.db.execute("DELETE FROM routes WHERE name = ?", [
       name,
@@ -356,10 +373,17 @@ export class RoutesService {
   /**
    * Remove a route by ID.
    * Waits for any in-progress rebuild to complete before modifying.
+   * If secretsService is configured, cascade deletes function-scoped secrets.
    */
   async removeRouteById(id: number): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
+
+    // Cascade delete function-scoped secrets before deleting the route
+    // (Routes are in SQLite, secrets in SurrealDB, so no FK constraint)
+    if (this.secretsService) {
+      await this.secretsService.deleteFunctionSecretsByFunctionId(id);
+    }
 
     const result = await this.db.execute("DELETE FROM routes WHERE id = ?", [
       id,

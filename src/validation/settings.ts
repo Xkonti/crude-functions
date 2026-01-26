@@ -86,12 +86,12 @@ export function validateSettingValue(
     }
 
     case "checkboxGroup": {
-      // Validate format: comma-separated numeric IDs (e.g., "1,3,5")
+      // Validate format: comma-separated string IDs (e.g., "abc,def,xyz123")
       // Empty string is valid (no groups selected)
-      if (value !== "" && !/^(\d+)(,\d+)*$/.test(value)) {
+      if (value !== "" && !/^([a-zA-Z0-9_-]+)(,[a-zA-Z0-9_-]+)*$/.test(value)) {
         return {
           valid: false,
-          error: "Invalid format. Must be comma-separated numeric IDs",
+          error: "Invalid format. Must be comma-separated alphanumeric IDs",
         };
       }
       break;

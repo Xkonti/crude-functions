@@ -1,14 +1,17 @@
-import type { DatabaseService } from "../database/database_service.ts";
+import { Mutex } from "@core/asyncutil/mutex";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { HashService } from "../encryption/hash_service.ts";
 import { validateKeyName } from "../validation/keys.ts";
 
 /**
- * Represents an API key group
+ * Represents an API key group.
+ * ID is RecordId at runtime - convert to string only at API/Web UI boundaries.
  */
 export interface ApiKeyGroup {
-  /** Unique identifier for the group */
-  id: number;
+  /** Unique identifier for the group (SurrealDB RecordId) */
+  id: RecordId;
   /** Group name (lowercase alphanumeric with dashes/underscores) */
   name: string;
   /** Optional description */
@@ -16,11 +19,12 @@ export interface ApiKeyGroup {
 }
 
 /**
- * Represents an API key with its metadata
+ * Represents an API key with its metadata.
+ * ID is RecordId at runtime - convert to string only at API/Web UI boundaries.
  */
 export interface ApiKey {
-  /** Unique identifier for the key (used for deletion) */
-  id: number;
+  /** Unique identifier for the key (SurrealDB RecordId) */
+  id: RecordId;
   /** User-friendly name for the key (unique within group) */
   name: string;
   /** The actual key value */
@@ -30,27 +34,70 @@ export interface ApiKey {
 }
 
 export interface ApiKeyServiceOptions {
-  /** Database service instance */
-  db: DatabaseService;
+  /** SurrealDB connection factory */
+  surrealFactory: SurrealConnectionFactory;
   /** Encryption service for encrypting API keys at rest */
   encryptionService: IEncryptionService;
   /** Hash service for O(1) API key lookups */
   hashService: HashService;
 }
 
+/** Database row type for API key groups */
+interface ApiKeyGroupRow {
+  id: RecordId;
+  name: string;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Database row type for API keys */
+interface ApiKeyRow {
+  id: RecordId;
+  groupId: RecordId;
+  name: string;
+  value: string;
+  valueHash: string;
+  description: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /**
- * Service for managing API keys and key groups stored in SQLite database.
+ * Service for managing API keys and key groups stored in SurrealDB.
  * No caching - always reads from database for simplicity and consistency.
  */
 export class ApiKeyService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly encryptionService: IEncryptionService;
   private readonly hashService: HashService;
+  private readonly writeMutex = new Mutex();
 
   constructor(options: ApiKeyServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.encryptionService = options.encryptionService;
     this.hashService = options.hashService;
+  }
+
+  // ============== Bootstrap ==============
+
+  /**
+   * Ensure the management group exists.
+   * Called during application startup.
+   */
+  async bootstrapManagementGroup(): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // INSERT IGNORE creates if not exists, preserves existing
+      await db.query(
+        `INSERT IGNORE INTO apiKeyGroup {
+          id: apiKeyGroup:management,
+          name: 'management',
+          description: 'Management API keys'
+        }`
+      );
+    });
   }
 
   // ============== Group Operations ==============
@@ -59,17 +106,17 @@ export class ApiKeyService {
    * Get all API key groups.
    */
   async getGroups(): Promise<ApiKeyGroup[]> {
-    const rows = await this.db.queryAll<{
-      id: number;
-      name: string;
-      description: string | null;
-    }>("SELECT id, name, description FROM apiKeyGroups ORDER BY name");
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ApiKeyGroupRow[]]>(
+        "SELECT * FROM apiKeyGroup ORDER BY name"
+      );
 
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      description: row.description ?? undefined,
-    }));
+      return (rows ?? []).map((row) => ({
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+      }));
+    });
   }
 
   /**
@@ -77,95 +124,139 @@ export class ApiKeyService {
    */
   async getGroupByName(name: string): Promise<ApiKeyGroup | null> {
     const normalizedName = name.toLowerCase();
-    const row = await this.db.queryOne<{
-      id: number;
-      name: string;
-      description: string | null;
-    }>("SELECT id, name, description FROM apiKeyGroups WHERE name = ?", [
-      normalizedName,
-    ]);
 
-    if (!row) return null;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ApiKeyGroupRow[]]>(
+        "SELECT * FROM apiKeyGroup WHERE name = $name LIMIT 1",
+        { name: normalizedName }
+      );
 
-    return {
-      id: row.id,
-      name: row.name,
-      description: row.description ?? undefined,
-    };
+      const row = rows?.[0];
+      if (!row) return null;
+
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+      };
+    });
   }
 
   /**
    * Get a group by ID.
    */
-  async getGroupById(id: number): Promise<ApiKeyGroup | null> {
-    const row = await this.db.queryOne<{
-      id: number;
-      name: string;
-      description: string | null;
-    }>("SELECT id, name, description FROM apiKeyGroups WHERE id = ?", [id]);
+  async getGroupById(id: string): Promise<ApiKeyGroup | null> {
+    const recordId = new RecordId("apiKeyGroup", id);
 
-    if (!row) return null;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [row] = await db.query<[ApiKeyGroupRow | undefined]>(
+        "RETURN $recordId.*",
+        { recordId }
+      );
 
-    return {
-      id: row.id,
-      name: row.name,
-      description: row.description ?? undefined,
-    };
+      if (!row) return null;
+
+      return {
+        id: row.id,
+        name: row.name,
+        description: row.description ?? undefined,
+      };
+    });
   }
 
   /**
    * Create a new group.
-   * @returns The ID of the created group
+   * @returns RecordId of the created group
    */
-  async createGroup(name: string, description?: string): Promise<number> {
+  async createGroup(name: string, description?: string): Promise<RecordId> {
+    using _lock = await this.writeMutex.acquire();
+
     const normalizedName = name.toLowerCase();
-    const result = await this.db.execute(
-      "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
-      [normalizedName, description ?? null]
-    );
-    return Number(result.lastInsertRowId);
+
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ApiKeyGroupRow[]]>(
+        "CREATE apiKeyGroup SET name = $name, description = $description",
+        { name: normalizedName, description }
+      );
+
+      const row = rows?.[0];
+      if (!row) {
+        throw new Error("Failed to create API key group");
+      }
+
+      return row.id;
+    });
   }
 
   /**
    * Update a group's description.
    */
-  async updateGroup(id: number, description: string): Promise<void> {
-    await this.db.execute(
-      "UPDATE apiKeyGroups SET description = ? WHERE id = ?",
-      [description, id]
-    );
+  async updateGroup(id: string, description: string): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
+    const recordId = new RecordId("apiKeyGroup", id);
+
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        "UPDATE $recordId SET description = $description",
+        { recordId, description }
+      );
+    });
   }
 
   /**
-   * Delete a group by ID. Cascades to all keys in the group.
+   * Delete a group by ID.
+   * Manually cascades to all keys in the group (SurrealDB doesn't auto-cascade).
    */
-  async deleteGroup(id: number): Promise<void> {
-    await this.db.execute("DELETE FROM apiKeyGroups WHERE id = ?", [id]);
+  async deleteGroup(id: string): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
+    const recordId = new RecordId("apiKeyGroup", id);
+
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Delete all keys in group first (manual cascade)
+      await db.query(
+        "DELETE apiKey WHERE groupId = $recordId",
+        { recordId }
+      );
+      // Then delete the group
+      await db.query(
+        "DELETE $recordId",
+        { recordId }
+      );
+    });
   }
 
   /**
    * Get the count of keys in a group.
    * Used to check before group deletion.
    */
-  async getKeyCountForGroup(groupId: number): Promise<number> {
-    const row = await this.db.queryOne<{ count: number }>(
-      "SELECT COUNT(*) as count FROM apiKeys WHERE groupId = ?",
-      [groupId]
-    );
-    return row?.count ?? 0;
+  async getKeyCountForGroup(groupId: string): Promise<number> {
+    const recordId = new RecordId("apiKeyGroup", groupId);
+
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ count: number }[]]>(
+        "SELECT count() as count FROM apiKey WHERE groupId = $groupId GROUP ALL",
+        { groupId: recordId }
+      );
+
+      return rows?.[0]?.count ?? 0;
+    });
   }
 
   /**
    * Get or create a group by name.
-   * @returns The group ID
+   * Returns string ID for internal use (chaining with methods that accept string IDs).
+   * @returns The group ID as string
    */
-  async getOrCreateGroup(name: string, description?: string): Promise<number> {
+  async getOrCreateGroup(name: string, description?: string): Promise<string> {
     const normalizedName = name.toLowerCase();
     const existing = await this.getGroupByName(normalizedName);
     if (existing) {
-      return existing.id;
+      return existing.id.id as string;
     }
-    return this.createGroup(normalizedName, description);
+    const recordId = await this.createGroup(normalizedName, description);
+    return recordId.id as string;
   }
 
   // ============== Key Operations ==============
@@ -174,38 +265,35 @@ export class ApiKeyService {
    * Get all API keys grouped by their group name.
    */
   async getAll(): Promise<Map<string, ApiKey[]>> {
-    const rows = await this.db.queryAll<{
-      id: number;
-      group_name: string;
-      name: string;
-      value: string;
-      description: string | null;
-    }>(`
-      SELECT ak.id, g.name as group_name, ak.name, ak.value, ak.description
-      FROM apiKeys ak
-      JOIN apiKeyGroups g ON g.id = ak.groupId
-      ORDER BY g.name, ak.name
-    `);
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[Array<ApiKeyRow & { groupName: string }>]>(
+        `SELECT *, groupId.name as groupName FROM apiKey ORDER BY groupId.name, name`
+      );
+      return result ?? [];
+    });
 
     // Decrypt all keys in parallel
     const decryptedRows = await Promise.all(
       rows.map(async (row) => ({
-        ...row,
+        id: row.id,
+        groupName: row.groupName,
+        name: row.name,
         value: await this.decryptKey(row.value),
+        description: row.description ?? undefined,
       }))
     );
 
     // Group by group_name
     const result = new Map<string, ApiKey[]>();
     for (const row of decryptedRows) {
-      const existing = result.get(row.group_name) || [];
+      const existing = result.get(row.groupName) || [];
       existing.push({
         id: row.id,
         name: row.name,
         value: row.value,
-        description: row.description ?? undefined,
+        description: row.description,
       });
-      result.set(row.group_name, existing);
+      result.set(row.groupName, existing);
     }
 
     return result;
@@ -224,14 +312,13 @@ export class ApiKeyService {
       return null;
     }
 
-    const rows = await this.db.queryAll<{
-      id: number;
-      name: string;
-      value: string;
-      description: string | null;
-    }>("SELECT id, name, value, description FROM apiKeys WHERE groupId = ? ORDER BY name", [
-      groupRow.id,
-    ]);
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[ApiKeyRow[]]>(
+        "SELECT * FROM apiKey WHERE groupId = $groupId ORDER BY name",
+        { groupId: groupRow.id }
+      );
+      return result ?? [];
+    });
 
     // Decrypt all keys in parallel
     const decryptedKeys = await Promise.all(
@@ -251,47 +338,36 @@ export class ApiKeyService {
    * Returns both the key and its associated group
    */
   async getById(
-    keyId: number
+    keyId: string
   ): Promise<{ key: ApiKey; group: ApiKeyGroup } | null> {
-    const row = await this.db.queryOne<{
-      key_id: number;
-      key_name: string;
-      key_value: string;
-      key_description: string | null;
-      group_id: number;
-      group_name: string;
-      group_description: string | null;
-    }>(
-      `SELECT
-         k.id as key_id,
-         k.name as key_name,
-         k.value as key_value,
-         k.description as key_description,
-         g.id as group_id,
-         g.name as group_name,
-         g.description as group_description
-       FROM apiKeys k
-       JOIN apiKeyGroups g ON k.groupId = g.id
-       WHERE k.id = ?`,
-      [keyId]
-    );
+    const recordId = new RecordId("apiKey", keyId);
 
-    if (!row) return null;
+    const result = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[
+        Array<ApiKeyRow & { groupRecord: ApiKeyGroupRow }>
+      ]>(
+        `SELECT *, groupId.* as groupRecord FROM apiKey WHERE id = $recordId LIMIT 1`,
+        { recordId }
+      );
+      return rows?.[0] ?? null;
+    });
+
+    if (!result) return null;
 
     // Decrypt the key value
-    const decryptedValue = await this.decryptKey(row.key_value);
+    const decryptedValue = await this.decryptKey(result.value);
 
     return {
       key: {
-        id: row.key_id,
-        name: row.key_name,
+        id: result.id,
+        name: result.name,
         value: decryptedValue,
-        description: row.key_description ?? undefined,
+        description: result.description ?? undefined,
       },
       group: {
-        id: row.group_id,
-        name: row.group_name,
-        description: row.group_description ?? undefined,
+        id: result.groupRecord.id,
+        name: result.groupRecord.name,
+        description: result.groupRecord.description ?? undefined,
       },
     };
   }
@@ -310,28 +386,22 @@ export class ApiKeyService {
       return false;
     }
 
-    // O(1) hash-based lookup eliminates timing attack
-    const valueHash = await this.hashService.computeHash(keyValue);
-    const row = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM apiKeys WHERE groupId = ? AND valueHash = ?",
-      [groupRow.id, valueHash]
-    );
-
-    return row !== null;
+    return this.hasKeyInGroup(groupRow.id.id as string, keyValue);
   }
 
   /**
    * Get key and group IDs for a specific key value in a group.
    * Uses hash-based O(1) lookup instead of O(n) decryption.
    * Used by ApiKeyValidator to obtain IDs for secret resolution.
+   * Returns string IDs for API compatibility.
    * @param group - The group name (will be normalized to lowercase)
    * @param keyValue - The key value to look up
-   * @returns Object with keyId, groupId, and keyName, or null if not found
+   * @returns Object with keyId, groupId, and keyName (all strings), or null if not found
    */
   async getKeyByValue(
     group: string,
     keyValue: string
-  ): Promise<{ keyId: number; groupId: number; keyName: string } | null> {
+  ): Promise<{ keyId: string; groupId: string; keyName: string } | null> {
     const normalizedGroup = group.toLowerCase();
 
     const groupRow = await this.getGroupByName(normalizedGroup);
@@ -339,21 +409,15 @@ export class ApiKeyService {
       return null;
     }
 
-    // O(1) hash-based lookup eliminates timing attack
-    const valueHash = await this.hashService.computeHash(keyValue);
-    const row = await this.db.queryOne<{ id: number; name: string }>(
-      "SELECT id, name FROM apiKeys WHERE groupId = ? AND valueHash = ?",
-      [groupRow.id, valueHash]
-    );
-
-    if (!row) {
+    const result = await this.getKeyByValueInGroup(groupRow.id.id as string, keyValue);
+    if (!result) {
       return null;
     }
 
     return {
-      keyId: row.id,
-      groupId: groupRow.id,
-      keyName: row.name,
+      keyId: result.keyId.id as string,
+      groupId: result.groupId,
+      keyName: result.keyName,
     };
   }
 
@@ -361,23 +425,24 @@ export class ApiKeyService {
 
   /**
    * Get all API keys for a specific group by ID.
-   * @param groupId - The group ID
+   * @param groupId - The group ID (string, from URL params)
    * @returns Array of keys or null if group doesn't exist
    */
-  async getKeysByGroupId(groupId: number): Promise<ApiKey[] | null> {
+  async getKeysByGroupId(groupId: string): Promise<ApiKey[] | null> {
     const groupRow = await this.getGroupById(groupId);
     if (!groupRow) {
       return null;
     }
 
-    const rows = await this.db.queryAll<{
-      id: number;
-      name: string;
-      value: string;
-      description: string | null;
-    }>("SELECT id, name, value, description FROM apiKeys WHERE groupId = ? ORDER BY name", [
-      groupId,
-    ]);
+    const groupRecordId = new RecordId("apiKeyGroup", groupId);
+
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [result] = await db.query<[ApiKeyRow[]]>(
+        "SELECT * FROM apiKey WHERE groupId = $groupId ORDER BY name",
+        { groupId: groupRecordId }
+      );
+      return result ?? [];
+    });
 
     // Decrypt all keys in parallel
     const decryptedKeys = await Promise.all(
@@ -398,68 +463,75 @@ export class ApiKeyService {
    * @param groupId - The group ID
    * @param keyValue - The key value to check
    */
-  async hasKeyInGroup(groupId: number, keyValue: string): Promise<boolean> {
-    // O(1) hash-based lookup eliminates timing attack
+  async hasKeyInGroup(groupId: string, keyValue: string): Promise<boolean> {
     const valueHash = await this.hashService.computeHash(keyValue);
-    const row = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM apiKeys WHERE groupId = ? AND valueHash = ?",
-      [groupId, valueHash]
-    );
+    const groupRecordId = new RecordId("apiKeyGroup", groupId);
 
-    return row !== null;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ id: RecordId }[]]>(
+        "SELECT id FROM apiKey WHERE groupId = $groupId AND valueHash = $valueHash LIMIT 1",
+        { groupId: groupRecordId, valueHash }
+      );
+
+      return (rows?.length ?? 0) > 0;
+    });
   }
 
   /**
    * Get key and group IDs for a specific key value in a group by ID.
    * Uses hash-based O(1) lookup instead of O(n) decryption.
    * Used by ApiKeyValidator to obtain IDs for secret resolution.
-   * @param groupId - The group ID
+   * @param groupId - The group ID (string, from URL params)
    * @param keyValue - The key value to look up
-   * @returns Object with keyId, groupId, keyName, and groupName, or null if not found
+   * @returns Object with keyId (RecordId), groupId (string), keyName, and groupName, or null if not found
    */
   async getKeyByValueInGroup(
-    groupId: number,
+    groupId: string,
     keyValue: string
-  ): Promise<{ keyId: number; groupId: number; keyName: string; groupName: string } | null> {
-    // O(1) hash-based lookup eliminates timing attack
+  ): Promise<{ keyId: RecordId; groupId: string; keyName: string; groupName: string } | null> {
     const valueHash = await this.hashService.computeHash(keyValue);
-    const row = await this.db.queryOne<{ id: number; name: string; groupName: string }>(
-      `SELECT k.id, k.name, g.name as groupName
-       FROM apiKeys k
-       JOIN apiKeyGroups g ON k.groupId = g.id
-       WHERE k.groupId = ? AND k.valueHash = ?`,
-      [groupId, valueHash]
-    );
+    const groupRecordId = new RecordId("apiKeyGroup", groupId);
 
-    if (!row) {
-      return null;
-    }
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[Array<{ id: RecordId; name: string; groupName: string }>]>(
+        `SELECT id, name, groupId.name as groupName FROM apiKey
+         WHERE groupId = $groupId AND valueHash = $valueHash LIMIT 1`,
+        { groupId: groupRecordId, valueHash }
+      );
 
-    return {
-      keyId: row.id,
-      groupId: groupId,
-      keyName: row.name,
-      groupName: row.groupName,
-    };
+      const row = rows?.[0];
+      if (!row) {
+        return null;
+      }
+
+      return {
+        keyId: row.id,
+        groupId: groupId,
+        keyName: row.name,
+        groupName: row.groupName,
+      };
+    });
   }
 
   /**
    * Add a new API key to a group by ID.
    * Does NOT create the group if it doesn't exist (unlike addKey).
    * Silently ignores if the exact (group, value) pair already exists.
-   * @param groupId - The group ID (must exist)
+   * @param groupId - The group ID (string, from URL params)
    * @param name - The key name (will be normalized to lowercase, must be unique within group)
    * @param value - The key value
    * @param description - Optional description
-   * @returns The ID of the created key
+   * @returns RecordId of the created (or existing) key
    * @throws Error if group doesn't exist or name conflicts
    */
   async addKeyToGroup(
-    groupId: number,
+    groupId: string,
     name: string,
     value: string,
     description?: string
-  ): Promise<number> {
+  ): Promise<RecordId> {
+    using _lock = await this.writeMutex.acquire();
+
     const normalizedName = name.toLowerCase();
 
     // Validate key name format
@@ -482,13 +554,18 @@ export class ApiKeyService {
       return existing!.keyId;
     }
 
-    // Check if name already exists in this group
-    const existingKeyWithName = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM apiKeys WHERE groupId = ? AND name = ?",
-      [groupId, normalizedName]
-    );
+    const groupRecordId = new RecordId("apiKeyGroup", groupId);
 
-    if (existingKeyWithName) {
+    // Check if name already exists in this group
+    const nameExists = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ id: RecordId }[]]>(
+        "SELECT id FROM apiKey WHERE groupId = $groupId AND name = $name LIMIT 1",
+        { groupId: groupRecordId, name: normalizedName }
+      );
+      return (rows?.length ?? 0) > 0;
+    });
+
+    if (nameExists) {
       throw new Error(
         `A key with name '${normalizedName}' already exists in group '${group.name}'`
       );
@@ -501,45 +578,57 @@ export class ApiKeyService {
     const valueHash = await this.hashService.computeHash(value);
 
     // Insert the encrypted key with hash
-    const result = await this.db.execute(
-      "INSERT INTO apiKeys (groupId, name, value, valueHash, description, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-      [groupId, normalizedName, encryptedValue, valueHash, description ?? null]
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ApiKeyRow[]]>(
+        `CREATE apiKey SET
+          groupId = $groupId,
+          name = $name,
+          value = $value,
+          valueHash = $valueHash,
+          description = $description`,
+        {
+          groupId: groupRecordId,
+          name: normalizedName,
+          value: encryptedValue,
+          valueHash,
+          description,
+        }
+      );
 
-    return Number(result.lastInsertRowId);
+      const row = rows?.[0];
+      if (!row) {
+        throw new Error("Failed to create API key");
+      }
+
+      return row.id;
+    });
   }
 
   /**
    * Get all keys (optionally filtered by group ID).
    * Returns keys with their group information.
-   * @param groupId - Optional group ID to filter by
+   * @param groupId - Optional group ID to filter by (string, from URL params)
    */
   async getAllKeys(
-    groupId?: number
-  ): Promise<Array<ApiKey & { groupId: number; groupName: string }>> {
-    let query = `
-      SELECT ak.id, g.id as group_id, g.name as group_name,
-             ak.name, ak.value, ak.description
-      FROM apiKeys ak
-      JOIN apiKeyGroups g ON g.id = ak.groupId
-    `;
-    const params: number[] = [];
+    groupId?: string
+  ): Promise<Array<ApiKey & { groupId: RecordId; groupName: string }>> {
+    const groupRecordId = groupId ? new RecordId("apiKeyGroup", groupId) : undefined;
 
-    if (groupId !== undefined) {
-      query += " WHERE ak.groupId = ?";
-      params.push(groupId);
-    }
-
-    query += " ORDER BY g.name, ak.name";
-
-    const rows = await this.db.queryAll<{
-      id: number;
-      group_id: number;
-      group_name: string;
-      name: string;
-      value: string;
-      description: string | null;
-    }>(query, params);
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      if (groupRecordId) {
+        const [result] = await db.query<[Array<ApiKeyRow & { groupName: string }>]>(
+          `SELECT *, groupId.name as groupName FROM apiKey
+           WHERE groupId = $groupId ORDER BY groupId.name, name`,
+          { groupId: groupRecordId }
+        );
+        return result ?? [];
+      } else {
+        const [result] = await db.query<[Array<ApiKeyRow & { groupName: string }>]>(
+          `SELECT *, groupId.name as groupName FROM apiKey ORDER BY groupId.name, name`
+        );
+        return result ?? [];
+      }
+    });
 
     // Decrypt all keys in parallel
     const decryptedKeys = await Promise.all(
@@ -548,8 +637,8 @@ export class ApiKeyService {
         name: r.name,
         value: await this.decryptKey(r.value),
         description: r.description ?? undefined,
-        groupId: r.group_id,
-        groupName: r.group_name,
+        groupId: r.groupId,
+        groupName: r.groupName,
       }))
     );
 
@@ -584,8 +673,6 @@ export class ApiKeyService {
     }
 
     // Check if key already exists (silently ignore duplicates)
-    // With encryption, we can't rely on DB unique constraint since each
-    // encryption produces different ciphertext
     if (await this.hasKey(normalizedGroup, value)) {
       return; // Silently ignore duplicate
     }
@@ -593,29 +680,17 @@ export class ApiKeyService {
     // Get or create the group
     const groupId = await this.getOrCreateGroup(normalizedGroup);
 
-    // Check if name already exists in this group
-    const existingKeyWithName = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM apiKeys WHERE groupId = ? AND name = ?",
-      [groupId, normalizedName]
-    );
-
-    if (existingKeyWithName) {
-      throw new Error(
-        `A key with name '${normalizedName}' already exists in group '${normalizedGroup}'`
-      );
+    // Use addKeyToGroup for the rest (which handles name conflict checking)
+    try {
+      await this.addKeyToGroup(groupId, normalizedName, value, description);
+    } catch (error) {
+      // Re-throw name conflicts, but ignore "key already exists" from addKeyToGroup
+      // since we already checked hasKey above
+      if (error instanceof Error && error.message.includes("already exists in group")) {
+        throw error;
+      }
+      throw error;
     }
-
-    // Encrypt the key value before storage
-    const encryptedValue = await this.encryptKey(value);
-
-    // Compute hash for O(1) constant-time lookup
-    const valueHash = await this.hashService.computeHash(value);
-
-    // Insert the encrypted key with hash
-    await this.db.execute(
-      "INSERT INTO apiKeys (groupId, name, value, valueHash, description, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-      [groupId, normalizedName, encryptedValue, valueHash, description ?? null]
-    );
   }
 
   /**
@@ -625,6 +700,8 @@ export class ApiKeyService {
    * @param keyValue - The key value to remove
    */
   async removeKey(group: string, keyValue: string): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
     const normalizedGroup = group.toLowerCase();
 
     const groupRow = await this.getGroupByName(normalizedGroup);
@@ -632,21 +709,29 @@ export class ApiKeyService {
       return; // Group doesn't exist, nothing to remove
     }
 
-    // O(1) hash-based lookup and delete
     const valueHash = await this.hashService.computeHash(keyValue);
-    await this.db.execute(
-      "DELETE FROM apiKeys WHERE groupId = ? AND valueHash = ?",
-      [groupRow.id, valueHash]
-    );
+
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        "DELETE apiKey WHERE groupId = $groupId AND valueHash = $valueHash",
+        { groupId: groupRow.id, valueHash }
+      );
+    });
   }
 
   /**
    * Remove a key by its unique ID.
    * Useful for web UI where passing the key value over the wire is undesirable.
-   * @param id - The unique key ID
+   * @param id - The unique key ID (string, from URL params)
    */
-  async removeKeyById(id: number): Promise<void> {
-    await this.db.execute("DELETE FROM apiKeys WHERE id = ?", [id]);
+  async removeKeyById(id: string): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
+    const recordId = new RecordId("apiKey", id);
+
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query("DELETE $recordId", { recordId });
+    });
   }
 
   /**
@@ -656,17 +741,21 @@ export class ApiKeyService {
    * @throws Error if key not found or name conflicts
    */
   async updateKey(
-    keyId: number,
+    keyId: string,
     updates: { name?: string; value?: string; description?: string }
   ): Promise<void> {
+    using _lock = await this.writeMutex.acquire();
+
     // Get existing key
     const existing = await this.getById(keyId);
     if (!existing) {
       throw new Error(`API key with id ${keyId} not found`);
     }
 
-    const setClauses: string[] = [];
-    const params: (string | number | null)[] = [];
+    const setFields: string[] = [];
+    const params: Record<string, unknown> = {
+      recordId: new RecordId("apiKey", keyId),
+    };
 
     // Handle name update
     if (updates.name !== undefined) {
@@ -676,47 +765,55 @@ export class ApiKeyService {
           "Invalid key name. Must contain only lowercase letters, numbers, dashes, and underscores."
         );
       }
+
       // Check for duplicate name in same group (excluding current key)
-      const duplicate = await this.db.queryOne<{ id: number }>(
-        "SELECT id FROM apiKeys WHERE groupId = ? AND name = ? AND id != ?",
-        [existing.group.id, normalizedName, keyId]
-      );
-      if (duplicate) {
+      const keyRecordId = new RecordId("apiKey", keyId);
+
+      const duplicateExists = await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const [rows] = await db.query<[{ id: RecordId }[]]>(
+          "SELECT id FROM apiKey WHERE groupId = $groupId AND name = $name AND id != $keyId LIMIT 1",
+          { groupId: existing.group.id, name: normalizedName, keyId: keyRecordId }
+        );
+        return (rows?.length ?? 0) > 0;
+      });
+
+      if (duplicateExists) {
         throw new Error(
           `A key with name '${normalizedName}' already exists in group '${existing.group.name}'`
         );
       }
-      setClauses.push("name = ?");
-      params.push(normalizedName);
+
+      setFields.push("name = $name");
+      params.name = normalizedName;
     }
 
     // Handle value update
     if (updates.value !== undefined) {
       const encryptedValue = await this.encryptKey(updates.value);
       const valueHash = await this.hashService.computeHash(updates.value);
-      setClauses.push("value = ?");
-      params.push(encryptedValue);
-      setClauses.push("valueHash = ?");
-      params.push(valueHash);
+      setFields.push("value = $value");
+      params.value = encryptedValue;
+      setFields.push("valueHash = $valueHash");
+      params.valueHash = valueHash;
     }
 
     // Handle description update
     if (updates.description !== undefined) {
-      setClauses.push("description = ?");
-      params.push(updates.description || null);
+      setFields.push("description = $description");
+      // Use undefined for NONE (empty), not null (NULL) - SurrealDB's option<T> expects NONE
+      params.description = updates.description || undefined;
     }
 
-    if (setClauses.length === 0) {
+    if (setFields.length === 0) {
       return; // Nothing to update
     }
 
-    setClauses.push("updatedAt = CURRENT_TIMESTAMP");
-    params.push(keyId);
-
-    await this.db.execute(
-      `UPDATE apiKeys SET ${setClauses.join(", ")} WHERE id = ?`,
-      params
-    );
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPDATE $recordId SET ${setFields.join(", ")}`,
+        params
+      );
+    });
   }
 
   // ============== Private Encryption Helpers ==============

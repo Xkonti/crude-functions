@@ -4,7 +4,6 @@ import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
-import { SecretScope } from "../secrets/types.ts";
 import { HandlerLoader } from "./handler_loader.ts";
 import { ApiKeyValidator } from "./api_key_validator.ts";
 import type { FunctionContext, RouteInfo } from "./types.ts";
@@ -115,8 +114,8 @@ export class FunctionRouter {
 
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
-      let keyGroupId: number | undefined;
-      let keyId: number | undefined;
+      let keyGroupId: string | undefined;
+      let keyId: string | undefined;
 
       if (route.keys && route.keys.length > 0) {
         const validation = await this.apiKeyValidator.validate(c, route.keys);
@@ -173,28 +172,10 @@ export class FunctionRouter {
           scope?: "global" | "function" | "group" | "key"
         ): Promise<string | undefined> => {
           if (scope) {
-            // Convert scope string to enum
-            let scopeEnum: SecretScope;
-            switch (scope) {
-              case "global":
-                scopeEnum = SecretScope.Global;
-                break;
-              case "function":
-                scopeEnum = SecretScope.Function;
-                break;
-              case "group":
-                scopeEnum = SecretScope.Group;
-                break;
-              case "key":
-                scopeEnum = SecretScope.Key;
-                break;
-              default:
-                throw new Error(`Invalid secret scope: ${scope}. Must be one of: global, function, group, key`);
-            }
-
-            return await this.secretsService.getSecretByNameAndScope(
+            // Use scope-specific lookup
+            return await this.secretsService.getSecretByScope(
               name,
-              scopeEnum,
+              scope,
               functionId,
               keyGroupId,
               keyId

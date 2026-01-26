@@ -4,6 +4,7 @@ import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
 import { createHybridAuthMiddleware } from "./auth_middleware.ts";
 import { SettingNames } from "../settings/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 import type { ApiKeysContext, BaseTestContext, SettingsContext } from "../test/types.ts";
 import type { Auth } from "./auth.ts";
 
@@ -152,7 +153,7 @@ integrationTest("HybridAuth: rejects API key from non-allowed group", async () =
 
     await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      String(allowedGroup.id)
+      recordIdToString(allowedGroup.id)
     );
 
     const auth = createMockAuth({ authenticated: false });
@@ -187,7 +188,7 @@ integrationTest("HybridAuth: accepts API key from single allowed group", async (
 
     await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      String(mgmtGroup.id)
+      recordIdToString(mgmtGroup.id)
     );
 
     const auth = createMockAuth({ authenticated: false });
@@ -227,7 +228,7 @@ integrationTest("HybridAuth: accepts API key from multiple allowed groups (first
     // Configure both groups (comma-separated IDs)
     await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      `${adminGroup.id},${serviceGroup.id}`
+      `${recordIdToString(adminGroup.id)},${recordIdToString(serviceGroup.id)}`
     );
 
     const auth = createMockAuth({ authenticated: false });
@@ -268,7 +269,7 @@ integrationTest("HybridAuth: accepts API key from multiple allowed groups (secon
     // Configure both groups (comma-separated IDs)
     await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      `${adminGroup.id},${serviceGroup.id}`
+      `${recordIdToString(adminGroup.id)},${recordIdToString(serviceGroup.id)}`
     );
 
     const auth = createMockAuth({ authenticated: false });
@@ -304,7 +305,7 @@ integrationTest("HybridAuth: rejects invalid API key even when access groups con
 
     await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      String(mgmtGroup.id)
+      recordIdToString(mgmtGroup.id)
     );
 
     const auth = createMockAuth({ authenticated: false });
@@ -393,7 +394,7 @@ integrationTest("HybridAuth: prioritizes session over API key when both present"
 
     await ctx.settingsService.setGlobalSetting(
       SettingNames.API_ACCESS_GROUPS,
-      String(mgmtGroup.id)
+      recordIdToString(mgmtGroup.id)
     );
 
     const auth = createMockAuth({ authenticated: true });

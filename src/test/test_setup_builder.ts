@@ -802,14 +802,17 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 6: Create API key service if needed (BEFORE routes for key resolution)
     // Map to track group name -> ID for resolving route keys
-    const groupNameToId = new Map<string, number>();
+    const groupNameToId = new Map<string, string>();
 
     if (this.flags.apiKeyService) {
       context.apiKeyService = createApiKeyService(
-        db,
+        surrealFactory,
         context.encryptionService,
         context.hashService
       );
+
+      // Bootstrap management group for API key service
+      await context.apiKeyService.bootstrapManagementGroup();
 
       // Create deferred groups and keys
       for (const { name, description } of this.deferredGroups) {
@@ -822,20 +825,23 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       }
     }
 
-    // STEP 7: Create routes service if needed (after API keys for key resolution)
+    // STEP 6.5: Create secrets service if needed (before routes for cascade delete)
+    if (this.flags.secretsService) {
+      context.secretsService = createSecretsService(surrealFactory, context.encryptionService);
+    }
+
+    // STEP 7: Create routes service if needed (after API keys for key resolution, after secrets for cascade delete)
     if (this.flags.routesService) {
-      context.routesService = createRoutesService(db);
+      // Pass secretsService for cascade delete of function-scoped secrets
+      context.routesService = createRoutesService(db, context.secretsService);
 
       // Create deferred routes
       for (const { path, fileName, options } of this.deferredRoutes) {
-        // Resolve any string keys to their IDs
-        let resolvedKeys: number[] | undefined;
+        // Resolve any string keys to their IDs (now string IDs)
+        let resolvedKeys: string[] | undefined;
         if (options?.keys && options.keys.length > 0) {
           resolvedKeys = options.keys.map((key) => {
-            if (typeof key === "number") {
-              return key;
-            }
-            // Resolve string key name to ID
+            // Key is already a string (group name that we need to resolve to string ID)
             const id = groupNameToId.get(key);
             if (id === undefined) {
               throw new Error(
@@ -866,11 +872,6 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       for (const { name, content } of this.deferredFiles) {
         await context.fileService.writeFile(name, content);
       }
-    }
-
-    // STEP 8.5: Create secrets service if needed
-    if (this.flags.secretsService) {
-      context.secretsService = createSecretsService(db, context.encryptionService);
     }
 
     // STEP 9: Create console log service if needed (after routes exist for FK constraint)

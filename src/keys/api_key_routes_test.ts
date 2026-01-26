@@ -4,6 +4,7 @@ import { Hono } from "@hono/hono";
 import { createApiKeyGroupRoutes, createApiKeyRoutes } from "./api_key_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { ApiKeysContext, BaseTestContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
  * Creates a Hono app with both API key routes from a TestSetupBuilder context.
@@ -78,7 +79,8 @@ integrationTest("POST /api/key-groups creates new group", async () => {
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.id).toBeGreaterThan(0);
+    expect(typeof json.id).toBe("string");
+    expect(json.id.length).toBeGreaterThan(0);
     expect(json.name).toBe("email");
 
     const group = await ctx.apiKeyService.getGroupByName("email");
@@ -160,13 +162,14 @@ integrationTest("GET /api/key-groups/:groupId returns group by ID", async () => 
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`);
+    const res = await app.request(`/api/key-groups/${groupIdStr}`);
     expect(res.status).toBe(200);
 
     const json = await res.json();
-    expect(json.id).toBe(group!.id);
+    expect(json.id).toBe(groupIdStr);
     expect(json.name).toBe("email");
     expect(json.description).toBe("Email keys");
   } finally {
@@ -188,14 +191,15 @@ integrationTest("GET /api/key-groups/:groupId returns 404 for nonexistent", asyn
   }
 });
 
-integrationTest("GET /api/key-groups/:groupId returns 400 for invalid ID", async () => {
+integrationTest("GET /api/key-groups/:groupId returns 400 for invalid ID characters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/key-groups/notanumber");
+    // SurrealDB IDs must be alphanumeric with dashes/underscores only
+    const res = await app.request("/api/key-groups/invalid.id");
     expect(res.status).toBe(400);
   } finally {
     await ctx.cleanup();
@@ -210,9 +214,10 @@ integrationTest("PUT /api/key-groups/:groupId updates group description", async 
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`, {
+    const res = await app.request(`/api/key-groups/${groupIdStr}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ description: "New desc" }),
@@ -220,7 +225,7 @@ integrationTest("PUT /api/key-groups/:groupId updates group description", async 
 
     expect(res.status).toBe(200);
 
-    const updated = await ctx.apiKeyService.getGroupById(group!.id);
+    const updated = await ctx.apiKeyService.getGroupById(groupIdStr);
     expect(updated!.description).toBe("New desc");
   } finally {
     await ctx.cleanup();
@@ -254,16 +259,17 @@ integrationTest("DELETE /api/key-groups/:groupId deletes empty group", async () 
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`, {
+    const res = await app.request(`/api/key-groups/${groupIdStr}`, {
       method: "DELETE",
     });
 
     expect(res.status).toBe(200);
 
     // Group should be gone
-    expect(await ctx.apiKeyService.getGroupById(group!.id)).toBeNull();
+    expect(await ctx.apiKeyService.getGroupById(groupIdStr)).toBeNull();
   } finally {
     await ctx.cleanup();
   }
@@ -276,9 +282,10 @@ integrationTest("DELETE /api/key-groups/:groupId blocks deleting management grou
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("management");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`, {
+    const res = await app.request(`/api/key-groups/${groupIdStr}`, {
       method: "DELETE",
     });
 
@@ -299,9 +306,10 @@ integrationTest("DELETE /api/key-groups/:groupId returns 409 when keys exist", a
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("test-group");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`, {
+    const res = await app.request(`/api/key-groups/${groupIdStr}`, {
       method: "DELETE",
     });
 
@@ -324,9 +332,10 @@ integrationTest("DELETE /api/key-groups/:groupId error includes key count", asyn
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("test-group");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`, {
+    const res = await app.request(`/api/key-groups/${groupIdStr}`, {
       method: "DELETE",
     });
 
@@ -347,21 +356,22 @@ integrationTest("DELETE /api/key-groups/:groupId works after keys deleted", asyn
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("test-group");
+    const groupIdStr = recordIdToString(group!.id);
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     // Delete the key first
     await ctx.apiKeyService.removeKeyById(keyId);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/key-groups/${group!.id}`, {
+    const res = await app.request(`/api/key-groups/${groupIdStr}`, {
       method: "DELETE",
     });
 
     expect(res.status).toBe(200);
 
     // Group should be gone
-    expect(await ctx.apiKeyService.getGroupById(group!.id)).toBeNull();
+    expect(await ctx.apiKeyService.getGroupById(groupIdStr)).toBeNull();
   } finally {
     await ctx.cleanup();
   }
@@ -423,9 +433,10 @@ integrationTest("GET /api/keys filters by groupId", async () => {
 
   try {
     const emailGroup = await ctx.apiKeyService.getGroupByName("email");
+    const emailGroupIdStr = recordIdToString(emailGroup!.id);
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/keys?groupId=${emailGroup!.id}`);
+    const res = await app.request(`/api/keys?groupId=${emailGroupIdStr}`);
     expect(res.status).toBe(200);
 
     const json = await res.json();
@@ -439,15 +450,16 @@ integrationTest("GET /api/keys filters by groupId", async () => {
   }
 });
 
-integrationTest("GET /api/keys returns 400 for invalid groupId", async () => {
+integrationTest("GET /api/keys returns 404 for nonexistent groupId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/keys?groupId=notanumber");
-    expect(res.status).toBe(400);
+    // SurrealDB accepts any string as an ID, returns 404 if group not found
+    const res = await app.request("/api/keys?groupId=nonexistent-group-id");
+    expect(res.status).toBe(404);
   } finally {
     await ctx.cleanup();
   }
@@ -460,7 +472,7 @@ integrationTest("GET /api/keys returns 404 for nonexistent groupId", async () =>
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/keys?groupId=999");
+    const res = await app.request("/api/keys?groupId=nonexistent-999");
     expect(res.status).toBe(404);
   } finally {
     await ctx.cleanup();
@@ -475,18 +487,20 @@ integrationTest("POST /api/keys creates key with groupId in body", async () => {
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: group!.id, name: "new-key", value: "new-value" }),
+      body: JSON.stringify({ groupId: groupIdStr, name: "new-key", value: "new-value" }),
     });
 
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.id).toBeGreaterThan(0);
+    expect(typeof json.id).toBe("string");
+    expect(json.id.length).toBeGreaterThan(0);
     expect(json.name).toBe("new-key");
     expect(json.value).toBe("new-value");
 
@@ -504,18 +518,20 @@ integrationTest("POST /api/keys generates value when not provided", async () => 
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: group!.id, name: "auto-key" }),
+      body: JSON.stringify({ groupId: groupIdStr, name: "auto-key" }),
     });
 
     expect(res.status).toBe(201);
 
     const json = await res.json();
-    expect(json.id).toBeGreaterThan(0);
+    expect(typeof json.id).toBe("string");
+    expect(json.id.length).toBeGreaterThan(0);
     expect(json.name).toBe("auto-key");
     expect(json.value).toBeDefined();
     expect(json.value.length).toBeGreaterThan(10);
@@ -546,17 +562,18 @@ integrationTest("POST /api/keys rejects missing groupId", async () => {
   }
 });
 
-integrationTest("POST /api/keys rejects invalid groupId", async () => {
+integrationTest("POST /api/keys rejects invalid groupId characters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
+    // SurrealDB IDs must be alphanumeric with dashes/underscores only
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: "notanumber", name: "new-key" }),
+      body: JSON.stringify({ groupId: "invalid.id", name: "new-key" }),
     });
 
     expect(res.status).toBe(400);
@@ -575,7 +592,7 @@ integrationTest("POST /api/keys rejects nonexistent groupId", async () => {
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: 999, name: "new-key" }),
+      body: JSON.stringify({ groupId: "nonexistent-999", name: "new-key" }),
     });
 
     expect(res.status).toBe(404);
@@ -591,12 +608,13 @@ integrationTest("POST /api/keys rejects missing name", async () => {
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: group!.id, value: "some-value" }),
+      body: JSON.stringify({ groupId: groupIdStr, value: "some-value" }),
     });
 
     expect(res.status).toBe(400);
@@ -615,12 +633,13 @@ integrationTest("POST /api/keys rejects invalid key name", async () => {
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: group!.id, name: "Invalid Name!" }),
+      body: JSON.stringify({ groupId: groupIdStr, name: "Invalid Name!" }),
     });
 
     expect(res.status).toBe(400);
@@ -639,12 +658,13 @@ integrationTest("POST /api/keys rejects invalid key value", async () => {
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: group!.id, name: "test-key", value: "invalid.value!" }),
+      body: JSON.stringify({ groupId: groupIdStr, name: "test-key", value: "invalid.value!" }),
     });
 
     expect(res.status).toBe(400);
@@ -664,12 +684,13 @@ integrationTest("POST /api/keys returns 409 for duplicate key name", async () =>
 
   try {
     const group = await ctx.apiKeyService.getGroupByName("email");
+    const groupIdStr = recordIdToString(group!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/keys", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ groupId: group!.id, name: "existing-key", value: "new-value" }),
+      body: JSON.stringify({ groupId: groupIdStr, name: "existing-key", value: "new-value" }),
     });
 
     expect(res.status).toBe(409);
@@ -690,7 +711,7 @@ integrationTest("GET /api/keys/:keyId returns key by ID", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("email");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${keyId}`);
@@ -721,15 +742,16 @@ integrationTest("GET /api/keys/:keyId returns 404 for nonexistent", async () => 
   }
 });
 
-integrationTest("GET /api/keys/:keyId returns 400 for invalid ID", async () => {
+integrationTest("GET /api/keys/:keyId returns 404 for nonexistent ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/keys/notanumber");
-    expect(res.status).toBe(400);
+    // SurrealDB accepts any string as an ID, returns 404 if not found
+    const res = await app.request("/api/keys/nonexistent-id");
+    expect(res.status).toBe(404);
   } finally {
     await ctx.cleanup();
   }
@@ -744,7 +766,7 @@ integrationTest("PUT /api/keys/:keyId updates name", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${keyId}`, {
@@ -773,7 +795,7 @@ integrationTest("PUT /api/keys/:keyId updates value", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${keyId}`, {
@@ -800,7 +822,7 @@ integrationTest("PUT /api/keys/:keyId updates description", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${keyId}`, {
@@ -826,7 +848,7 @@ integrationTest("PUT /api/keys/:keyId returns 400 for invalid name", async () =>
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${keyId}`, {
@@ -852,7 +874,7 @@ integrationTest("PUT /api/keys/:keyId returns 400 for invalid value", async () =
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const keyId = keys![0].id;
+    const keyId = recordIdToString(keys![0].id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${keyId}`, {
@@ -901,7 +923,7 @@ integrationTest("PUT /api/keys/:keyId returns 409 for duplicate name", async () 
 
   try {
     const keys = await ctx.apiKeyService.getKeys("test-group");
-    const key2Id = keys!.find((k) => k.name === "key-two")!.id;
+    const key2Id = recordIdToString(keys!.find((k) => k.name === "key-two")!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${key2Id}`, {
@@ -919,23 +941,24 @@ integrationTest("PUT /api/keys/:keyId returns 409 for duplicate name", async () 
   }
 });
 
-integrationTest("PUT /api/keys/:keyId returns 400 for invalid ID", async () => {
+integrationTest("PUT /api/keys/:keyId returns 404 for nonexistent ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/keys/notanumber", {
+    // SurrealDB accepts any string as an ID, returns 404 if not found
+    const res = await app.request("/api/keys/nonexistent-id", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: "new-name" }),
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid");
+    expect(json.error).toContain("not found");
   } finally {
     await ctx.cleanup();
   }
@@ -951,7 +974,7 @@ integrationTest("DELETE /api/keys/:keyId removes key by ID", async () => {
 
   try {
     const keys = await ctx.apiKeyService.getKeys("email");
-    const key1Id = keys!.find((k) => k.value === "key1-value")!.id;
+    const key1Id = recordIdToString(keys!.find((k) => k.value === "key1-value")!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request(`/api/keys/${key1Id}`, {
@@ -988,21 +1011,22 @@ integrationTest("DELETE /api/keys/:keyId returns 404 for non-existent key", asyn
   }
 });
 
-integrationTest("DELETE /api/keys/:keyId returns 400 for invalid ID", async () => {
+integrationTest("DELETE /api/keys/:keyId returns 404 for nonexistent ID", async () => {
   const ctx = await TestSetupBuilder.create()
     .withApiKeys()
     .build();
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/keys/notanumber", {
+    // SurrealDB accepts any string as an ID, returns 404 if not found
+    const res = await app.request("/api/keys/nonexistent-id", {
       method: "DELETE",
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(404);
 
     const json = await res.json();
-    expect(json.error).toContain("Invalid");
+    expect(json.error).toContain("not found");
   } finally {
     await ctx.cleanup();
   }

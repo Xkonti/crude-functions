@@ -103,11 +103,11 @@ export function createHybridAuthMiddleware(options: HybridAuthMiddlewareOptions)
       );
 
       if (accessGroupsSetting) {
-        // Parse comma-separated numeric IDs
+        // Parse comma-separated string IDs
         const groupIds = accessGroupsSetting
           .split(",")
-          .map((id) => parseInt(id.trim(), 10))
-          .filter((id) => !isNaN(id));
+          .map((id) => id.trim())
+          .filter((id) => id.length > 0);
 
         // Check API key against each allowed group by ID
         for (const groupId of groupIds) {

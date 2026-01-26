@@ -130,3 +130,86 @@ DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE codeSource TYPE datetime VALUE tim
 DEFINE INDEX IF NOT EXISTS unique_codeSource_name ON codeSource FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_codeSource_enabled ON codeSource FIELDS enabled;
 DEFINE INDEX IF NOT EXISTS idx_codeSource_type ON codeSource FIELDS type;
+
+--------------------------------------------------------------------------------
+-- API Key Groups
+--------------------------------------------------------------------------------
+
+-- API key groups table - organizes API keys into groups
+DEFINE TABLE IF NOT EXISTS apiKeyGroup SCHEMAFULL TYPE NORMAL;
+
+DEFINE FIELD IF NOT EXISTS name ON TABLE apiKeyGroup TYPE string;
+DEFINE FIELD IF NOT EXISTS description ON TABLE apiKeyGroup TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE apiKeyGroup TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE apiKeyGroup TYPE datetime VALUE time::now();
+
+-- Unique name constraint
+DEFINE INDEX IF NOT EXISTS unique_apiKeyGroup_name ON apiKeyGroup FIELDS name UNIQUE;
+
+--------------------------------------------------------------------------------
+-- API Keys
+--------------------------------------------------------------------------------
+
+-- API keys table - stores encrypted API keys
+DEFINE TABLE IF NOT EXISTS apiKey SCHEMAFULL TYPE NORMAL;
+
+DEFINE FIELD IF NOT EXISTS groupId ON TABLE apiKey TYPE record<apiKeyGroup>;
+DEFINE FIELD IF NOT EXISTS name ON TABLE apiKey TYPE string;
+DEFINE FIELD IF NOT EXISTS value ON TABLE apiKey TYPE string;  -- encrypted
+DEFINE FIELD IF NOT EXISTS valueHash ON TABLE apiKey TYPE string;  -- for O(1) lookup
+DEFINE FIELD IF NOT EXISTS description ON TABLE apiKey TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE apiKey TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE apiKey TYPE datetime VALUE time::now();
+
+-- Unique constraint: name must be unique within a group
+DEFINE INDEX IF NOT EXISTS unique_apiKey_group_name ON apiKey FIELDS groupId, name UNIQUE;
+
+-- Index for hash-based lookups (O(1) key validation)
+DEFINE INDEX IF NOT EXISTS idx_apiKey_group_hash ON apiKey FIELDS groupId, valueHash;
+
+--------------------------------------------------------------------------------
+-- Secrets
+--------------------------------------------------------------------------------
+
+-- Secrets table - stores encrypted secrets with flexible scoping
+DEFINE TABLE IF NOT EXISTS secret SCHEMAFULL TYPE NORMAL;
+
+-- Core fields
+DEFINE FIELD IF NOT EXISTS name ON TABLE secret TYPE string;
+DEFINE FIELD IF NOT EXISTS value ON TABLE secret TYPE string;  -- encrypted
+DEFINE FIELD IF NOT EXISTS comment ON TABLE secret TYPE option<string>;
+
+-- Scope type as string literal
+DEFINE FIELD IF NOT EXISTS scopeType ON TABLE secret TYPE "global" | "function" | "group" | "key";
+
+-- Scope reference as record:
+-- - global: NONE (null)
+-- - function: record (e.g., function:123 - synthetic record for SQLite route ID)
+-- - group: record<apiKeyGroup>
+-- - key: record<apiKey>
+DEFINE FIELD IF NOT EXISTS scopeRef ON TABLE secret TYPE option<record>;
+
+-- Timestamps
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE secret TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE secret TYPE datetime VALUE time::now();
+
+-- Unique index: no duplicate secrets with same name in same scope
+DEFINE INDEX IF NOT EXISTS unique_secret_name_scope ON secret FIELDS name, scopeType, scopeRef UNIQUE;
+
+-- Indexes for efficient lookups
+DEFINE INDEX IF NOT EXISTS idx_secret_scopeType ON secret FIELDS scopeType;
+DEFINE INDEX IF NOT EXISTS idx_secret_scopeRef ON secret FIELDS scopeRef;
+
+--------------------------------------------------------------------------------
+-- Cascade Delete Events
+--------------------------------------------------------------------------------
+
+-- When apiKeyGroup is deleted, delete all group-scoped secrets
+DEFINE EVENT IF NOT EXISTS delete_group_secrets ON TABLE apiKeyGroup WHEN $event = "DELETE" THEN {
+    DELETE secret WHERE scopeType = "group" AND scopeRef = $before.id
+};
+
+-- When apiKey is deleted, delete all key-scoped secrets
+DEFINE EVENT IF NOT EXISTS delete_key_secrets ON TABLE apiKey WHEN $event = "DELETE" THEN {
+    DELETE secret WHERE scopeType = "key" AND scopeRef = $before.id
+};

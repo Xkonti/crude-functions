@@ -239,10 +239,13 @@ export function createConsoleLogService(
 
 /**
  * Creates the RoutesService.
- * Requires only database.
+ * Requires database, optionally accepts SecretsService for cascade delete.
  */
-export function createRoutesService(db: DatabaseService): RoutesService {
-  return new RoutesService({ db });
+export function createRoutesService(
+  db: DatabaseService,
+  secretsService?: SecretsService
+): RoutesService {
+  return new RoutesService({ db, secretsService });
 }
 
 // =============================================================================
@@ -263,15 +266,15 @@ export function createFileService(codeDir: string): FileService {
 
 /**
  * Creates the ApiKeyService.
- * Requires database, encryption service, and hash service.
+ * Requires SurrealDB connection factory, encryption service, and hash service.
  */
 export function createApiKeyService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   encryptionService: VersionedEncryptionService,
   hashService: HashService
 ): ApiKeyService {
   return new ApiKeyService({
-    db,
+    surrealFactory,
     encryptionService,
     hashService,
   });
@@ -283,14 +286,14 @@ export function createApiKeyService(
 
 /**
  * Creates the SecretsService.
- * Requires database and encryption service.
+ * Requires SurrealDB connection factory and encryption service.
  */
 export function createSecretsService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   encryptionService: VersionedEncryptionService
 ): SecretsService {
   return new SecretsService({
-    db,
+    surrealFactory,
     encryptionService,
   });
 }

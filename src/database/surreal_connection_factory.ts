@@ -199,16 +199,18 @@ export class SurrealConnectionFactory {
     const db = new Surreal();
 
     try {
-      await db.connect(this.connectionUrl);
-
-      await db.signin({
-        username: this.username,
-        password: this.password,
-      });
-
-      await db.use({
+      // Use new API with automatic re-authentication on reconnection
+      // This prevents "Anonymous access not allowed" errors when WebSocket
+      // connections drop and reconnect due to inactivity or server restarts
+      await db.connect(this.connectionUrl, {
         namespace,
         database,
+        // Provide authentication function for automatic re-authentication
+        // The SDK will call this function when reconnecting or renewing tokens
+        authentication: () => ({
+          username: this.username,
+          password: this.password,
+        }),
       });
 
       return db;

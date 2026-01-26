@@ -267,12 +267,10 @@ export interface RouteOptions {
   methods?: string[];
   /**
    * API key groups required to access this route.
-   * Can be specified as:
-   * - Group IDs (numbers) - used directly
-   * - Group names (strings) - resolved to IDs at build time
-   *   (group must be created with withApiKeyGroup before the route)
+   * Specified as group names (strings) - resolved to IDs at build time.
+   * Group must be created with withApiKeyGroup before the route.
    */
-  keys?: (number | string)[];
+  keys?: string[];
 }
 
 /**

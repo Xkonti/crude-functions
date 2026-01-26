@@ -1,7 +1,8 @@
 import { Hono } from "@hono/hono";
-import { ApiKeyService } from "./api_key_service.ts";
+import type { RecordId } from "surrealdb";
+import { ApiKeyService, type ApiKeyGroup, type ApiKey } from "./api_key_service.ts";
 import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
-import { validateId } from "../validation/common.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
  * Generate a URL-safe base64-encoded UUID for API keys.
@@ -9,6 +10,51 @@ import { validateId } from "../validation/common.ts";
 function generateApiKey(): string {
   const uuid = crypto.randomUUID().replace(/-/g, "");
   return btoa(uuid).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+}
+
+/**
+ * Validate a SurrealDB record ID (string).
+ * Must be non-empty and contain only alphanumeric characters, dashes, and underscores.
+ */
+function isValidSurrealId(id: string | undefined): id is string {
+  return !!id && id.length > 0 && /^[a-zA-Z0-9_-]+$/.test(id);
+}
+
+/**
+ * Convert ApiKeyGroup (internal with RecordId) to API response (strings).
+ */
+function normalizeGroup(group: ApiKeyGroup): Record<string, unknown> {
+  return {
+    id: recordIdToString(group.id),
+    name: group.name,
+    description: group.description ?? null,
+  };
+}
+
+/**
+ * Convert ApiKey (internal with RecordId) to API response (strings).
+ */
+function normalizeKey(key: ApiKey): Record<string, unknown> {
+  return {
+    id: recordIdToString(key.id),
+    name: key.name,
+    value: key.value,
+    description: key.description ?? null,
+  };
+}
+
+/**
+ * Convert ApiKey with group info to API response (strings).
+ */
+function normalizeKeyWithGroup(key: ApiKey & { groupId: RecordId; groupName: string }): Record<string, unknown> {
+  return {
+    id: recordIdToString(key.id),
+    name: key.name,
+    value: key.value,
+    description: key.description ?? null,
+    groupId: recordIdToString(key.groupId),
+    groupName: key.groupName,
+  };
 }
 
 /**
@@ -21,7 +67,7 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
   // GET /api/key-groups - List all groups
   routes.get("/", async (c) => {
     const groups = await service.getGroups();
-    return c.json({ groups });
+    return c.json({ groups: groups.map(normalizeGroup) });
   });
 
   // POST /api/key-groups - Create a new group
@@ -48,14 +94,14 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
       return c.json({ error: `Group '${name}' already exists` }, 409);
     }
 
-    const id = await service.createGroup(name, body.description);
-    return c.json({ id, name }, 201);
+    const recordId = await service.createGroup(name, body.description);
+    return c.json({ id: recordIdToString(recordId), name }, 201);
   });
 
   // GET /api/key-groups/:groupId - Get a group by ID
   routes.get("/:groupId", async (c) => {
-    const groupId = validateId(c.req.param("groupId"));
-    if (groupId === null) {
+    const groupId = c.req.param("groupId");
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid group ID" }, 400);
     }
 
@@ -64,13 +110,13 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
       return c.json({ error: "Group not found" }, 404);
     }
 
-    return c.json(group);
+    return c.json(normalizeGroup(group));
   });
 
   // PUT /api/key-groups/:groupId - Update a group
   routes.put("/:groupId", async (c) => {
-    const groupId = validateId(c.req.param("groupId"));
-    if (groupId === null) {
+    const groupId = c.req.param("groupId");
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid group ID" }, 400);
     }
 
@@ -92,8 +138,8 @@ export function createApiKeyGroupRoutes(service: ApiKeyService): Hono {
 
   // DELETE /api/key-groups/:groupId - Delete a group (must be empty)
   routes.delete("/:groupId", async (c) => {
-    const groupId = validateId(c.req.param("groupId"));
-    if (groupId === null) {
+    const groupId = c.req.param("groupId");
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid group ID" }, 400);
     }
 
@@ -132,13 +178,13 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
   // GET /api/keys - List all keys (optional ?groupId= filter)
   routes.get("/", async (c) => {
     const groupIdParam = c.req.query("groupId");
-    let groupId: number | undefined;
+    let groupId: string | undefined;
 
     if (groupIdParam) {
-      groupId = validateId(groupIdParam) ?? undefined;
-      if (groupId === undefined) {
+      if (!isValidSurrealId(groupIdParam)) {
         return c.json({ error: "Invalid groupId parameter" }, 400);
       }
+      groupId = groupIdParam;
 
       // Verify group exists
       const group = await service.getGroupById(groupId);
@@ -148,12 +194,12 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
     }
 
     const keys = await service.getAllKeys(groupId);
-    return c.json({ keys });
+    return c.json({ keys: keys.map(normalizeKeyWithGroup) });
   });
 
   // POST /api/keys - Create a new key
   routes.post("/", async (c) => {
-    let body: { groupId?: number; name?: string; value?: string; description?: string };
+    let body: { groupId?: string; name?: string; value?: string; description?: string };
     try {
       body = await c.req.json();
     } catch {
@@ -165,8 +211,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
       return c.json({ error: "Missing required field: groupId" }, 400);
     }
 
-    const groupId = validateId(String(body.groupId));
-    if (groupId === null) {
+    const groupId = body.groupId;
+    if (!isValidSurrealId(groupId)) {
       return c.json({ error: "Invalid groupId" }, 400);
     }
 
@@ -194,9 +240,9 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
     }
 
     try {
-      const keyId = await service.addKeyToGroup(groupId, name, value, body.description);
+      const keyRecordId = await service.addKeyToGroup(groupId, name, value, body.description);
       // Return the key value (important when auto-generated)
-      return c.json({ id: keyId, name, value }, 201);
+      return c.json({ id: recordIdToString(keyRecordId), name, value }, 201);
     } catch (error) {
       if (error instanceof Error && error.message.includes("already exists")) {
         return c.json({ error: error.message }, 409);
@@ -207,8 +253,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // GET /api/keys/:keyId - Get a key by ID
   routes.get("/:keyId", async (c) => {
-    const keyId = validateId(c.req.param("keyId"));
-    if (keyId === null) {
+    const keyId = c.req.param("keyId");
+    if (!isValidSurrealId(keyId)) {
       return c.json({ error: "Invalid key ID" }, 400);
     }
 
@@ -217,13 +263,13 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
       return c.json({ error: "Key not found" }, 404);
     }
 
-    return c.json({ key: result.key, group: result.group });
+    return c.json({ key: normalizeKey(result.key), group: normalizeGroup(result.group) });
   });
 
   // PUT /api/keys/:keyId - Update a key
   routes.put("/:keyId", async (c) => {
-    const keyId = validateId(c.req.param("keyId"));
-    if (keyId === null) {
+    const keyId = c.req.param("keyId");
+    if (!isValidSurrealId(keyId)) {
       return c.json({ error: "Invalid key ID" }, 400);
     }
 
@@ -266,8 +312,8 @@ export function createApiKeyRoutes(service: ApiKeyService): Hono {
 
   // DELETE /api/keys/:keyId - Delete a key
   routes.delete("/:keyId", async (c) => {
-    const keyId = validateId(c.req.param("keyId"));
-    if (keyId === null) {
+    const keyId = c.req.param("keyId");
+    if (!isValidSurrealId(keyId)) {
       return c.json({ error: "Invalid key ID" }, 400);
     }
 

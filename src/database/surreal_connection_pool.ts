@@ -371,6 +371,7 @@ export class SurrealConnectionPool {
 
   /**
    * Check if an error looks like a connection failure.
+   * Includes authentication errors that indicate the connection is stale.
    */
   private isConnectionError(error: unknown): boolean {
     const message = error instanceof Error ? error.message.toLowerCase() : "";
@@ -380,7 +381,13 @@ export class SurrealConnectionPool {
       message.includes("disconnected") ||
       message.includes("websocket") ||
       message.includes("econnrefused") ||
-      message.includes("econnreset")
+      message.includes("econnreset") ||
+      // Authentication errors indicate connection lost auth state
+      message.includes("anonymous") ||
+      message.includes("not enough permissions") ||
+      message.includes("permission") ||
+      message.includes("authentication") ||
+      message.includes("unauthorized")
     );
   }
 }

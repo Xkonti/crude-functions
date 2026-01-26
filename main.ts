@@ -55,6 +55,7 @@ import { SurrealProcessManager } from "./src/database/surreal_process_manager.ts
 import { SurrealHealthMonitor } from "./src/database/surreal_health_monitor.ts";
 import { SurrealSupervisor } from "./src/database/surreal_supervisor.ts";
 import { SurrealMigrationService } from "./src/database/surreal_migration_service.ts";
+import { recordIdToString } from "./src/database/surreal_helpers.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -378,28 +379,32 @@ console.log("✓ Code source service initialized (manual, git)");
 
 // Initialize API key service
 const apiKeyService = new ApiKeyService({
-  db,
+  surrealFactory,
   encryptionService,
   hashService,
 });
 
-// Ensure management group exists and set default access groups
-const mgmtGroupId = await apiKeyService.getOrCreateGroup("management", "Management API keys");
+// Bootstrap management group (creates if not exists)
+await apiKeyService.bootstrapManagementGroup();
+
+// Ensure default access groups setting is set
+const mgmtGroup = await apiKeyService.getGroupByName("management");
 const currentAccessGroups = await settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
-if (!currentAccessGroups) {
-  await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+if (!currentAccessGroups && mgmtGroup) {
+  await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, recordIdToString(mgmtGroup.id));
   console.log("✓ Default API access group set to management");
 }
 
 // Initialize secrets service
 const secretsService = new SecretsService({
-  db,
+  surrealFactory,
   encryptionService,
 });
 
 // Initialize routes service
 const routesService = new RoutesService({
   db,
+  secretsService, // For cascade delete of function-scoped secrets
 });
 
 // Initialize function router
@@ -520,6 +525,7 @@ const functionApp = createFunctionApp(functionRouter);
 const managementApp = createManagementApp({
   auth,
   db,
+  surrealFactory,
   apiKeyService,
   routesService,
   consoleLogService,

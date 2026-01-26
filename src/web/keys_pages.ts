@@ -3,6 +3,7 @@ import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import { validateKeyGroup, validateKeyName, validateKeyValue } from "../validation/keys.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import {
   layout,
@@ -70,12 +71,12 @@ export function createKeysPages(
                       ${groupInfo?.description ? `<br><small style="color: var(--pico-muted-color);">${escapeHtml(groupInfo.description)}</small>` : ""}
                     </div>
                     <div>
-                      ${groupInfo ? `<a href="/web/keys/secrets/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Manage Secrets">🔐</a>` : ""}
-                      ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
-                      ${groupInfo ? `<a href="/web/keys/create?group=${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>` : ""}
+                      ${groupInfo ? `<a href="/web/keys/secrets/${recordIdToString(groupInfo.id)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Manage Secrets">🔐</a>` : ""}
+                      ${groupInfo ? `<a href="/web/keys/edit-group/${recordIdToString(groupInfo.id)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
+                      ${groupInfo ? `<a href="/web/keys/create?group=${recordIdToString(groupInfo.id)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>` : ""}
                       ${
                         groupName !== "management" && groupInfo
-                          ? `<a href="/web/keys/delete-group?id=${groupInfo.id}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
+                          ? `<a href="/web/keys/delete-group?id=${recordIdToString(groupInfo.id)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
                           : ""
                       }
                     </div>
@@ -117,7 +118,7 @@ export function createKeysPages(
                         </td>
                         <td>${key.description ? escapeHtml(key.description) : "<em>none</em>"}</td>
                         <td class="actions">
-                          <a href="/web/keys/${key.id}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+                          <a href="/web/keys/${recordIdToString(key.id)}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${recordIdToString(key.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                         </td>
                       </tr>
                     `
@@ -207,12 +208,11 @@ export function createKeysPages(
 
   // Edit group form
   routes.get("/edit-group/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = c.req.param("id");
     const error = c.req.query("error");
     const csrfToken = getCsrfToken(c);
 
-    if (isNaN(id)) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
@@ -246,10 +246,9 @@ export function createKeysPages(
 
   // Handle edit group
   routes.post("/edit-group/:id", async (c) => {
-    const idStr = c.req.param("id");
-    const id = parseInt(idStr, 10);
+    const id = c.req.param("id");
 
-    if (isNaN(id)) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
@@ -278,14 +277,11 @@ export function createKeysPages(
 
   // Create key form
   routes.get("/create", async (c) => {
-    const preselectedGroupIdStr = c.req.query("group") ?? "";
+    const preselectedGroupId = c.req.query("group") ?? "";
     let preselectedGroup: ApiKeyGroup | null = null;
 
-    if (preselectedGroupIdStr) {
-      const groupId = parseInt(preselectedGroupIdStr, 10);
-      if (!isNaN(groupId)) {
-        preselectedGroup = await apiKeyService.getGroupById(groupId);
-      }
+    if (preselectedGroupId) {
+      preselectedGroup = await apiKeyService.getGroupById(preselectedGroupId);
     }
 
     const error = c.req.query("error");
@@ -302,11 +298,11 @@ export function createKeysPages(
           ${
             preselectedGroup
               ? `<input type="text" name="groupName" value="${escapeHtml(preselectedGroup.name)}" readonly>
-                 <input type="hidden" name="groupId" value="${preselectedGroup.id}">
+                 <input type="hidden" name="groupId" value="${recordIdToString(preselectedGroup.id)}">
                  <small>Adding to group: ${escapeHtml(preselectedGroup.name)}</small>`
               : `<select name="groupId" required>
                    <option value="">-- Select a group or create new --</option>
-                   ${groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
+                   ${groups.map((g) => `<option value="${recordIdToString(g.id)}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
                    <option value="__new__">+ Create new group...</option>
                  </select>
                  <small>Select an existing group or create a new one</small>`
@@ -378,7 +374,7 @@ export function createKeysPages(
     const value = (body.value as string | undefined)?.trim() ?? "";
     const description = (body.description as string | undefined)?.trim() || undefined;
 
-    let groupId: number;
+    let groupId: string;
     let groupName: string;
 
     // Handle "create new group" option
@@ -394,7 +390,8 @@ export function createKeysPages(
       }
 
       try {
-        groupId = await apiKeyService.createGroup(newGroupName);
+        const recordId = await apiKeyService.createGroup(newGroupName);
+        groupId = recordIdToString(recordId);
         groupName = newGroupName;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to create group";
@@ -402,17 +399,16 @@ export function createKeysPages(
       }
     } else {
       // Use existing group
-      const parsedGroupId = parseInt(groupIdStr, 10);
-      if (isNaN(parsedGroupId)) {
+      if (!groupIdStr) {
         return c.redirect("/web/keys/create?error=" + encodeURIComponent("Invalid group selection"));
       }
 
-      const group = await apiKeyService.getGroupById(parsedGroupId);
+      const group = await apiKeyService.getGroupById(groupIdStr);
       if (!group) {
         return c.redirect("/web/keys/create?error=" + encodeURIComponent("Selected group not found"));
       }
 
-      groupId = parsedGroupId;
+      groupId = groupIdStr;
       groupName = group.name;
     }
 
@@ -459,15 +455,10 @@ export function createKeysPages(
 
   // Delete key by ID confirmation
   routes.get("/delete", (c) => {
-    const idStr = c.req.query("id");
+    const id = c.req.query("id");
 
-    if (!idStr) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No key ID specified"));
-    }
-
-    const id = parseInt(idStr, 10);
-    if (isNaN(id)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
     }
 
     return c.html(
@@ -485,15 +476,10 @@ export function createKeysPages(
 
   // Handle delete by ID
   routes.post("/delete", async (c) => {
-    const idStr = c.req.query("id");
+    const id = c.req.query("id");
 
-    if (!idStr) {
+    if (!id) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No key ID specified"));
-    }
-
-    const id = parseInt(idStr, 10);
-    if (isNaN(id)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid key ID"));
     }
 
     try {
@@ -507,15 +493,10 @@ export function createKeysPages(
 
   // Delete group confirmation
   routes.get("/delete-group", async (c) => {
-    const groupIdStr = c.req.query("id");
+    const groupId = c.req.query("id");
 
-    if (!groupIdStr) {
+    if (!groupId) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No group ID specified"));
-    }
-
-    const groupId = parseInt(groupIdStr, 10);
-    if (isNaN(groupId)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
     const group = await apiKeyService.getGroupById(groupId);
@@ -552,15 +533,10 @@ export function createKeysPages(
 
   // Handle delete group
   routes.post("/delete-group", async (c) => {
-    const groupIdStr = c.req.query("id");
+    const groupId = c.req.query("id");
 
-    if (!groupIdStr) {
+    if (!groupId) {
       return c.redirect("/web/keys?error=" + encodeURIComponent("No group ID specified"));
-    }
-
-    const groupId = parseInt(groupIdStr, 10);
-    if (isNaN(groupId)) {
-      return c.redirect("/web/keys?error=" + encodeURIComponent("Invalid group ID"));
     }
 
     const group = await apiKeyService.getGroupById(groupId);
@@ -597,10 +573,9 @@ export function createKeysPages(
 
   // GET /secrets/:groupId - List secrets for group
   routes.get("/secrets/:groupId", async (c) => {
-    const idParam = c.req.param("groupId");
-    const groupId = parseInt(idParam);
+    const groupId = c.req.param("groupId");
 
-    if (isNaN(groupId)) {
+    if (!groupId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid group ID")
       );
@@ -648,10 +623,9 @@ export function createKeysPages(
 
   // GET /secrets/:groupId/create - Create secret form
   routes.get("/secrets/:groupId/create", async (c) => {
-    const idParam = c.req.param("groupId");
-    const groupId = parseInt(idParam);
+    const groupId = c.req.param("groupId");
 
-    if (isNaN(groupId)) {
+    if (!groupId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid group ID")
       );
@@ -684,10 +658,9 @@ export function createKeysPages(
 
   // POST /secrets/:groupId/create - Handle secret creation
   routes.post("/secrets/:groupId/create", async (c) => {
-    const idParam = c.req.param("groupId");
-    const groupId = parseInt(idParam);
+    const groupId = c.req.param("groupId");
 
-    if (isNaN(groupId)) {
+    if (!groupId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid group ID")
       );
@@ -763,12 +736,10 @@ export function createKeysPages(
 
   // GET /secrets/:groupId/edit/:secretId - Edit secret form
   routes.get("/secrets/:groupId/edit/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
-    const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
+    const groupId = c.req.param("groupId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -812,12 +783,10 @@ export function createKeysPages(
 
   // POST /secrets/:groupId/edit/:secretId - Handle secret update
   routes.post("/secrets/:groupId/edit/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
-    const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
+    const groupId = c.req.param("groupId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -914,12 +883,10 @@ export function createKeysPages(
 
   // GET /secrets/:groupId/delete/:secretId - Delete confirmation
   routes.get("/secrets/:groupId/delete/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
-    const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
+    const groupId = c.req.param("groupId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -958,12 +925,10 @@ export function createKeysPages(
 
   // POST /secrets/:groupId/delete/:secretId - Handle deletion
   routes.post("/secrets/:groupId/delete/:secretId", async (c) => {
-    const idParam = c.req.param("groupId");
-    const secretIdParam = c.req.param("secretId");
-    const groupId = parseInt(idParam);
-    const secretId = parseInt(secretIdParam);
+    const groupId = c.req.param("groupId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(groupId) || isNaN(secretId)) {
+    if (!groupId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1007,10 +972,9 @@ export function createKeysPages(
 
   // GET /:keyId/secrets - List secrets for an API key
   routes.get("/:keyId/secrets", async (c) => {
-    const idParam = c.req.param("keyId");
-    const keyId = parseInt(idParam);
+    const keyId = c.req.param("keyId");
 
-    if (isNaN(keyId)) {
+    if (!keyId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid key ID")
       );
@@ -1061,10 +1025,9 @@ export function createKeysPages(
 
   // GET /:keyId/secrets/create - Create secret form
   routes.get("/:keyId/secrets/create", async (c) => {
-    const idParam = c.req.param("keyId");
-    const keyId = parseInt(idParam);
+    const keyId = c.req.param("keyId");
 
-    if (isNaN(keyId)) {
+    if (!keyId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid key ID")
       );
@@ -1099,10 +1062,9 @@ export function createKeysPages(
 
   // POST /:keyId/secrets/create - Handle secret creation
   routes.post("/:keyId/secrets/create", async (c) => {
-    const idParam = c.req.param("keyId");
-    const keyId = parseInt(idParam);
+    const keyId = c.req.param("keyId");
 
-    if (isNaN(keyId)) {
+    if (!keyId) {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid key ID")
       );
@@ -1171,12 +1133,10 @@ export function createKeysPages(
 
   // GET /:keyId/secrets/edit/:secretId - Edit secret form
   routes.get("/:keyId/secrets/edit/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
-    const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
-    const secretId = parseInt(secretIdParam);
+    const keyId = c.req.param("keyId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1217,12 +1177,10 @@ export function createKeysPages(
 
   // POST /:keyId/secrets/edit/:secretId - Handle secret update
   routes.post("/:keyId/secrets/edit/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
-    const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
-    const secretId = parseInt(secretIdParam);
+    const keyId = c.req.param("keyId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1297,12 +1255,10 @@ export function createKeysPages(
 
   // GET /:keyId/secrets/delete/:secretId - Delete confirmation
   routes.get("/:keyId/secrets/delete/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
-    const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
-    const secretId = parseInt(secretIdParam);
+    const keyId = c.req.param("keyId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1340,12 +1296,10 @@ export function createKeysPages(
 
   // POST /:keyId/secrets/delete/:secretId - Handle secret deletion
   routes.post("/:keyId/secrets/delete/:secretId", async (c) => {
-    const keyIdParam = c.req.param("keyId");
-    const secretIdParam = c.req.param("secretId");
-    const keyId = parseInt(keyIdParam);
-    const secretId = parseInt(secretIdParam);
+    const keyId = c.req.param("keyId");
+    const secretId = c.req.param("secretId");
 
-    if (isNaN(keyId) || isNaN(secretId)) {
+    if (!keyId || !secretId || secretId.trim() === "") {
       return c.redirect(
         "/web/keys?error=" + encodeURIComponent("Invalid ID")
       );
@@ -1392,7 +1346,7 @@ export function createKeysPages(
 /**
  * Renders the secrets table with show/hide and copy functionality
  */
-function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
+function renderGroupSecretsTable(secrets: Secret[], groupId: string): string {
   return `
     <table>
       <thead>
@@ -1435,8 +1389,8 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
             <td>${formatDate(new Date(secret.createdAt))}</td>
             <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              ${secret.decryptionError ? "" : `<a href="/web/keys/secrets/${groupId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
-              <a href="/web/keys/secrets/${groupId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+              ${secret.decryptionError ? "" : `<a href="/web/keys/secrets/${groupId}/edit/${recordIdToString(secret.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
+              <a href="/web/keys/secrets/${groupId}/delete/${recordIdToString(secret.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
         `
@@ -1453,7 +1407,7 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: number): string {
  * Renders the create secret form for a group
  */
 function renderGroupSecretCreateForm(
-  groupId: number,
+  groupId: string,
   data: { name?: string; value?: string; comment?: string } = {},
   error?: string,
   csrfToken: string = ""
@@ -1494,17 +1448,19 @@ function renderGroupSecretCreateForm(
 }
 
 /**
- * Renders the edit secret form for a group
+ * Renders the edit secret form for a group.
+ * Accepts Secret type with RecordId, converts to string for URLs.
  */
 function renderGroupSecretEditForm(
-  groupId: number,
-  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
+  groupId: string,
+  secret: Secret,
   error?: string,
   csrfToken: string = ""
 ): string {
+  const secretId = recordIdToString(secret.id);
   return `
     ${error ? flashMessages(undefined, error) : ""}
-    <form method="POST" action="/web/keys/secrets/${groupId}/edit/${secret.id}">
+    <form method="POST" action="/web/keys/secrets/${groupId}/edit/${secretId}">
       ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
@@ -1514,10 +1470,10 @@ function renderGroupSecretEditForm(
       <label>
         Secret Value *
         <div style="display: flex; align-items: flex-start;">
-          <textarea id="group-secret-edit-${groupId}-${secret.id}" name="value" required
+          <textarea id="group-secret-edit-${groupId}-${secretId}" name="value" required
                     placeholder="your-secret-value"
                     rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
-          ${generateValueButton(`group-secret-edit-${groupId}-${secret.id}`)}
+          ${generateValueButton(`group-secret-edit-${groupId}-${secretId}`)}
         </div>
       </label>
       <label>
@@ -1540,7 +1496,7 @@ function renderGroupSecretEditForm(
 /**
  * Renders the secrets table for an individual API key with show/hide and copy functionality
  */
-function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
+function renderKeySecretsTable(secrets: Secret[], keyId: string): string {
   return `
     <table>
       <thead>
@@ -1583,8 +1539,8 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
             <td>${formatDate(new Date(secret.createdAt))}</td>
             <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              ${secret.decryptionError ? "" : `<a href="/web/keys/${keyId}/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
-              <a href="/web/keys/${keyId}/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+              ${secret.decryptionError ? "" : `<a href="/web/keys/${keyId}/secrets/edit/${recordIdToString(secret.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
+              <a href="/web/keys/${keyId}/secrets/delete/${recordIdToString(secret.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
         `
@@ -1601,7 +1557,7 @@ function renderKeySecretsTable(secrets: Secret[], keyId: number): string {
  * Renders the create secret form for an API key
  */
 function renderKeySecretCreateForm(
-  keyId: number,
+  keyId: string,
   data: { name?: string; value?: string; comment?: string } = {},
   error?: string,
   csrfToken: string = ""
@@ -1642,17 +1598,19 @@ function renderKeySecretCreateForm(
 }
 
 /**
- * Renders the edit secret form for an API key
+ * Renders the edit secret form for an API key.
+ * Accepts Secret type with RecordId, converts to string for URLs.
  */
 function renderKeySecretEditForm(
-  keyId: number,
-  secret: { id: number; name: string; value: string; comment: string | null; decryptionError?: string },
+  keyId: string,
+  secret: Secret,
   error?: string,
   csrfToken: string = ""
 ): string {
+  const secretId = recordIdToString(secret.id);
   return `
     ${error ? flashMessages(undefined, error) : ""}
-    <form method="POST" action="/web/keys/${keyId}/secrets/edit/${secret.id}">
+    <form method="POST" action="/web/keys/${keyId}/secrets/edit/${secretId}">
       ${csrfToken ? csrfInput(csrfToken) : ""}
       <label>
         Secret Name
@@ -1662,10 +1620,10 @@ function renderKeySecretEditForm(
       <label>
         Secret Value *
         <div style="display: flex; align-items: flex-start;">
-          <textarea id="key-secret-edit-${keyId}-${secret.id}" name="value" required
+          <textarea id="key-secret-edit-${keyId}-${secretId}" name="value" required
                     placeholder="your-secret-value"
                     rows="4" style="flex: 1;">${escapeHtml(secret.value)}</textarea>
-          ${generateValueButton(`key-secret-edit-${keyId}-${secret.id}`)}
+          ${generateValueButton(`key-secret-edit-${keyId}-${secretId}`)}
         </div>
       </label>
       <label>

@@ -4,6 +4,7 @@ import { TestSetupBuilder } from "./test/test_setup_builder.ts";
 import type { ApiKeyService } from "./keys/api_key_service.ts";
 import type { SettingsService } from "./settings/settings_service.ts";
 import { SettingNames } from "./settings/types.ts";
+import { recordIdToString } from "./database/surreal_helpers.ts";
 
 /**
  * Simulates the bootstrap logic from main.ts lines 216-221
@@ -16,7 +17,7 @@ async function bootstrapApiAccess(
   const mgmtGroupId = await apiKeyService.getOrCreateGroup("management", "Management API keys");
   const currentAccessGroups = await settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
   if (!currentAccessGroups) {
-    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(mgmtGroupId));
+    await settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, mgmtGroupId);
   }
 }
 
@@ -81,7 +82,7 @@ integrationTest("Bootstrap: sets api.access-groups to management group ID", asyn
 
     // Verify setting was configured correctly
     const accessGroups = await ctx.settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
-    expect(accessGroups).toBe(String(mgmtGroup!.id));
+    expect(accessGroups).toBe(recordIdToString(mgmtGroup!.id));
   } finally {
     await ctx.cleanup();
   }
@@ -96,18 +97,18 @@ integrationTest("Bootstrap: does not override existing api.access-groups setting
   try {
     // Create a custom group and set it as the access group
     const customGroupId = await ctx.apiKeyService.createGroup("custom", "Custom access");
-    await ctx.settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, String(customGroupId));
+    await ctx.settingsService.setGlobalSetting(SettingNames.API_ACCESS_GROUPS, recordIdToString(customGroupId));
 
     // Run bootstrap
     await bootstrapApiAccess(ctx.apiKeyService, ctx.settingsService);
 
     // Verify setting was NOT overridden
     const accessGroups = await ctx.settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
-    expect(accessGroups).toBe(String(customGroupId));
+    expect(accessGroups).toBe(recordIdToString(customGroupId));
 
     // Verify it's not the management group ID
     const mgmtGroup = await ctx.apiKeyService.getGroupByName("management");
-    expect(accessGroups).not.toBe(String(mgmtGroup!.id));
+    expect(accessGroups).not.toBe(recordIdToString(mgmtGroup!.id));
   } finally {
     await ctx.cleanup();
   }
@@ -133,7 +134,7 @@ integrationTest("Bootstrap: is idempotent (can run multiple times safely)", asyn
     // Verify setting is still correct
     const mgmtGroup = await ctx.apiKeyService.getGroupByName("management");
     const accessGroups = await ctx.settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
-    expect(accessGroups).toBe(String(mgmtGroup!.id));
+    expect(accessGroups).toBe(recordIdToString(mgmtGroup!.id));
   } finally {
     await ctx.cleanup();
   }
@@ -186,7 +187,7 @@ integrationTest("Bootstrap: management group in access-groups setting enables AP
 
     // Verify the management group ID is in the access groups setting
     const accessGroups = await ctx.settingsService.getGlobalSetting(SettingNames.API_ACCESS_GROUPS);
-    expect(accessGroups).toContain(String(mgmtGroup!.id));
+    expect(accessGroups).toContain(recordIdToString(mgmtGroup!.id));
   } finally {
     await ctx.cleanup();
   }
