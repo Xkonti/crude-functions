@@ -71,12 +71,12 @@ export function createKeysPages(
                       ${groupInfo?.description ? `<br><small style="color: var(--pico-muted-color);">${escapeHtml(groupInfo.description)}</small>` : ""}
                     </div>
                     <div>
-                      ${groupInfo ? `<a href="/web/keys/secrets/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Manage Secrets">🔐</a>` : ""}
-                      ${groupInfo ? `<a href="/web/keys/edit-group/${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
-                      ${groupInfo ? `<a href="/web/keys/create?group=${groupInfo.id}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>` : ""}
+                      ${groupInfo ? `<a href="/web/keys/secrets/${recordIdToString(groupInfo.id)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Manage Secrets">🔐</a>` : ""}
+                      ${groupInfo ? `<a href="/web/keys/edit-group/${recordIdToString(groupInfo.id)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Edit Group">✏️</a>` : ""}
+                      ${groupInfo ? `<a href="/web/keys/create?group=${recordIdToString(groupInfo.id)}" role="button" class="outline" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Add Key">➕</a>` : ""}
                       ${
                         groupName !== "management" && groupInfo
-                          ? `<a href="/web/keys/delete-group?id=${groupInfo.id}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
+                          ? `<a href="/web/keys/delete-group?id=${recordIdToString(groupInfo.id)}" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; font-size: 1rem;" title="Delete Group">🗑️</a>`
                           : ""
                       }
                     </div>
@@ -118,7 +118,7 @@ export function createKeysPages(
                         </td>
                         <td>${key.description ? escapeHtml(key.description) : "<em>none</em>"}</td>
                         <td class="actions">
-                          <a href="/web/keys/${key.id}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${key.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+                          <a href="/web/keys/${recordIdToString(key.id)}/secrets" title="Manage Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a><a href="/web/keys/delete?id=${recordIdToString(key.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                         </td>
                       </tr>
                     `
@@ -298,11 +298,11 @@ export function createKeysPages(
           ${
             preselectedGroup
               ? `<input type="text" name="groupName" value="${escapeHtml(preselectedGroup.name)}" readonly>
-                 <input type="hidden" name="groupId" value="${preselectedGroup.id}">
+                 <input type="hidden" name="groupId" value="${recordIdToString(preselectedGroup.id)}">
                  <small>Adding to group: ${escapeHtml(preselectedGroup.name)}</small>`
               : `<select name="groupId" required>
                    <option value="">-- Select a group or create new --</option>
-                   ${groups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
+                   ${groups.map((g) => `<option value="${recordIdToString(g.id)}">${escapeHtml(g.name)}${g.description ? ` - ${escapeHtml(g.description)}` : ""}</option>`).join("")}
                    <option value="__new__">+ Create new group...</option>
                  </select>
                  <small>Select an existing group or create a new one</small>`
@@ -1389,8 +1389,8 @@ function renderGroupSecretsTable(secrets: Secret[], groupId: string): string {
             <td>${formatDate(new Date(secret.createdAt))}</td>
             <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              ${secret.decryptionError ? "" : `<a href="/web/keys/secrets/${groupId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
-              <a href="/web/keys/secrets/${groupId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+              ${secret.decryptionError ? "" : `<a href="/web/keys/secrets/${groupId}/edit/${recordIdToString(secret.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
+              <a href="/web/keys/secrets/${groupId}/delete/${recordIdToString(secret.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
         `
@@ -1539,8 +1539,8 @@ function renderKeySecretsTable(secrets: Secret[], keyId: string): string {
             <td>${formatDate(new Date(secret.createdAt))}</td>
             <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              ${secret.decryptionError ? "" : `<a href="/web/keys/${keyId}/secrets/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
-              <a href="/web/keys/${keyId}/secrets/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+              ${secret.decryptionError ? "" : `<a href="/web/keys/${keyId}/secrets/edit/${recordIdToString(secret.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
+              <a href="/web/keys/${keyId}/secrets/delete/${recordIdToString(secret.id)}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
         `
