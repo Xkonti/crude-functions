@@ -1,8 +1,9 @@
-import type { DatabaseService } from "../database/database_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { CancellationToken } from "../jobs/types.ts";
+import type { RecordId } from "surrealdb";
 
 // ============================================================================
 // Source Types
@@ -75,25 +76,25 @@ export interface SyncSettings {
 }
 
 // ============================================================================
-// Database Row Type
+// Database Row Type (SurrealDB)
 // ============================================================================
 
 /**
- * Raw database row from codeSources table.
+ * Raw database row from codeSource table in SurrealDB.
+ * Record ID is the source name (e.g., codeSource:my-repo).
  */
 export interface CodeSourceRow {
-  [key: string]: unknown; // Index signature for Row compatibility
-  id: number;
-  name: string;
+  id: RecordId<"codeSource">; // RecordId where id.id = source name
+  name: string; // Duplicated for convenience, always equals id.id
   type: string;
-  typeSettings: string | null; // Encrypted JSON
-  syncSettings: string | null; // Encrypted JSON
-  lastSyncStartedAt: string | null;
-  lastSyncAt: string | null;
+  typeSettings: TypeSettings; // Native object (sensitive fields encrypted)
+  syncSettings: SyncSettings; // Native object (sensitive fields encrypted)
+  lastSyncStartedAt: Date | null;
+  lastSyncAt: Date | null;
   lastSyncError: string | null;
-  enabled: number; // SQLite integer: 1 = enabled, 0 = disabled
-  createdAt: string;
-  updatedAt: string;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 // ============================================================================
@@ -102,12 +103,17 @@ export interface CodeSourceRow {
 
 /**
  * Code source entity with decoded/decrypted fields.
+ * Note: id and name are the same value (source name is the record ID).
  */
 export interface CodeSource {
-  id: number;
+  /** Source identifier - same as name (source name is the record ID) */
+  id: string;
+  /** Source name - same as id, kept for clarity */
   name: string;
   type: CodeSourceType;
+  /** Type-specific settings (sensitive fields like authToken still encrypted) */
   typeSettings: TypeSettings;
+  /** Sync settings (webhookSecret decrypted) */
   syncSettings: SyncSettings;
   lastSyncStartedAt: Date | null;
   lastSyncAt: Date | null;
@@ -173,8 +179,8 @@ export interface SyncResult {
  * Payload for source_sync jobs.
  */
 export interface SyncJobPayload {
-  /** Source ID to sync */
-  sourceId: number;
+  /** Source ID to sync (same as source name) */
+  sourceId: string;
   /** What triggered this sync */
   triggeredBy?: "manual" | "interval" | "webhook";
 }
@@ -222,19 +228,41 @@ export interface ProviderCapabilities {
 }
 
 /**
+ * Interface for providers that have sensitive fields requiring encryption.
+ * Providers implement this to encrypt/decrypt their type-specific sensitive fields
+ * (e.g., GitCodeSourceProvider encrypts authToken).
+ */
+export interface EncryptableProvider {
+  /**
+   * Encrypt sensitive fields in type settings before database storage.
+   * @param settings - The type settings to encrypt
+   * @returns Settings with sensitive fields encrypted
+   */
+  encryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings>;
+
+  /**
+   * Decrypt sensitive fields in type settings after database retrieval.
+   * @param settings - The type settings to decrypt
+   * @returns Settings with sensitive fields decrypted
+   */
+  decryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings>;
+}
+
+/**
  * Minimal interface that all code source providers must implement.
  *
  * Providers are responsible for:
  * - Syncing data from external sources (git clone/pull, s3 download, etc.)
  * - Managing source directories on the filesystem
  * - Reporting their capabilities
+ * - Encrypting/decrypting their sensitive type settings fields
  *
  * Providers do NOT handle:
  * - File read/write operations (handled by separate file management API)
  * - Schedule management (handled by CodeSourceService)
  * - Job orchestration (handled by CodeSourceService)
  */
-export interface CodeSourceProvider {
+export interface CodeSourceProvider extends EncryptableProvider {
   /**
    * The source type this provider handles (e.g., "git", "manual", "s3").
    */
@@ -295,7 +323,7 @@ export interface CodeSourceProvider {
 // ============================================================================
 
 export interface CodeSourceServiceOptions {
-  db: DatabaseService;
+  surrealFactory: SurrealConnectionFactory;
   encryptionService: IEncryptionService;
   jobQueueService: JobQueueService;
   schedulingService: SchedulingService;

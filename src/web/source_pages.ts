@@ -122,11 +122,12 @@ export function createSourcePages(
   }
 
   /**
-   * Parse and validate source ID from route param
+   * Parse and validate source ID from route param.
+   * ID is now the source name (string).
    */
-  function parseSourceId(idParam: string): number | null {
-    const id = parseInt(idParam, 10);
-    return isNaN(id) ? null : id;
+  function parseSourceId(idParam: string): string | null {
+    // ID is now the source name - validate the format
+    return codeSourceService.isValidSourceName(idParam) ? idParam : null;
   }
 
   // ============================================================================

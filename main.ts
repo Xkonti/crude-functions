@@ -354,7 +354,7 @@ const schedulingService = new SchedulingService({
 
 // Initialize code source service
 const codeSourceService = new CodeSourceService({
-  db,
+  surrealFactory,
   encryptionService,
   jobQueueService,
   schedulingService,
@@ -362,13 +362,16 @@ const codeSourceService = new CodeSourceService({
 });
 
 // Register code source providers
+// Manual provider has no sensitive fields
 const manualCodeSourceProvider = new ManualCodeSourceProvider({
   codeDirectory: "./code",
 });
 codeSourceService.registerProvider(manualCodeSourceProvider);
 
+// Git provider needs encryption service for authToken encryption
 const gitCodeSourceProvider = new GitCodeSourceProvider({
   codeDirectory: "./code",
+  encryptionService,
 });
 codeSourceService.registerProvider(gitCodeSourceProvider);
 console.log("✓ Code source service initialized (manual, git)");

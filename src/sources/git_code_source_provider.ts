@@ -7,13 +7,17 @@ import type {
   GitTypeSettings,
   ProviderCapabilities,
   SyncResult,
+  TypeSettings,
 } from "./types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
+import type { IEncryptionService } from "../encryption/types.ts";
 import { GitOperationError } from "./errors.ts";
 
 export interface GitCodeSourceProviderOptions {
   /** Base code directory (e.g., "./code") */
   codeDirectory: string;
+  /** Encryption service for sensitive fields (authToken) */
+  encryptionService: IEncryptionService;
 }
 
 interface TargetRef {
@@ -150,9 +154,11 @@ const denoFs = {
 export class GitCodeSourceProvider implements CodeSourceProvider {
   readonly type = "git" as const;
   private readonly codeDirectory: string;
+  private readonly encryptionService: IEncryptionService;
 
   constructor(options: GitCodeSourceProviderOptions) {
     this.codeDirectory = options.codeDirectory;
+    this.encryptionService = options.encryptionService;
   }
 
   getCapabilities(): ProviderCapabilities {
@@ -162,12 +168,46 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
     };
   }
 
+  // ===========================================================================
+  // Encryption methods for sensitive fields
+  // ===========================================================================
+
+  /**
+   * Encrypt sensitive fields (authToken) before database storage.
+   */
+  async encryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings> {
+    const gitSettings = settings as GitTypeSettings;
+    if (!gitSettings.authToken) {
+      return settings;
+    }
+    return {
+      ...gitSettings,
+      authToken: await this.encryptionService.encrypt(gitSettings.authToken),
+    };
+  }
+
+  /**
+   * Decrypt sensitive fields (authToken) after database retrieval.
+   */
+  async decryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings> {
+    const gitSettings = settings as GitTypeSettings;
+    if (!gitSettings.authToken) {
+      return settings;
+    }
+    return {
+      ...gitSettings,
+      authToken: await this.encryptionService.decrypt(gitSettings.authToken),
+    };
+  }
+
   /**
    * Sync the git repository.
    *
    * - If not cloned: performs initial clone
    * - If URL changed: deletes directory and re-clones
    * - Otherwise: fetches and resets to target ref
+   *
+   * Note: authToken is decrypted before use since it's stored encrypted in DB.
    */
   async sync(
     source: CodeSource,
@@ -175,7 +215,10 @@ export class GitCodeSourceProvider implements CodeSourceProvider {
   ): Promise<SyncResult> {
     const startTime = Date.now();
     const dirPath = join(this.codeDirectory, source.name);
-    const settings = source.typeSettings as GitTypeSettings;
+    // Decrypt sensitive fields before use
+    const settings = await this.decryptSensitiveFields(
+      source.typeSettings,
+    ) as GitTypeSettings;
 
     try {
       token.throwIfCancelled();

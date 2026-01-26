@@ -7,7 +7,7 @@ import {
   SourceNotFoundError,
   SourceNotEditableError,
 } from "../sources/errors.ts";
-import type { CodeSourceProvider, ProviderCapabilities, SyncResult, CodeSource } from "../sources/types.ts";
+import type { CodeSourceProvider, ProviderCapabilities, SyncResult, CodeSource, TypeSettings } from "../sources/types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
 
 // ============================================================================
@@ -22,6 +22,13 @@ function createMockGitProvider(): CodeSourceProvider {
     type: "git" as const,
     getCapabilities(): ProviderCapabilities {
       return { isSyncable: true, isEditable: false };
+    },
+    // No-op encryption for mock provider
+    encryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings> {
+      return Promise.resolve(settings);
+    },
+    decryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings> {
+      return Promise.resolve(settings);
     },
     sync(_source: CodeSource, _token: CancellationToken): Promise<SyncResult> {
       return Promise.resolve({ success: true, filesChanged: 0, durationMs: 0 });

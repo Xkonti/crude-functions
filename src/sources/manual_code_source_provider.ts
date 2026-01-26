@@ -4,6 +4,7 @@ import type {
   CodeSource,
   ProviderCapabilities,
   SyncResult,
+  TypeSettings,
 } from "./types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
 
@@ -36,6 +37,24 @@ export class ManualCodeSourceProvider implements CodeSourceProvider {
       isSyncable: false, // Manual sources have no remote to sync from
       isEditable: true, // Files can be managed via API
     };
+  }
+
+  // ===========================================================================
+  // Encryption methods (no-op - manual sources have no sensitive fields)
+  // ===========================================================================
+
+  /**
+   * No-op for manual sources - no sensitive fields to encrypt.
+   */
+  encryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings> {
+    return Promise.resolve(settings);
+  }
+
+  /**
+   * No-op for manual sources - no sensitive fields to decrypt.
+   */
+  decryptSensitiveFields(settings: TypeSettings): Promise<TypeSettings> {
+    return Promise.resolve(settings);
   }
 
   /**

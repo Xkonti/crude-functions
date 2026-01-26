@@ -74,8 +74,8 @@ export interface Schedule {
   jobExecutionMode: ExecutionMode;
   /** Job reference type for duplicate detection */
   jobReferenceType: string | null;
-  /** Job reference ID */
-  jobReferenceId: number | null;
+  /** Job reference ID (number or string for named resources) */
+  jobReferenceId: number | string | null;
   /** Currently active job ID (for tracking completion) */
   activeJobId: number | null;
   /** Consecutive failure count */
@@ -131,8 +131,8 @@ export interface NewSchedule {
   jobExecutionMode?: ExecutionMode;
   /** Job reference type for duplicate detection */
   jobReferenceType?: string;
-  /** Job reference ID for duplicate detection */
-  jobReferenceId?: number;
+  /** Job reference ID for duplicate detection (number or string for named resources) */
+  jobReferenceId?: number | string;
   /** Max consecutive failures before error state (default: 5) */
   maxConsecutiveFailures?: number;
 }
@@ -234,7 +234,7 @@ export interface ScheduleRow {
   jobMaxRetries: number;
   jobExecutionMode: string;
   jobReferenceType: string | null;
-  jobReferenceId: number | null;
+  jobReferenceId: number | string | null;
   activeJobId: number | null;
   consecutiveFailures: number;
   maxConsecutiveFailures: number;

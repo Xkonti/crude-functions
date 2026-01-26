@@ -58,7 +58,8 @@ integrationTest("GET /api/sources/:id returns 404 for non-existent source", asyn
 integrationTest("GET /api/sources/:id returns 400 for invalid ID", async () => {
   const { app, ctx } = await createTestApp();
   try {
-    const res = await app.request("/api/sources/invalid");
+    // Use an actually invalid name format (starts with dash, which fails the regex)
+    const res = await app.request("/api/sources/-invalid-name");
     expect(res.status).toBe(400);
 
     const body = await res.json();

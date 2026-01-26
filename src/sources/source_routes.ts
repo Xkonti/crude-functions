@@ -1,6 +1,5 @@
 import { Hono } from "@hono/hono";
 import { CodeSourceService } from "./code_source_service.ts";
-import { validateId } from "../validation/common.ts";
 import {
   DuplicateSourceError,
   InvalidSourceConfigError,
@@ -71,14 +70,6 @@ function sourceToResponse(source: CodeSource) {
 }
 
 /**
- * Check if a string looks like a numeric ID.
- * Used to differentiate between ID routes and sourceName routes.
- */
-function isNumericId(value: string): boolean {
-  return /^\d+$/.test(value);
-}
-
-/**
  * Create the webhook route for code sources.
  * This is exported separately because webhook endpoints require no auth
  * (they use their own secret validation).
@@ -91,13 +82,9 @@ export function createSourceWebhookRoute(options: SourceRoutesOptions): Hono {
 
   // POST /api/sources/:id/webhook - Webhook trigger (no auth - uses secret)
   routes.post("/:id/webhook", async (c) => {
-    const idParam = c.req.param("id");
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
+    // ID is now the source name (string)
+    const id = c.req.param("id");
+    if (!codeSourceService.isValidSourceName(id)) {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 
@@ -146,17 +133,11 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
     });
   });
 
-  // GET /api/sources/:id - Get source by ID
+  // GET /api/sources/:id - Get source by ID (ID is now the source name)
   routes.get("/:id", async (c) => {
-    const idParam = c.req.param("id");
-
-    // Skip if this looks like a sourceName (not numeric) - let file routes handle it
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
+    // ID is now the source name (string)
+    const id = c.req.param("id");
+    if (!codeSourceService.isValidSourceName(id)) {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 
@@ -220,15 +201,11 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
     }
   });
 
-  // PUT /api/sources/:id - Update source
+  // PUT /api/sources/:id - Update source (ID is now the source name)
   routes.put("/:id", async (c) => {
-    const idParam = c.req.param("id");
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
+    // ID is now the source name (string)
+    const id = c.req.param("id");
+    if (!codeSourceService.isValidSourceName(id)) {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 
@@ -297,15 +274,11 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
     }
   });
 
-  // DELETE /api/sources/:id - Delete source
+  // DELETE /api/sources/:id - Delete source (ID is now the source name)
   routes.delete("/:id", async (c) => {
-    const idParam = c.req.param("id");
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
+    // ID is now the source name (string)
+    const id = c.req.param("id");
+    if (!codeSourceService.isValidSourceName(id)) {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 
@@ -320,15 +293,11 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
     }
   });
 
-  // POST /api/sources/:id/sync - Trigger manual sync
+  // POST /api/sources/:id/sync - Trigger manual sync (ID is now the source name)
   routes.post("/:id/sync", async (c) => {
-    const idParam = c.req.param("id");
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
+    // ID is now the source name (string)
+    const id = c.req.param("id");
+    if (!codeSourceService.isValidSourceName(id)) {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 
@@ -349,15 +318,11 @@ export function createSourceRoutes(options: SourceRoutesOptions): Hono {
     }
   });
 
-  // GET /api/sources/:id/status - Get sync status
+  // GET /api/sources/:id/status - Get sync status (ID is now the source name)
   routes.get("/:id/status", async (c) => {
-    const idParam = c.req.param("id");
-    if (!isNumericId(idParam)) {
-      return c.json({ error: "Invalid source ID" }, 400);
-    }
-
-    const id = validateId(idParam);
-    if (id === null) {
+    // ID is now the source name (string)
+    const id = c.req.param("id");
+    if (!codeSourceService.isValidSourceName(id)) {
       return c.json({ error: "Invalid source ID" }, 400);
     }
 

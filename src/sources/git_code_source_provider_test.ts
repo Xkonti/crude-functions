@@ -4,6 +4,19 @@ import { integrationTest } from "../test/test_helpers.ts";
 import { GitCodeSourceProvider } from "./git_code_source_provider.ts";
 import type { CodeSource, GitTypeSettings } from "./types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
+import type { IEncryptionService } from "../encryption/types.ts";
+
+/**
+ * Create a mock encryption service for unit tests.
+ * Does not actually encrypt - just passes values through.
+ */
+function createMockEncryptionService(): IEncryptionService {
+  return {
+    encrypt: (plaintext: string) => Promise.resolve(`enc:${plaintext}`),
+    decrypt: (ciphertext: string) =>
+      Promise.resolve(ciphertext.startsWith("enc:") ? ciphertext.slice(4) : ciphertext),
+  };
+}
 
 /**
  * Create a mock cancellation token for testing.
@@ -26,7 +39,7 @@ function createTestSource(
   typeSettings: GitTypeSettings,
 ): CodeSource {
   return {
-    id: 1,
+    id: name, // ID is now the source name (string)
     name,
     type: "git",
     typeSettings,
@@ -45,7 +58,10 @@ function createTestSource(
 // =============================================================================
 
 integrationTest("GitCodeSourceProvider.getCapabilities returns correct values", () => {
-  const provider = new GitCodeSourceProvider({ codeDirectory: "./code" });
+  const provider = new GitCodeSourceProvider({
+    codeDirectory: "./code",
+    encryptionService: createMockEncryptionService(),
+  });
   const capabilities = provider.getCapabilities();
 
   expect(capabilities.isSyncable).toBe(true);
@@ -53,7 +69,10 @@ integrationTest("GitCodeSourceProvider.getCapabilities returns correct values", 
 });
 
 integrationTest("GitCodeSourceProvider.type returns 'git'", () => {
-  const provider = new GitCodeSourceProvider({ codeDirectory: "./code" });
+  const provider = new GitCodeSourceProvider({
+    codeDirectory: "./code",
+    encryptionService: createMockEncryptionService(),
+  });
   expect(provider.type).toBe("git");
 });
 
@@ -64,7 +83,10 @@ integrationTest("GitCodeSourceProvider.type returns 'git'", () => {
 integrationTest("GitCodeSourceProvider.ensureDirectory creates directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+    const provider = new GitCodeSourceProvider({
+      codeDirectory: tempDir,
+      encryptionService: createMockEncryptionService(),
+    });
     await provider.ensureDirectory("test-source");
 
     const stat = await Deno.stat(`${tempDir}/test-source`);
@@ -77,7 +99,10 @@ integrationTest("GitCodeSourceProvider.ensureDirectory creates directory", async
 integrationTest("GitCodeSourceProvider.deleteDirectory removes directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+    const provider = new GitCodeSourceProvider({
+      codeDirectory: tempDir,
+      encryptionService: createMockEncryptionService(),
+    });
 
     // Create directory with contents
     await Deno.mkdir(`${tempDir}/test-source`, { recursive: true });
@@ -101,7 +126,10 @@ integrationTest("GitCodeSourceProvider.deleteDirectory removes directory", async
 integrationTest("GitCodeSourceProvider.deleteDirectory silently succeeds if directory doesn't exist", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+    const provider = new GitCodeSourceProvider({
+      codeDirectory: tempDir,
+      encryptionService: createMockEncryptionService(),
+    });
 
     // Should not throw
     await provider.deleteDirectory("nonexistent-source");
@@ -113,7 +141,10 @@ integrationTest("GitCodeSourceProvider.deleteDirectory silently succeeds if dire
 integrationTest("GitCodeSourceProvider.directoryExists returns true for existing directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+    const provider = new GitCodeSourceProvider({
+      codeDirectory: tempDir,
+      encryptionService: createMockEncryptionService(),
+    });
     await Deno.mkdir(`${tempDir}/test-source`, { recursive: true });
 
     const exists = await provider.directoryExists("test-source");
@@ -126,7 +157,10 @@ integrationTest("GitCodeSourceProvider.directoryExists returns true for existing
 integrationTest("GitCodeSourceProvider.directoryExists returns false for non-existing directory", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+    const provider = new GitCodeSourceProvider({
+      codeDirectory: tempDir,
+      encryptionService: createMockEncryptionService(),
+    });
 
     const exists = await provider.directoryExists("nonexistent-source");
     expect(exists).toBe(false);
@@ -144,7 +178,10 @@ integrationTest({
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {
-      const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+      const provider = new GitCodeSourceProvider({
+        codeDirectory: tempDir,
+        encryptionService: createMockEncryptionService(),
+      });
 
       const source = createTestSource("test-repo", {
         url: "https://github.com/octocat/Hello-World.git",
@@ -172,7 +209,10 @@ integrationTest({
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {
-      const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+      const provider = new GitCodeSourceProvider({
+        codeDirectory: tempDir,
+        encryptionService: createMockEncryptionService(),
+      });
 
       const source = createTestSource("test-repo", {
         url: "https://github.com/nonexistent/nonexistent-repo-12345.git",
@@ -195,7 +235,10 @@ integrationTest({
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {
-      const provider = new GitCodeSourceProvider({ codeDirectory: tempDir });
+      const provider = new GitCodeSourceProvider({
+        codeDirectory: tempDir,
+        encryptionService: createMockEncryptionService(),
+      });
 
       const source = createTestSource("test-repo", {
         url: "https://github.com/octocat/Hello-World.git",

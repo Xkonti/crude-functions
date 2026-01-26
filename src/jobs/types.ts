@@ -72,8 +72,8 @@ export interface Job<TPayload = unknown, TResult = unknown> {
   priority: number;
   /** Type of entity this job references (e.g., "code_source", "file") */
   referenceType: string | null;
-  /** ID of the referenced entity */
-  referenceId: number | null;
+  /** ID of the referenced entity (number or string for named resources) */
+  referenceId: number | string | null;
   /** When the job was created */
   createdAt: Date;
   /** When the job started processing (null if pending) */
@@ -103,8 +103,8 @@ export interface NewJob<TPayload = unknown> {
   priority?: number;
   /** Type of entity this job references */
   referenceType?: string;
-  /** ID of the referenced entity */
-  referenceId?: number;
+  /** ID of the referenced entity (number or string for named resources) */
+  referenceId?: number | string;
   /**
    * Execution mode (default: 'sequential').
    * - sequential: Enforces unique constraint on active jobs per reference.
@@ -184,7 +184,7 @@ export interface JobRow {
   maxRetries: number;
   priority: number;
   referenceType: string | null;
-  referenceId: number | null;
+  referenceId: number | string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;

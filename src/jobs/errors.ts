@@ -40,9 +40,9 @@ export class JobAlreadyClaimedError extends JobQueueError {
  */
 export class DuplicateActiveJobError extends JobQueueError {
   public readonly referenceType: string;
-  public readonly referenceId: number;
+  public readonly referenceId: number | string;
 
-  constructor(referenceType: string, referenceId: number) {
+  constructor(referenceType: string, referenceId: number | string) {
     super(
       `An active job already exists for ${referenceType}:${referenceId}. ` +
         `Wait for the existing job to complete or fail before enqueuing a new one.`,
