@@ -7,6 +7,7 @@ import type {
   ProviderCapabilities,
   SyncResult,
   TypeSettings,
+  GitTypeSettings,
 } from "./types.ts";
 import type { CancellationToken } from "../jobs/types.ts";
 import {
@@ -673,6 +674,492 @@ integrationTest("CodeSourceService encrypts and decrypts syncSettings correctly"
     expect(rawRow?.syncSettings?.webhookSecret).not.toBe("webhook-secret-456");
     // But intervalSeconds should be unchanged (not encrypted)
     expect(rawRow?.syncSettings?.intervalSeconds).toBe(300);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============================================================================
+// Encryption Lifecycle Tests - authToken
+// ============================================================================
+
+integrationTest("authToken encryption lifecycle: create with token", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    const source = await ctx.codeSourceService.create({
+      name: "git-with-token",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "github_pat_secret123",
+      },
+    });
+
+    // Retrieved value should be decrypted
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    const gitSettings = retrieved?.typeSettings as GitTypeSettings;
+    expect(gitSettings?.authToken).toBe("github_pat_secret123");
+
+    // Raw DB value should be encrypted (starts with version prefix, not 'g')
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ typeSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawToken = rawRow?.typeSettings?.authToken as string;
+    expect(rawToken).not.toBe("github_pat_secret123");
+    expect(rawToken?.charAt(0)).toBe("A"); // Encrypted value starts with version prefix
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("authToken encryption lifecycle: create without token", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    const source = await ctx.codeSourceService.create({
+      name: "git-no-token",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+      },
+    });
+
+    // Retrieved value should have no authToken
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    const gitSettings = retrieved?.typeSettings as GitTypeSettings;
+    expect(gitSettings?.authToken).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("authToken encryption lifecycle: update with new token", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    // Create with initial token
+    const source = await ctx.codeSourceService.create({
+      name: "git-update-token",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "initial_token_123",
+      },
+    });
+
+    // Update with new token
+    await ctx.codeSourceService.update(source.id, {
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "new_token_456",
+      },
+    });
+
+    // Retrieved value should have new decrypted token
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    const gitSettings = retrieved?.typeSettings as GitTypeSettings;
+    expect(gitSettings?.authToken).toBe("new_token_456");
+
+    // Raw DB value should be encrypted (different from plaintext)
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ typeSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawToken = rawRow?.typeSettings?.authToken as string;
+    expect(rawToken).not.toBe("new_token_456");
+    expect(rawToken?.charAt(0)).toBe("A"); // Encrypted value starts with version prefix
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("authToken encryption lifecycle: add token to source without one", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    // Create without token
+    const source = await ctx.codeSourceService.create({
+      name: "git-add-token",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+      },
+    });
+
+    // Verify no token initially
+    const initial = await ctx.codeSourceService.getById(source.id);
+    const initialSettings = initial?.typeSettings as GitTypeSettings;
+    expect(initialSettings?.authToken).toBeUndefined();
+
+    // Update to add token
+    await ctx.codeSourceService.update(source.id, {
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "added_token_789",
+      },
+    });
+
+    // Retrieved value should have decrypted token
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    const gitSettings = retrieved?.typeSettings as GitTypeSettings;
+    expect(gitSettings?.authToken).toBe("added_token_789");
+
+    // Raw DB value should be encrypted
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ typeSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawToken = rawRow?.typeSettings?.authToken as string;
+    expect(rawToken).not.toBe("added_token_789");
+    expect(rawToken?.charAt(0)).toBe("A");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("authToken encryption lifecycle: remove token from source", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    // Create with token
+    const source = await ctx.codeSourceService.create({
+      name: "git-remove-token",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "token_to_remove",
+      },
+    });
+
+    // Verify token exists initially
+    const initial = await ctx.codeSourceService.getById(source.id);
+    const initialSettings = initial?.typeSettings as GitTypeSettings;
+    expect(initialSettings?.authToken).toBe("token_to_remove");
+
+    // Update to remove token (by not including it)
+    await ctx.codeSourceService.update(source.id, {
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        // No authToken = remove it
+      },
+    });
+
+    // Retrieved value should have no authToken
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    const gitSettings = retrieved?.typeSettings as GitTypeSettings;
+    expect(gitSettings?.authToken).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============================================================================
+// Encryption Lifecycle Tests - webhookSecret
+// ============================================================================
+
+integrationTest("webhookSecret encryption lifecycle: create with secret", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "src-with-secret",
+      type: "manual",
+      syncSettings: {
+        webhookEnabled: true,
+        webhookSecret: "super_secret_webhook_key",
+      },
+    });
+
+    // Retrieved value should be decrypted
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.syncSettings?.webhookSecret).toBe("super_secret_webhook_key");
+
+    // Raw DB value should be encrypted (starts with version prefix)
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ syncSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawSecret = rawRow?.syncSettings?.webhookSecret as string;
+    expect(rawSecret).not.toBe("super_secret_webhook_key");
+    expect(rawSecret?.charAt(0)).toBe("A"); // Encrypted value starts with version prefix
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("webhookSecret encryption lifecycle: create without secret", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    const source = await ctx.codeSourceService.create({
+      name: "src-no-secret",
+      type: "manual",
+      syncSettings: {
+        webhookEnabled: true,
+        // No webhookSecret
+      },
+    });
+
+    // Retrieved value should have no webhookSecret
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.syncSettings?.webhookSecret).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("webhookSecret encryption lifecycle: update with new secret", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    // Create with initial secret
+    const source = await ctx.codeSourceService.create({
+      name: "src-update-secret",
+      type: "manual",
+      syncSettings: {
+        webhookEnabled: true,
+        webhookSecret: "initial_secret",
+      },
+    });
+
+    // Update with new secret
+    await ctx.codeSourceService.update(source.id, {
+      syncSettings: {
+        webhookEnabled: true,
+        webhookSecret: "new_secret_value",
+      },
+    });
+
+    // Retrieved value should have new decrypted secret
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.syncSettings?.webhookSecret).toBe("new_secret_value");
+
+    // Raw DB value should be encrypted
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ syncSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawSecret = rawRow?.syncSettings?.webhookSecret as string;
+    expect(rawSecret).not.toBe("new_secret_value");
+    expect(rawSecret?.charAt(0)).toBe("A");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("webhookSecret encryption lifecycle: add secret to source without one", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    // Create without secret
+    const source = await ctx.codeSourceService.create({
+      name: "src-add-secret",
+      type: "manual",
+      syncSettings: {
+        webhookEnabled: true,
+      },
+    });
+
+    // Verify no secret initially
+    const initial = await ctx.codeSourceService.getById(source.id);
+    expect(initial?.syncSettings?.webhookSecret).toBeUndefined();
+
+    // Update to add secret
+    await ctx.codeSourceService.update(source.id, {
+      syncSettings: {
+        webhookEnabled: true,
+        webhookSecret: "added_secret",
+      },
+    });
+
+    // Retrieved value should have decrypted secret
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.syncSettings?.webhookSecret).toBe("added_secret");
+
+    // Raw DB value should be encrypted
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ syncSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawSecret = rawRow?.syncSettings?.webhookSecret as string;
+    expect(rawSecret).not.toBe("added_secret");
+    expect(rawSecret?.charAt(0)).toBe("A");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("webhookSecret encryption lifecycle: remove secret from source", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    // Create with secret
+    const source = await ctx.codeSourceService.create({
+      name: "src-remove-secret",
+      type: "manual",
+      syncSettings: {
+        webhookEnabled: true,
+        webhookSecret: "secret_to_remove",
+      },
+    });
+
+    // Verify secret exists initially
+    const initial = await ctx.codeSourceService.getById(source.id);
+    expect(initial?.syncSettings?.webhookSecret).toBe("secret_to_remove");
+
+    // Update to remove secret (by not including it)
+    await ctx.codeSourceService.update(source.id, {
+      syncSettings: {
+        webhookEnabled: true,
+        // No webhookSecret = remove it
+      },
+    });
+
+    // Retrieved value should have no webhookSecret
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    expect(retrieved?.syncSettings?.webhookSecret).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+// ============================================================================
+// No Double Encryption/Decryption Tests
+// ============================================================================
+
+integrationTest("authToken: getById returns correctly decrypted value (no double decrypt)", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    // Create source with token
+    const source = await ctx.codeSourceService.create({
+      name: "git-decrypt-once",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "github_pat_test123",
+      },
+    });
+
+    // Multiple getById calls should all return the same decrypted value
+    // If there's double decryption, subsequent calls would fail or return garbage
+    const retrieved1 = await ctx.codeSourceService.getById(source.id);
+    const retrieved2 = await ctx.codeSourceService.getById(source.id);
+    const retrieved3 = await ctx.codeSourceService.getById(source.id);
+
+    const settings1 = retrieved1?.typeSettings as GitTypeSettings;
+    const settings2 = retrieved2?.typeSettings as GitTypeSettings;
+    const settings3 = retrieved3?.typeSettings as GitTypeSettings;
+
+    expect(settings1?.authToken).toBe("github_pat_test123");
+    expect(settings2?.authToken).toBe("github_pat_test123");
+    expect(settings3?.authToken).toBe("github_pat_test123");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("webhookSecret: getById returns correctly decrypted value (no double decrypt)", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    ctx.codeSourceService.registerProvider(createMockProvider("manual"));
+
+    // Create source with webhook secret
+    const source = await ctx.codeSourceService.create({
+      name: "src-decrypt-once",
+      type: "manual",
+      syncSettings: {
+        webhookEnabled: true,
+        webhookSecret: "webhook_secret_abc",
+      },
+    });
+
+    // Multiple getById calls should all return the same decrypted value
+    const retrieved1 = await ctx.codeSourceService.getById(source.id);
+    const retrieved2 = await ctx.codeSourceService.getById(source.id);
+    const retrieved3 = await ctx.codeSourceService.getById(source.id);
+
+    expect(retrieved1?.syncSettings?.webhookSecret).toBe("webhook_secret_abc");
+    expect(retrieved2?.syncSettings?.webhookSecret).toBe("webhook_secret_abc");
+    expect(retrieved3?.syncSettings?.webhookSecret).toBe("webhook_secret_abc");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("authToken: update preserves encryption correctly (no double encrypt)", async () => {
+  const ctx = await TestSetupBuilder.create().withCodeSources().build();
+  try {
+    // Create source with token
+    const source = await ctx.codeSourceService.create({
+      name: "git-encrypt-once",
+      type: "git",
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "original_token",
+      },
+    });
+
+    // Update multiple times with same token
+    // If there's double encryption, each update would nest the encryption
+    await ctx.codeSourceService.update(source.id, {
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "updated_token",
+      },
+    });
+
+    await ctx.codeSourceService.update(source.id, {
+      typeSettings: {
+        url: "https://github.com/user/repo.git",
+        authToken: "updated_token", // Same token again
+      },
+    });
+
+    // Should still decrypt correctly
+    const retrieved = await ctx.codeSourceService.getById(source.id);
+    const gitSettings = retrieved?.typeSettings as GitTypeSettings;
+    expect(gitSettings?.authToken).toBe("updated_token");
+
+    // Raw DB should have properly encrypted value (single encryption)
+    const recordId = new RecordId("codeSource", source.id);
+    const rawRow = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ typeSettings: Record<string, unknown> } | undefined]>(
+        `RETURN $recordId.*`,
+        { recordId },
+      );
+      return result[0];
+    });
+    const rawToken = rawRow?.typeSettings?.authToken as string;
+    // Should start with version prefix (single level of encryption)
+    expect(rawToken?.charAt(0)).toBe("A");
+    // Should NOT have nested encryption markers
+    expect(rawToken?.charAt(1)).not.toBe("A");
   } finally {
     await ctx.cleanup();
   }
