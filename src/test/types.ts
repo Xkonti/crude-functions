@@ -331,7 +331,7 @@ export interface DeferredSetting {
  */
 export interface DeferredConsoleLog {
   requestId: string;
-  routeId: number;
+  functionId: string;  // SurrealDB RecordId string of functionDef
   level: "log" | "debug" | "info" | "warn" | "error" | "trace" | "stdout" | "stderr" | "exec_start" | "exec_end" | "exec_reject";
   message: string;
   args?: string; // JSON-serialized additional arguments

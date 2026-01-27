@@ -266,7 +266,7 @@ async function createTestApp(
   const routesService = new RoutesService({ surrealFactory: surrealTestContext.factory });
   const settingsService = new SettingsService({ surrealFactory: surrealTestContext.factory, encryptionService });
   await settingsService.bootstrapGlobalSettings();
-  const consoleLogService = new ConsoleLogService({ db, settingsService });
+  const consoleLogService = new ConsoleLogService({ surrealFactory: surrealTestContext.factory, settingsService });
   const executionMetricsService = new ExecutionMetricsService({ db });
 
   // Create mock code source service (returns empty sources by default)

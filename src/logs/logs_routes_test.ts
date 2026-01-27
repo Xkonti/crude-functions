@@ -63,7 +63,7 @@ async function createTestContext(): Promise<LogsTestContext> {
 // Helper to insert test logs
 async function insertLogs(
   service: ConsoleLogService,
-  routeId: string,
+  functionId: string,
   count: number,
   level: ConsoleLogLevel = "log",
   baseRequestId = "req",
@@ -71,7 +71,7 @@ async function insertLogs(
   for (let i = 0; i < count; i++) {
     service.store({
       requestId: `${baseRequestId}-${i}`,
-      routeId,
+      functionId,
       level,
       message: `Test message ${i}`,
     });
@@ -125,7 +125,7 @@ integrationTest("GET /api/logs filters by functionId correctly", async () => {
 
     expect(res.status).toBe(200);
     expect(json.data.logs.length).toBe(5);
-    expect(json.data.logs.every((log: ConsoleLog) => log.routeId === recordIdToString(ctx.routes.route1.id))).toBe(true);
+    expect(json.data.logs.every((log: ConsoleLog) => log.functionId === recordIdToString(ctx.routes.route1.id))).toBe(true);
   } finally {
     await ctx.cleanup();
   }
@@ -186,7 +186,7 @@ integrationTest("GET /api/logs combines functionId and level filters", async () 
     expect(res.status).toBe(200);
     expect(json.data.logs.length).toBe(3);
     expect(json.data.logs.every((log: ConsoleLog) =>
-      log.routeId === recordIdToString(ctx.routes.route1.id) && log.level === "error"
+      log.functionId === recordIdToString(ctx.routes.route1.id) && log.level === "error"
     )).toBe(true);
   } finally {
     await ctx.cleanup();
@@ -254,7 +254,8 @@ integrationTest("GET /api/logs returns logs ordered newest to oldest", async () 
 integrationTest("GET /api/logs returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
-    const res = await ctx.app.request("/api/logs?functionId=invalid");
+    // Use a functionId with invalid characters (spaces, special chars)
+    const res = await ctx.app.request("/api/logs?functionId=invalid%20format!");
     const json = await res.json();
 
     expect(res.status).toBe(400);
@@ -512,7 +513,7 @@ integrationTest("GET /api/logs handles logs with identical timestamps", async ()
     for (let i = 0; i < 5; i++) {
       ctx.consoleLogService.store({
         requestId: `req-${i}`,
-        routeId: recordIdToString(ctx.routes.route1.id),
+        functionId: recordIdToString(ctx.routes.route1.id),
         level: "log",
         message: `Message ${i}`,
       });
@@ -633,7 +634,8 @@ integrationTest("DELETE /api/logs/:functionId returns count=0 when no logs exist
 integrationTest("DELETE /api/logs/:functionId returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
-    const res = await ctx.app.request("/api/logs/invalid", { method: "DELETE" });
+    // Use a functionId with invalid characters (special chars)
+    const res = await ctx.app.request("/api/logs/invalid%20format!", { method: "DELETE" });
     const json = await res.json();
 
     expect(res.status).toBe(400);
@@ -731,7 +733,7 @@ integrationTest("GET /api/logs log objects have all required fields", async () =
     const log = json.data.logs[0];
     expect(log).toHaveProperty("id");
     expect(log).toHaveProperty("requestId");
-    expect(log).toHaveProperty("routeId");
+    expect(log).toHaveProperty("functionId");
     expect(log).toHaveProperty("level");
     expect(log).toHaveProperty("message");
     expect(log).toHaveProperty("timestamp");

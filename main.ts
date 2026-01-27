@@ -291,7 +291,7 @@ const userService = new UserService({
 // Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
 // Captures both console.* methods AND direct process.stdout/stderr writes
-const consoleLogService = new ConsoleLogService({ db, settingsService });
+const consoleLogService = new ConsoleLogService({ surrealFactory, settingsService });
 const streamInterceptor = new StreamInterceptor({ logService: consoleLogService });
 streamInterceptor.install();
 

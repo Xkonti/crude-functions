@@ -17,7 +17,7 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
   routes.get("/", async (c) => {
     // 1. Parse and validate functionId (optional)
     const functionIdParam = c.req.query("functionId");
-    let routeId: string | undefined;
+    let functionId: string | undefined;
 
     if (functionIdParam) {
       const parsed = validateSurrealId(functionIdParam);
@@ -25,13 +25,13 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
         return c.json({ error: "Invalid functionId parameter" }, 400);
       }
 
-      // Verify route exists
+      // Verify function exists
       const route = await routesService.getById(parsed);
       if (!route) {
         return c.json({ error: `Function with id ${parsed} not found` }, 404);
       }
 
-      routeId = parsed;
+      functionId = parsed;
     }
 
     // 2. Parse and validate level (optional, comma-separated)
@@ -81,7 +81,7 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
     // 5. Query logs
     try {
       const result = await consoleLogService.getPaginated({
-        routeId,
+        functionId,
         levels,
         limit,
         cursor,
@@ -91,8 +91,8 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       const baseUrl = "/api/logs";
       const queryParams = new URLSearchParams();
 
-      if (routeId !== undefined) {
-        queryParams.set("functionId", String(routeId));
+      if (functionId !== undefined) {
+        queryParams.set("functionId", functionId);
       }
       if (levels !== undefined) {
         queryParams.set("level", levels.join(","));
@@ -140,7 +140,7 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       return c.json({ error: "Invalid functionId parameter" }, 400);
     }
 
-    // Verify route exists
+    // Verify function exists
     const route = await routesService.getById(functionId);
     if (!route) {
       return c.json(
@@ -149,7 +149,7 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       );
     }
 
-    const deleted = await consoleLogService.deleteByRouteId(functionId);
+    const deleted = await consoleLogService.deleteByFunctionId(functionId);
 
     return c.json({
       data: {

@@ -557,14 +557,14 @@ function calculateSummary(dataPoints: ChartDataPoint[]): MetricsSummary {
 
 interface LogsPaginationOptions {
   limit: number;
-  beforeId: number | null;
-  oldestLogId: number | null;
+  cursor: string | null;
+  nextCursor: string | null;
   hasMore: boolean;
 }
 
 function renderLogsPage(
   functionName: string,
-  routeId: string,
+  functionId: string,
   logs: ConsoleLog[],
   pagination: LogsPaginationOptions
 ): string {
@@ -657,22 +657,22 @@ function renderLogsPage(
       }
       function changePageSize(select) {
         const limit = select.value;
-        window.location.href = '/web/functions/logs/${routeId}?limit=' + limit;
+        window.location.href = '/web/functions/logs/${functionId}?limit=' + limit;
       }
       function goToNextPage() {
-        const beforeId = ${pagination.oldestLogId ?? "null"};
-        if (beforeId) {
-          window.location.href = '/web/functions/logs/${routeId}?limit=${pagination.limit}&before_id=' + beforeId;
+        const nextCursor = ${pagination.nextCursor ? `"${pagination.nextCursor}"` : "null"};
+        if (nextCursor) {
+          window.location.href = '/web/functions/logs/${functionId}?limit=${pagination.limit}&cursor=' + encodeURIComponent(nextCursor);
         }
       }
       function resetToNewest() {
-        window.location.href = '/web/functions/logs/${routeId}?limit=${pagination.limit}';
+        window.location.href = '/web/functions/logs/${functionId}?limit=${pagination.limit}';
       }
     </script>
   `;
 
   const pageSizeOptions = [50, 100, 250, 500, 1000];
-  const isViewingOlder = pagination.beforeId !== null;
+  const isViewingOlder = pagination.cursor !== null;
 
   return `
     ${logsTableStyles}
@@ -687,7 +687,7 @@ function renderLogsPage(
           ${pageSizeOptions.map((size) => `<option value="${size}"${size === pagination.limit ? " selected" : ""}>${size}</option>`).join("")}
         </select>
         ${isViewingOlder ? `<button class="outline" onclick="resetToNewest()">Reset to Newest</button>` : ""}
-        <a href="/web/functions/logs/${routeId}?limit=${pagination.limit}${isViewingOlder ? "&before_id=" + pagination.beforeId : ""}" role="button" class="outline">Refresh</a>
+        <a href="/web/functions/logs/${functionId}?limit=${pagination.limit}${isViewingOlder && pagination.cursor ? "&cursor=" + encodeURIComponent(pagination.cursor) : ""}" role="button" class="outline">Refresh</a>
       </div>
     </div>
     ${
@@ -1815,29 +1815,24 @@ export function createFunctionsPages(
 
     // Parse pagination params
     const limitParam = c.req.query("limit");
-    const beforeIdParam = c.req.query("before_id");
+    const cursorParam = c.req.query("cursor");
     const validLimits = [50, 100, 250, 500, 1000];
     const limit = limitParam && validLimits.includes(parseInt(limitParam, 10))
       ? parseInt(limitParam, 10)
       : 100;
-    const beforeId = beforeIdParam ? parseInt(beforeIdParam, 10) : null;
 
-    // Get logs - either newest or before a specific log id
-    // NOTE: Logs still use string routeId (stored in TEXT column) - will be migrated separately
-    const logs = beforeId
-      ? await consoleLogService.getByRouteIdBeforeId(id, beforeId, limit)
-      : await consoleLogService.getByRouteId(id, limit);
-
-    // Get oldest log id for next page navigation
-    const oldestLogId = logs.length > 0
-      ? logs[logs.length - 1].id
-      : null;
-
-    const content = renderLogsPage(route.name, id, logs, {
+    // Use getPaginated which handles cursor-based pagination properly
+    const paginatedResult = await consoleLogService.getPaginated({
+      functionId: id,
       limit,
-      beforeId,
-      oldestLogId,
-      hasMore: logs.length === limit,
+      cursor: cursorParam ?? undefined,
+    });
+
+    const content = renderLogsPage(route.name, id, paginatedResult.logs, {
+      limit,
+      cursor: cursorParam ?? null,
+      nextCursor: paginatedResult.nextCursor ?? null,
+      hasMore: paginatedResult.hasMore,
     });
     return c.html(await layout(`Logs: ${route.name}`, content, getLayoutUser(c), settingsService));
   });

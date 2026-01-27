@@ -752,13 +752,13 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     // Add console logs for this route
     ctx.consoleLogService.store({
       requestId: "req-1",
-      routeId,
+      functionId: routeId,
       level: "log",
       message: "Test log 1",
     });
     ctx.consoleLogService.store({
       requestId: "req-2",
-      routeId,
+      functionId: routeId,
       level: "info",
       message: "Test log 2",
     });
@@ -790,7 +790,7 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     });
 
     // Verify data exists before deletion
-    const logsBefore = await ctx.consoleLogService.getByRouteId(routeId);
+    const logsBefore = await ctx.consoleLogService.getByFunctionId(routeId);
     expect(logsBefore.length).toBe(2);
 
     const secretsBefore = await secretsService.getFunctionSecrets(routeId);
@@ -803,7 +803,7 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     await ctx.routesService.removeRoute("test-route");
 
     // Verify console logs are CASCADE deleted
-    const logsAfter = await ctx.consoleLogService.getByRouteId(routeId);
+    const logsAfter = await ctx.consoleLogService.getByFunctionId(routeId);
     expect(logsAfter.length).toBe(0);
 
     // Verify function-specific secrets are CASCADE deleted

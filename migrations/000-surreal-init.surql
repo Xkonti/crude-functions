@@ -342,3 +342,8 @@ DEFINE EVENT IF NOT EXISTS delete_key_secrets ON TABLE apiKey WHEN $event = "DEL
 DEFINE EVENT IF NOT EXISTS delete_functionDef_secrets ON TABLE functionDef WHEN $event = "DELETE" THEN {
     DELETE secret WHERE scopeType = "function" AND scopeRef = $before.id
 };
+
+-- When functionDef is deleted, delete all associated execution logs
+DEFINE EVENT IF NOT EXISTS delete_functionDef_logs ON TABLE functionDef WHEN $event = "DELETE" THEN {
+    DELETE executionLog WHERE functionId = $before.id
+};

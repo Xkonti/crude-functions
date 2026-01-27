@@ -12,8 +12,8 @@ import type { RequestContext } from "./types.ts";
 /**
  * Create a test RequestContext with the given values.
  */
-function createContext(requestId: string, routeId: string): RequestContext {
-  return { requestId, routeId };
+function createContext(requestId: string, functionId: string): RequestContext {
+  return { requestId, functionId };
 }
 
 // =====================
@@ -34,13 +34,13 @@ Deno.test("getCurrentRequestContext returns the context inside runInRequestConte
   });
 });
 
-Deno.test("context contains correct requestId and routeId values", () => {
-  const ctx = createContext("test-request-id", "99");
+Deno.test("context contains correct requestId and functionId values", () => {
+  const ctx = createContext("test-request-id", "functionDef:test99");
 
   runInRequestContext(ctx, () => {
     const result = getCurrentRequestContext();
     expect(result?.requestId).toBe("test-request-id");
-    expect(result?.routeId).toBe("99");
+    expect(result?.functionId).toBe("functionDef:test99");
   });
 });
 
@@ -99,17 +99,17 @@ Deno.test("context is available through await points", async () => {
 // =====================
 
 Deno.test("concurrent executions see their own contexts", async () => {
-  const results: { requestId: string; routeId: string }[] = [];
+  const results: { requestId: string; functionId: string }[] = [];
 
-  const ctx1 = createContext("request-1", "100");
-  const ctx2 = createContext("request-2", "200");
+  const ctx1 = createContext("request-1", "functionDef:100");
+  const ctx2 = createContext("request-2", "functionDef:200");
 
   const execution1 = runInRequestContext(ctx1, async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const current = getCurrentRequestContext();
     results.push({
       requestId: current!.requestId,
-      routeId: current!.routeId,
+      functionId: current!.functionId,
     });
   });
 
@@ -118,15 +118,15 @@ Deno.test("concurrent executions see their own contexts", async () => {
     const current = getCurrentRequestContext();
     results.push({
       requestId: current!.requestId,
-      routeId: current!.routeId,
+      functionId: current!.functionId,
     });
   });
 
   await Promise.all([execution1, execution2]);
 
   // Both executions should have seen their own contexts
-  expect(results).toContainEqual({ requestId: "request-1", routeId: "100" });
-  expect(results).toContainEqual({ requestId: "request-2", routeId: "200" });
+  expect(results).toContainEqual({ requestId: "request-1", functionId: "functionDef:100" });
+  expect(results).toContainEqual({ requestId: "request-2", functionId: "functionDef:200" });
 });
 
 Deno.test("each runInRequestContext call is isolated", () => {
@@ -168,24 +168,24 @@ Deno.test("nested contexts use innermost context", () => {
 });
 
 Deno.test("deeply nested contexts work correctly", () => {
-  const level1 = createContext("level-1", "1");
-  const level2 = createContext("level-2", "2");
-  const level3 = createContext("level-3", "3");
+  const level1 = createContext("level-1", "functionDef:1");
+  const level2 = createContext("level-2", "functionDef:2");
+  const level3 = createContext("level-3", "functionDef:3");
 
   runInRequestContext(level1, () => {
-    expect(getCurrentRequestContext()?.routeId).toBe("1");
+    expect(getCurrentRequestContext()?.functionId).toBe("functionDef:1");
 
     runInRequestContext(level2, () => {
-      expect(getCurrentRequestContext()?.routeId).toBe("2");
+      expect(getCurrentRequestContext()?.functionId).toBe("functionDef:2");
 
       runInRequestContext(level3, () => {
-        expect(getCurrentRequestContext()?.routeId).toBe("3");
+        expect(getCurrentRequestContext()?.functionId).toBe("functionDef:3");
       });
 
-      expect(getCurrentRequestContext()?.routeId).toBe("2");
+      expect(getCurrentRequestContext()?.functionId).toBe("functionDef:2");
     });
 
-    expect(getCurrentRequestContext()?.routeId).toBe("1");
+    expect(getCurrentRequestContext()?.functionId).toBe("functionDef:1");
   });
 });
 

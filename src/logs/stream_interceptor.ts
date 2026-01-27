@@ -172,7 +172,7 @@ export class StreamInterceptor {
 
         this.logService.store({
           requestId: context.requestId,
-          routeId: context.routeId,
+          functionId: context.functionId,
           level: method as ConsoleLogLevel,
           message,
           args: serializedArgs,
@@ -213,7 +213,7 @@ export class StreamInterceptor {
         if (message.length > 0) {
           this.logService.store({
             requestId: context.requestId,
-            routeId: context.routeId,
+            functionId: context.functionId,
             level,
             message,
           });
@@ -261,7 +261,7 @@ export class StreamInterceptor {
         if (message.length > 0) {
           this.logService.store({
             requestId: context.requestId,
-            routeId: context.routeId,
+            functionId: context.functionId,
             level,
             message,
           });
@@ -301,7 +301,7 @@ export class StreamInterceptor {
         if (message.length > 0) {
           this.logService.store({
             requestId: context.requestId,
-            routeId: context.routeId,
+            functionId: context.functionId,
             level,
             message,
           });

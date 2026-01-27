@@ -55,19 +55,19 @@ export class LogTrimmingService {
       }
     }
 
-    // STEP 2: Count-based trimming per route
-    const routeIds = await this.logService.getDistinctRouteIds();
+    // STEP 2: Count-based trimming per function
+    const functionIds = await this.logService.getDistinctFunctionIds();
 
-    for (const routeId of routeIds) {
+    for (const functionId of functionIds) {
       const deleted = await this.logService.trimToLimit(
-        routeId,
+        functionId,
         this.config.maxLogsPerRoute
       );
       totalDeleted += deleted;
     }
 
     if (totalDeleted > 0) {
-      logger.info(`[LogTrimming] Trimmed ${totalDeleted} logs across ${routeIds.length} routes`);
+      logger.info(`[LogTrimming] Trimmed ${totalDeleted} logs across ${functionIds.length} functions`);
     }
 
     return { deletedByAge, trimmedByCount: totalDeleted };

@@ -876,13 +876,13 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 9: Create console log service if needed (after routes exist for FK constraint)
     if (this.flags.consoleLogService) {
-      context.consoleLogService = createConsoleLogService(db, context.settingsService);
+      context.consoleLogService = createConsoleLogService(surrealFactory, context.settingsService);
 
       // Seed deferred logs
       for (const log of this.deferredLogs) {
         context.consoleLogService.store({
           requestId: log.requestId,
-          routeId: log.routeId,
+          functionId: log.functionId,
           level: log.level,
           message: log.message,
           args: log.args,

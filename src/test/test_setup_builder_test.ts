@@ -138,18 +138,27 @@ integrationTest("TestSetupBuilder.withAdminUser creates user", async () => {
 });
 
 integrationTest("TestSetupBuilder.withConsoleLog seeds log data", async () => {
-  // First create a route to have a valid routeId
+  // First create a route to have a valid functionId
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts")
-    .withConsoleLog({
-      requestId: "test-request-123",
-      routeId: 1, // Will match the created route
-      level: "info",
-      message: "Test log message",
-    })
+    .withLogs()
     .build();
 
   try {
+    // Get the functionId from the created route
+    const route = await ctx.routesService.getByName("test");
+    const { recordIdToString } = await import("../database/surreal_helpers.ts");
+    const functionId = recordIdToString(route!.id);
+
+    // Now seed the log with the actual functionId
+    ctx.consoleLogService.store({
+      requestId: "test-request-123",
+      functionId,
+      level: "info",
+      message: "Test log message",
+    });
+    await ctx.consoleLogService.flush();
+
     const logs = await ctx.consoleLogService.getByRequestId("test-request-123");
     expect(logs.length).toBe(1);
     expect(logs[0].message).toBe("Test log message");

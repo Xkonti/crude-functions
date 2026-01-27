@@ -14,25 +14,25 @@ import { recordIdToString } from "../database/surreal_helpers.ts";
 interface StreamTestContext {
   logService: ConsoleLogService;
   interceptor: StreamInterceptor;
-  routeId: string;
+  functionId: string;
   cleanup: () => Promise<void>;
 }
 
 async function createStreamTestContext(): Promise<StreamTestContext> {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
-    .withRoute("/test-route", "test.ts")
+    .withRoute("/test-route", "test.ts", { name: "test-route" })
     .build();
 
   const route = await ctx.routesService.getByName("test-route");
-  const routeId = recordIdToString(route!.id);
+  const functionId = recordIdToString(route!.id);
 
   const interceptor = new StreamInterceptor({ logService: ctx.consoleLogService });
 
   return {
     logService: ctx.consoleLogService,
     interceptor,
-    routeId,
+    functionId,
     cleanup: async () => {
       interceptor.uninstall();
       await ctx.consoleLogService.shutdown();
@@ -46,13 +46,13 @@ async function createStreamTestContext(): Promise<StreamTestContext> {
 // =====================
 
 integrationTest("StreamInterceptor captures console.log within request context", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         console.log("Hello from handler");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -65,20 +65,20 @@ integrationTest("StreamInterceptor captures console.log within request context",
     expect(logs.length).toBe(1);
     expect(logs[0].message).toBe("Hello from handler");
     expect(logs[0].level).toBe("log");
-    expect(logs[0].routeId).toBe(routeId);
+    expect(logs[0].functionId).toBe(functionId);
   } finally {
     await cleanup();
   }
 });
 
 integrationTest("StreamInterceptor captures all console methods with correct levels", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         console.log("log message");
         console.debug("debug message");
@@ -106,13 +106,13 @@ integrationTest("StreamInterceptor captures all console methods with correct lev
 });
 
 integrationTest("StreamInterceptor captures process.stdout.write with stdout level", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         process.stdout.write("Direct stdout message\n");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -131,13 +131,13 @@ integrationTest("StreamInterceptor captures process.stdout.write with stdout lev
 });
 
 integrationTest("StreamInterceptor captures process.stderr.write with stderr level", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         process.stderr.write("Direct stderr message\n");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -175,13 +175,13 @@ integrationTest("StreamInterceptor does not capture logs outside request context
 });
 
 integrationTest("StreamInterceptor can be uninstalled", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         console.log("Before uninstall");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -193,7 +193,7 @@ integrationTest("StreamInterceptor can be uninstalled", async () => {
     interceptor.uninstall();
 
     await runInRequestContext(
-      { requestId: "test-request-2", routeId },
+      { requestId: "test-request-2", functionId },
       async () => {
         console.log("After uninstall");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -227,7 +227,7 @@ integrationTest("StreamInterceptor preserves originalStreams functions", () => {
 });
 
 integrationTest("StreamInterceptor install is idempotent", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
@@ -235,7 +235,7 @@ integrationTest("StreamInterceptor install is idempotent", async () => {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         console.log("Test message");
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -266,13 +266,13 @@ integrationTest("StreamInterceptor installed getter returns correct state", asyn
 });
 
 integrationTest("StreamInterceptor handles Uint8Array input", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         const encoder = new TextEncoder();
         process.stdout.write(encoder.encode("Binary message\n"));
@@ -292,13 +292,13 @@ integrationTest("StreamInterceptor handles Uint8Array input", async () => {
 });
 
 integrationTest("StreamInterceptor handles empty messages", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         // Empty newline should not be stored
         process.stdout.write("\n");
@@ -323,13 +323,13 @@ integrationTest("StreamInterceptor handles empty messages", async () => {
 // =====================
 
 integrationTest("StreamInterceptor captures Deno.stdout.writeSync", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         const encoder = new TextEncoder();
         Deno.stdout.writeSync(encoder.encode("Deno stdout sync\n"));
@@ -349,13 +349,13 @@ integrationTest("StreamInterceptor captures Deno.stdout.writeSync", async () => 
 });
 
 integrationTest("StreamInterceptor captures Deno.stdout.write (async)", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         const encoder = new TextEncoder();
         await Deno.stdout.write(encoder.encode("Deno stdout async\n"));
@@ -375,13 +375,13 @@ integrationTest("StreamInterceptor captures Deno.stdout.write (async)", async ()
 });
 
 integrationTest("StreamInterceptor captures Deno.stderr.writeSync", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         const encoder = new TextEncoder();
         Deno.stderr.writeSync(encoder.encode("Deno stderr sync\n"));
@@ -401,13 +401,13 @@ integrationTest("StreamInterceptor captures Deno.stderr.writeSync", async () => 
 });
 
 integrationTest("StreamInterceptor captures Deno.stderr.write (async)", async () => {
-  const { logService, interceptor, routeId, cleanup } = await createStreamTestContext();
+  const { logService, interceptor, functionId, cleanup } = await createStreamTestContext();
 
   try {
     interceptor.install();
 
     await runInRequestContext(
-      { requestId: "test-request-1", routeId },
+      { requestId: "test-request-1", functionId },
       async () => {
         const encoder = new TextEncoder();
         await Deno.stderr.write(encoder.encode("Deno stderr async\n"));

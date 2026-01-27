@@ -227,10 +227,10 @@ export function createMetricsStateService(db: DatabaseService): MetricsStateServ
  * Requires database and settings service.
  */
 export function createConsoleLogService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   settingsService: SettingsService
 ): ConsoleLogService {
-  return new ConsoleLogService({ db, settingsService });
+  return new ConsoleLogService({ surrealFactory, settingsService });
 }
 
 // =============================================================================

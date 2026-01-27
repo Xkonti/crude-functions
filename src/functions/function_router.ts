@@ -114,8 +114,7 @@ export class FunctionRouter {
       const fullUrl = c.req.url;
 
       // Convert route.id to string for logs/metrics (they expect string IDs now)
-      // NOTE: Logs and metrics will be migrated to SurrealDB separately
-      const routeIdString = recordIdToString(route.id);
+      const functionIdString = recordIdToString(route.id);
 
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
@@ -129,7 +128,7 @@ export class FunctionRouter {
           // Log rejected request
           this.consoleLogService.store({
             requestId,
-            routeId: routeIdString,
+            functionId: functionIdString,
             level: "exec_reject",
             message: `${method} ${fullUrl}`,
             args: JSON.stringify({ reason: "invalid_api_key" }),
@@ -161,7 +160,7 @@ export class FunctionRouter {
       };
 
       // Capture functionId for secret closures (string ID)
-      const functionId = routeIdString;
+      const functionId = functionIdString;
 
       const ctx: FunctionContext = {
         route: routeInfo,
@@ -209,7 +208,7 @@ export class FunctionRouter {
       // 3. Execute Handler within request context (for console log capture)
       // Handler loading happens INSIDE the env context so module-level code
       // sees the isolated environment, not the real system environment.
-      const requestContext = { requestId, routeId: routeIdString };
+      const requestContext = { requestId, functionId: functionIdString };
 
       // Prepare execution logging data
       const origin = c.req.header("origin") || c.req.header("referer") || "";
@@ -220,7 +219,7 @@ export class FunctionRouter {
       const startTime = performance.now();
       this.consoleLogService.store({
         requestId,
-        routeId: routeIdString,
+        functionId: functionIdString,
         level: "exec_start",
         message: `${method} ${fullUrl}`,
         args: JSON.stringify({ origin, keyGroup, contentLength }),
@@ -242,14 +241,15 @@ export class FunctionRouter {
         const durationMs = Math.round(performance.now() - startTime);
         this.consoleLogService.store({
           requestId,
-          routeId: routeIdString,
+          functionId: functionIdString,
           level: "exec_end",
           message: `${durationMs}ms`,
         });
 
         // Store execution metric
+        // NOTE: Metrics still use routeId - will be migrated to SurrealDB separately
         this.executionMetricsService.store({
-          routeId: routeIdString,
+          routeId: functionIdString,
           type: "execution",
           avgTimeMs: durationMs,
           maxTimeMs: durationMs,
@@ -272,7 +272,7 @@ export class FunctionRouter {
           // Log execution end (load error) - no metrics for load failures
           this.consoleLogService.store({
             requestId,
-            routeId: routeIdString,
+            functionId: functionIdString,
             level: "exec_end",
             message: `${durationMs}ms (load error)`,
           });
@@ -283,14 +283,15 @@ export class FunctionRouter {
         // Log execution end (execution error)
         this.consoleLogService.store({
           requestId,
-          routeId: routeIdString,
+          functionId: functionIdString,
           level: "exec_end",
           message: `${durationMs}ms (error)`,
         });
 
         // Store metric for failed executions
+        // NOTE: Metrics still use routeId - will be migrated to SurrealDB separately
         this.executionMetricsService.store({
-          routeId: routeIdString,
+          routeId: functionIdString,
           type: "execution",
           avgTimeMs: durationMs,
           maxTimeMs: durationMs,
