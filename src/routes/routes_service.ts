@@ -2,7 +2,6 @@ import { Mutex } from "@core/asyncutil/mutex";
 import { RecordId } from "surrealdb";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
-import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
  * Represents a function route configuration.
@@ -122,7 +121,7 @@ export class RoutesService {
   async getAll(): Promise<FunctionRoute[]> {
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[RouteRow[]]>(
-        "SELECT * FROM route ORDER BY name"
+        "SELECT * FROM functionDef ORDER BY name"
       );
 
       return (rows ?? []).map((row) => this.rowToRoute(row));
@@ -135,7 +134,7 @@ export class RoutesService {
   async getByName(name: string): Promise<FunctionRoute | null> {
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[RouteRow[]]>(
-        "SELECT * FROM route WHERE name = $name LIMIT 1",
+        "SELECT * FROM functionDef WHERE name = $name LIMIT 1",
         { name }
       );
 
@@ -151,7 +150,7 @@ export class RoutesService {
    * @param id - The string ID part of the RecordId
    */
   async getById(id: string): Promise<FunctionRoute | null> {
-    const recordId = new RecordId("route", id);
+    const recordId = new RecordId("functionDef", id);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       const [row] = await db.query<[RouteRow | undefined]>(
@@ -200,7 +199,7 @@ export class RoutesService {
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Validate: check for duplicate name
       const [existingByName] = await db.query<[RouteRow[]]>(
-        "SELECT id FROM route WHERE name = $name LIMIT 1",
+        "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
         { name: route.name }
       );
       if (existingByName && existingByName.length > 0) {
@@ -209,7 +208,7 @@ export class RoutesService {
 
       // Validate: check for duplicate routePath+method combinations
       const [existingRoutes] = await db.query<[RouteRow[]]>(
-        "SELECT name, methods FROM route WHERE routePath = $routePath",
+        "SELECT name, methods FROM functionDef WHERE routePath = $routePath",
         { routePath: route.routePath }
       );
 
@@ -226,7 +225,7 @@ export class RoutesService {
       // Create the route
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
       const [rows] = await db.query<[RouteRow[]]>(
-        `CREATE route SET
+        `CREATE functionDef SET
           name = $name,
           description = $description,
           handler = $handler,
@@ -266,7 +265,7 @@ export class RoutesService {
     await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Get the route ID first (for logging purposes and to check if exists)
       const [rows] = await db.query<[RouteRow[]]>(
-        "SELECT id FROM route WHERE name = $name LIMIT 1",
+        "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
         { name }
       );
 
@@ -290,7 +289,7 @@ export class RoutesService {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    const recordId = new RecordId("route", id);
+    const recordId = new RecordId("functionDef", id);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Verify route exists
@@ -304,7 +303,7 @@ export class RoutesService {
 
       // Validate: check for duplicate name (excluding current route)
       const [existingByName] = await db.query<[RouteRow[]]>(
-        "SELECT id FROM route WHERE name = $name AND id != $recordId LIMIT 1",
+        "SELECT id FROM functionDef WHERE name = $name AND id != $recordId LIMIT 1",
         { name: route.name, recordId }
       );
       if (existingByName && existingByName.length > 0) {
@@ -313,7 +312,7 @@ export class RoutesService {
 
       // Validate: check for duplicate routePath+method combinations (excluding current route)
       const [existingRoutes] = await db.query<[RouteRow[]]>(
-        "SELECT name, methods FROM route WHERE routePath = $routePath AND id != $recordId",
+        "SELECT name, methods FROM functionDef WHERE routePath = $routePath AND id != $recordId",
         { routePath: route.routePath, recordId }
       );
 
@@ -369,7 +368,7 @@ export class RoutesService {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    const recordId = new RecordId("route", id);
+    const recordId = new RecordId("functionDef", id);
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Check if route exists first
@@ -395,7 +394,7 @@ export class RoutesService {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    const recordId = new RecordId("route", id);
+    const recordId = new RecordId("functionDef", id);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Verify route exists

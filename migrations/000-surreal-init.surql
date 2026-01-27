@@ -201,28 +201,128 @@ DEFINE INDEX IF NOT EXISTS idx_secret_scopeType ON secret FIELDS scopeType;
 DEFINE INDEX IF NOT EXISTS idx_secret_scopeRef ON secret FIELDS scopeRef;
 
 --------------------------------------------------------------------------------
--- Routes / Functions
+-- Function Definitions
 --------------------------------------------------------------------------------
 
--- Routes table - stores function routes with their configuration
--- Replaces SQLite routes table for function management
-DEFINE TABLE IF NOT EXISTS route SCHEMAFULL TYPE NORMAL;
+-- Function definitions table - stores function configurations
+-- (Renamed from 'route' to 'functionDef' for clarity)
+DEFINE TABLE IF NOT EXISTS functionDef SCHEMAFULL TYPE NORMAL;
 
-DEFINE FIELD IF NOT EXISTS name ON TABLE route TYPE string;
-DEFINE FIELD IF NOT EXISTS description ON TABLE route TYPE option<string>;
-DEFINE FIELD IF NOT EXISTS handler ON TABLE route TYPE string;
-DEFINE FIELD IF NOT EXISTS routePath ON TABLE route TYPE string;
-DEFINE FIELD IF NOT EXISTS methods ON TABLE route TYPE array<string>;
-DEFINE FIELD IF NOT EXISTS keys ON TABLE route TYPE option<array<string>>;  -- API key group IDs
-DEFINE FIELD IF NOT EXISTS enabled ON TABLE route TYPE bool DEFAULT true;
-DEFINE FIELD IF NOT EXISTS createdAt ON TABLE route TYPE datetime VALUE time::now() READONLY;
-DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE route TYPE datetime VALUE time::now();
+DEFINE FIELD IF NOT EXISTS name ON TABLE functionDef TYPE string;
+DEFINE FIELD IF NOT EXISTS description ON TABLE functionDef TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS handler ON TABLE functionDef TYPE string;
+DEFINE FIELD IF NOT EXISTS routePath ON TABLE functionDef TYPE string;
+DEFINE FIELD IF NOT EXISTS methods ON TABLE functionDef TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS keys ON TABLE functionDef TYPE option<array<string>>;  -- API key group IDs
+DEFINE FIELD IF NOT EXISTS enabled ON TABLE functionDef TYPE bool DEFAULT true;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE functionDef TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE functionDef TYPE datetime VALUE time::now();
 
 -- Unique name constraint
-DEFINE INDEX IF NOT EXISTS unique_route_name ON route FIELDS name UNIQUE;
+DEFINE INDEX IF NOT EXISTS unique_functionDef_name ON functionDef FIELDS name UNIQUE;
 
 -- Index for route path lookups (used by FunctionRouter)
-DEFINE INDEX IF NOT EXISTS idx_route_path ON route FIELDS routePath;
+DEFINE INDEX IF NOT EXISTS idx_functionDef_path ON functionDef FIELDS routePath;
+
+--------------------------------------------------------------------------------
+-- Execution Metrics
+--------------------------------------------------------------------------------
+
+-- Execution metrics table - stores execution timing data for functions
+-- Designed for high-frequency inserts from function executions
+DEFINE TABLE IF NOT EXISTS executionMetric SCHEMAFULL TYPE NORMAL;
+
+-- Function reference (optional - NONE for global/combined metrics)
+DEFINE FIELD IF NOT EXISTS functionId ON TABLE executionMetric TYPE option<record<functionDef>>;
+
+-- Metric type as integer for efficiency:
+-- 0 = execution (raw), 1 = minute, 2 = hour, 3 = day (aggregated)
+DEFINE FIELD IF NOT EXISTS type ON TABLE executionMetric TYPE int;
+
+-- Timing data using duration type (enables future in-database processing)
+DEFINE FIELD IF NOT EXISTS avgTime ON TABLE executionMetric TYPE duration;
+DEFINE FIELD IF NOT EXISTS maxTime ON TABLE executionMetric TYPE duration;
+
+-- Execution count (for aggregation weighting)
+DEFINE FIELD IF NOT EXISTS executionCount ON TABLE executionMetric TYPE int DEFAULT 1;
+
+-- Timestamp for the metric (when execution occurred or aggregation window start)
+DEFINE FIELD IF NOT EXISTS timestamp ON TABLE executionMetric TYPE datetime DEFAULT time::now();
+
+-- Record creation timestamp
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE executionMetric TYPE datetime VALUE time::now() READONLY;
+
+-- Indexes optimized for aggregation queries
+-- Primary: type + timestamp range for watermark-based aggregation windows
+DEFINE INDEX IF NOT EXISTS idx_metric_type_timestamp ON executionMetric FIELDS type, timestamp;
+
+-- Per-function metrics lookup by type and time range
+DEFINE INDEX IF NOT EXISTS idx_metric_function_type_timestamp ON executionMetric FIELDS functionId, type, timestamp;
+
+--------------------------------------------------------------------------------
+-- Metrics Aggregation State
+--------------------------------------------------------------------------------
+
+-- Metrics state table - tracks aggregation watermarks
+-- Uses fixed record IDs for O(1) access: metricsState:lastProcessedMinute, etc.
+DEFINE TABLE IF NOT EXISTS metricsState SCHEMAFULL TYPE NORMAL;
+
+-- Marker key (stored for clarity, ID is the primary access pattern)
+DEFINE FIELD IF NOT EXISTS key ON TABLE metricsState TYPE string;
+
+-- Marker value (datetime for watermark timestamps)
+DEFINE FIELD IF NOT EXISTS value ON TABLE metricsState TYPE datetime;
+
+-- Last update timestamp
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE metricsState TYPE datetime VALUE time::now();
+
+--------------------------------------------------------------------------------
+-- Console/Execution Logs
+--------------------------------------------------------------------------------
+
+-- Execution logs table - stores captured console output from function handlers
+-- Designed for batched inserts (50 entries at a time)
+DEFINE TABLE IF NOT EXISTS executionLog SCHEMAFULL TYPE NORMAL;
+
+-- Request identifier (UUID for correlating logs within a single execution)
+DEFINE FIELD IF NOT EXISTS requestId ON TABLE executionLog TYPE string;
+
+-- Function reference (optional - orphaned logs may have NONE functionId)
+DEFINE FIELD IF NOT EXISTS functionId ON TABLE executionLog TYPE option<record<functionDef>>;
+
+-- Log level
+DEFINE FIELD IF NOT EXISTS level ON TABLE executionLog TYPE
+    "log" | "debug" | "info" | "warn" | "error" | "trace" |
+    "stdout" | "stderr" |
+    "exec_start" | "exec_end" | "exec_reject";
+
+-- Log message
+DEFINE FIELD IF NOT EXISTS message ON TABLE executionLog TYPE string;
+
+-- Additional arguments (JSON-serialized, optional)
+DEFINE FIELD IF NOT EXISTS args ON TABLE executionLog TYPE option<string>;
+
+-- Sequence number within batch for ordering (replaces microsecond timestamp hack)
+DEFINE FIELD IF NOT EXISTS sequence ON TABLE executionLog TYPE int DEFAULT 0;
+
+-- Timestamp when log was captured
+DEFINE FIELD IF NOT EXISTS timestamp ON TABLE executionLog TYPE datetime DEFAULT time::now();
+
+-- Record creation timestamp
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE executionLog TYPE datetime VALUE time::now() READONLY;
+
+-- Indexes for query patterns
+-- Logs by request (debugging a specific execution)
+DEFINE INDEX IF NOT EXISTS idx_log_requestId ON executionLog FIELDS requestId;
+
+-- Logs by function with time-based pagination (newest first)
+DEFINE INDEX IF NOT EXISTS idx_log_function_timestamp ON executionLog FIELDS functionId, timestamp;
+
+-- Global time-based pagination
+DEFINE INDEX IF NOT EXISTS idx_log_timestamp ON executionLog FIELDS timestamp;
+
+-- Level filtering within function
+DEFINE INDEX IF NOT EXISTS idx_log_function_level ON executionLog FIELDS functionId, level;
 
 --------------------------------------------------------------------------------
 -- Cascade Delete Events
@@ -238,7 +338,7 @@ DEFINE EVENT IF NOT EXISTS delete_key_secrets ON TABLE apiKey WHEN $event = "DEL
     DELETE secret WHERE scopeType = "key" AND scopeRef = $before.id
 };
 
--- When route is deleted, delete all function-scoped secrets
-DEFINE EVENT IF NOT EXISTS delete_route_secrets ON TABLE route WHEN $event = "DELETE" THEN {
+-- When functionDef is deleted, delete all function-scoped secrets
+DEFINE EVENT IF NOT EXISTS delete_functionDef_secrets ON TABLE functionDef WHEN $event = "DELETE" THEN {
     DELETE secret WHERE scopeType = "function" AND scopeRef = $before.id
 };

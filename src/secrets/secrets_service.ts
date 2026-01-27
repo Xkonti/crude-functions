@@ -195,7 +195,7 @@ export class SecretsService {
    * Get all secrets for a specific function (with decrypted values)
    */
   async getFunctionSecrets(functionId: string): Promise<Secret[]> {
-    const scopeRef = new RecordId("route", functionId);
+    const scopeRef = new RecordId("functionDef", functionId);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[SecretRow[]]>(
@@ -213,7 +213,7 @@ export class SecretsService {
     functionId: string,
     secretId: string
   ): Promise<Secret | null> {
-    const scopeRef = new RecordId("route", functionId);
+    const scopeRef = new RecordId("functionDef", functionId);
     const recordId = new RecordId("secret", secretId);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -242,7 +242,7 @@ export class SecretsService {
     this.validateSecretName(name);
 
     const encryptedValue = await this.encryptionService.encrypt(value);
-    const scopeRef = new RecordId("route", functionId);
+    const scopeRef = new RecordId("functionDef", functionId);
 
     try {
       return await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -306,7 +306,7 @@ export class SecretsService {
   ): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    const scopeRef = new RecordId("route", functionId);
+    const scopeRef = new RecordId("functionDef", functionId);
     const recordId = new RecordId("secret", secretId);
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -327,7 +327,7 @@ export class SecretsService {
   async deleteFunctionSecretsByFunctionId(functionId: string): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    const scopeRef = new RecordId("route", functionId);
+    const scopeRef = new RecordId("functionDef", functionId);
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
       await db.query(
@@ -641,7 +641,7 @@ export class SecretsService {
         break;
       case "function":
         if (functionId === undefined) return undefined;
-        scopeRef = new RecordId("route", functionId);
+        scopeRef = new RecordId("functionDef", functionId);
         break;
       case "group":
         if (apiGroupId === undefined) return undefined;
@@ -686,7 +686,7 @@ export class SecretsService {
     }
 
     // 3. Function scope
-    const functionScopeRef = new RecordId("route", functionId);
+    const functionScopeRef = new RecordId("functionDef", functionId);
     const functionSecret = await this.getSecretValueByNameAndScope(name, "function", functionScopeRef);
     if (functionSecret !== undefined) return functionSecret;
 
@@ -740,7 +740,7 @@ export class SecretsService {
     }
 
     // 2. Function scope
-    const functionScopeRef = new RecordId("route", functionId);
+    const functionScopeRef = new RecordId("functionDef", functionId);
     const functionSecret = await this.getSecretValueByNameAndScope(name, "function", functionScopeRef);
     if (functionSecret !== undefined) {
       result.function = functionSecret;
@@ -1004,7 +1004,7 @@ export class SecretsService {
       }
 
       if (functionId !== undefined) {
-        const scopeRef = new RecordId("route", functionId);
+        const scopeRef = new RecordId("functionDef", functionId);
         query += ` AND scopeRef = $scopeRef`;
         params.scopeRef = scopeRef;
       } else if (groupId !== undefined) {
