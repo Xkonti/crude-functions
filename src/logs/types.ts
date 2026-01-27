@@ -8,7 +8,7 @@ export type ConsoleLogLevel =
 export interface ConsoleLog {
   id: number;
   requestId: string;
-  routeId: number;
+  routeId: string;  // SurrealDB RecordId string (was number before routes migration)
   level: ConsoleLogLevel;
   message: string;
   args?: string; // JSON-serialized additional arguments
@@ -18,7 +18,7 @@ export interface ConsoleLog {
 /** Context for the current request, stored in AsyncLocalStorage */
 export interface RequestContext {
   requestId: string;
-  routeId: number;
+  routeId: string;  // SurrealDB RecordId string (was number before routes migration)
 }
 
 /** Input type for storing a new console log (id and timestamp are auto-generated) */
@@ -32,7 +32,7 @@ export interface PaginationCursor {
 
 /** Options for paginated log queries */
 export interface GetPaginatedOptions {
-  routeId?: number;
+  routeId?: string;  // SurrealDB RecordId string (was number before routes migration)
   levels?: ConsoleLogLevel[]; // Optional log level filtering
   limit: number; // 1-1000
   cursor?: string; // base64-encoded PaginationCursor

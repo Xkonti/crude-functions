@@ -201,6 +201,30 @@ DEFINE INDEX IF NOT EXISTS idx_secret_scopeType ON secret FIELDS scopeType;
 DEFINE INDEX IF NOT EXISTS idx_secret_scopeRef ON secret FIELDS scopeRef;
 
 --------------------------------------------------------------------------------
+-- Routes / Functions
+--------------------------------------------------------------------------------
+
+-- Routes table - stores function routes with their configuration
+-- Replaces SQLite routes table for function management
+DEFINE TABLE IF NOT EXISTS route SCHEMAFULL TYPE NORMAL;
+
+DEFINE FIELD IF NOT EXISTS name ON TABLE route TYPE string;
+DEFINE FIELD IF NOT EXISTS description ON TABLE route TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS handler ON TABLE route TYPE string;
+DEFINE FIELD IF NOT EXISTS routePath ON TABLE route TYPE string;
+DEFINE FIELD IF NOT EXISTS methods ON TABLE route TYPE array<string>;
+DEFINE FIELD IF NOT EXISTS keys ON TABLE route TYPE option<array<string>>;  -- API key group IDs
+DEFINE FIELD IF NOT EXISTS enabled ON TABLE route TYPE bool DEFAULT true;
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE route TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE route TYPE datetime VALUE time::now();
+
+-- Unique name constraint
+DEFINE INDEX IF NOT EXISTS unique_route_name ON route FIELDS name UNIQUE;
+
+-- Index for route path lookups (used by FunctionRouter)
+DEFINE INDEX IF NOT EXISTS idx_route_path ON route FIELDS routePath;
+
+--------------------------------------------------------------------------------
 -- Cascade Delete Events
 --------------------------------------------------------------------------------
 
@@ -212,4 +236,9 @@ DEFINE EVENT IF NOT EXISTS delete_group_secrets ON TABLE apiKeyGroup WHEN $event
 -- When apiKey is deleted, delete all key-scoped secrets
 DEFINE EVENT IF NOT EXISTS delete_key_secrets ON TABLE apiKey WHEN $event = "DELETE" THEN {
     DELETE secret WHERE scopeType = "key" AND scopeRef = $before.id
+};
+
+-- When route is deleted, delete all function-scoped secrets
+DEFINE EVENT IF NOT EXISTS delete_route_secrets ON TABLE route WHEN $event = "DELETE" THEN {
+    DELETE secret WHERE scopeType = "function" AND scopeRef = $before.id
 };

@@ -102,7 +102,7 @@ integrationTest("MetricsAggregationService aggregates executions into minute", a
     const minuteStart = getPastMinute(5);
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -111,7 +111,7 @@ integrationTest("MetricsAggregationService aggregates executions into minute", a
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 200,
       maxTimeMs: 200,
@@ -120,7 +120,7 @@ integrationTest("MetricsAggregationService aggregates executions into minute", a
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 150,
       maxTimeMs: 150,
@@ -132,7 +132,7 @@ integrationTest("MetricsAggregationService aggregates executions into minute", a
     await setup.aggregationService.runOnce();
 
     // Check that minute aggregate was created
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(1);
     expect(minuteMetrics[0].executionCount).toBe(3);
     expect(minuteMetrics[0].maxTimeMs).toBe(200);
@@ -141,7 +141,7 @@ integrationTest("MetricsAggregationService aggregates executions into minute", a
     expect(minuteMetrics[0].timestamp.toISOString()).toBe(minuteStart.toISOString());
 
     // Check that execution metrics were deleted
-    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(executionMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);
@@ -156,7 +156,7 @@ integrationTest("MetricsAggregationService handles weighted averages correctly",
 
     // Single execution with count 1, avg 100
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -166,7 +166,7 @@ integrationTest("MetricsAggregationService handles weighted averages correctly",
 
     // Another execution with count 1, avg 300
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 300,
       maxTimeMs: 300,
@@ -177,7 +177,7 @@ integrationTest("MetricsAggregationService handles weighted averages correctly",
     // Run aggregation once
     await setup.aggregationService.runOnce();
 
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(1);
     // Weighted average: (100*1 + 300*1) / 2 = 200
     expect(minuteMetrics[0].avgTimeMs).toBe(200);
@@ -196,7 +196,7 @@ integrationTest("MetricsAggregationService processes multiple routes separately"
 
     // Route 1 executions
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -206,7 +206,7 @@ integrationTest("MetricsAggregationService processes multiple routes separately"
 
     // Route 2 executions
     await setup.ctx.executionMetricsService.store({
-      routeId: 2,
+      routeId: "2",
       type: "execution",
       avgTimeMs: 500,
       maxTimeMs: 500,
@@ -217,8 +217,8 @@ integrationTest("MetricsAggregationService processes multiple routes separately"
     // Run aggregation once
     await setup.aggregationService.runOnce();
 
-    const route1Minutes = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
-    const route2Minutes = await setup.ctx.executionMetricsService.getByRouteId(2, "minute");
+    const route1Minutes = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
+    const route2Minutes = await setup.ctx.executionMetricsService.getByRouteId("2", "minute");
 
     expect(route1Minutes.length).toBe(1);
     expect(route1Minutes[0].avgTimeMs).toBe(100);
@@ -237,7 +237,7 @@ integrationTest("MetricsAggregationService skips empty periods (no zero-value ro
     // Create an execution in minute 0 (5 minutes ago)
     const minute1Start = getPastMinute(5, 0);
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -248,7 +248,7 @@ integrationTest("MetricsAggregationService skips empty periods (no zero-value ro
     // Create an execution in minute 2 (skipping minute 1)
     const minute3Start = getPastMinute(5, 2);
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 200,
       maxTimeMs: 200,
@@ -261,7 +261,7 @@ integrationTest("MetricsAggregationService skips empty periods (no zero-value ro
 
     // Should have minute records for both minutes only
     // Empty periods are skipped - no zero-value rows
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(2);
   } finally {
     await cleanup(setup);
@@ -283,7 +283,7 @@ integrationTest("MetricsAggregationService aggregates minutes into hour", async 
     // Create executions in the last 3 minutes of the previous hour
     // This ensures the hour boundary will be crossed during processing
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -292,7 +292,7 @@ integrationTest("MetricsAggregationService aggregates minutes into hour", async 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 200,
       maxTimeMs: 200,
@@ -301,7 +301,7 @@ integrationTest("MetricsAggregationService aggregates minutes into hour", async 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 150,
       maxTimeMs: 150,
@@ -312,7 +312,7 @@ integrationTest("MetricsAggregationService aggregates minutes into hour", async 
     // Add an execution in the next hour to trigger the hour boundary crossing
     const currHourStart = new Date(prevHourStart.getTime() + 60 * 60 * 1000);
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 50,
       maxTimeMs: 50,
@@ -326,18 +326,18 @@ integrationTest("MetricsAggregationService aggregates minutes into hour", async 
     if (crossesDayBoundary) {
       // When running at 00:xx, the previous hour (23:xx) is on yesterday,
       // so hour records get aggregated into day records
-      const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
+      const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "day");
       expect(dayMetrics.length).toBe(1);
       expect(dayMetrics[0].executionCount).toBe(3); // 3 executions from prev day's hour
       expect(dayMetrics[0].maxTimeMs).toBe(200);
       expect(Math.round(dayMetrics[0].avgTimeMs)).toBe(150);
 
       // Hour records from yesterday should be aggregated into day
-      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
       expect(hourMetrics.length).toBe(0);
     } else {
       // Normal case: hour record exists for the previous hour
-      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
       expect(hourMetrics.length).toBe(1);
       expect(hourMetrics[0].executionCount).toBe(3); // 3 executions in prev hour
       expect(hourMetrics[0].maxTimeMs).toBe(200);
@@ -347,12 +347,12 @@ integrationTest("MetricsAggregationService aggregates minutes into hour", async 
     }
 
     // Check that minute metrics from prev hour were deleted (aggregated into hour)
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     // Should have 1 minute record remaining from current hour (:00)
     expect(minuteMetrics.length).toBe(1);
 
     // Check all executions were processed
-    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(executionMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);
@@ -378,7 +378,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
     // Create hour records for the previous day (pre-aggregated for simplicity)
     // These will be aggregated when the day boundary is crossed
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "hour",
       avgTimeMs: 100,
       maxTimeMs: 150,
@@ -387,7 +387,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "hour",
       avgTimeMs: 200,
       maxTimeMs: 300,
@@ -397,7 +397,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
 
     // Create execution in the last hour of the previous day to start processing there
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 150,
       maxTimeMs: 150,
@@ -408,7 +408,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
     // Create execution in the first hour of the current day to cross the day boundary
     const currDayStart = new Date(prevDayStart.getTime() + 24 * 60 * 60 * 1000);
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "execution",
       avgTimeMs: 50,
       maxTimeMs: 50,
@@ -420,7 +420,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
     await setup.aggregationService.runOnce();
 
     // Check day aggregate was created for the previous day
-    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
+    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "day");
     expect(dayMetrics.length).toBe(1);
     // Should have 100 + 200 + 1 (from the hour + the one execution that was in 23:59)
     // Actually, the execution at 23:59 becomes minute, then hour, then day
@@ -431,7 +431,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
     expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
 
     // Check hour metrics from prev day were deleted (aggregated into day)
-    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
     if (isFirstHourOfDay) {
       // At 00:xx, the execution at 00:00:10 stays as a minute (hour 00 not complete yet)
       // So no hour records exist from today
@@ -442,7 +442,7 @@ integrationTest("MetricsAggregationService aggregates hours into day", async () 
     }
 
     // Check all executions were processed
-    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(executionMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);
@@ -463,7 +463,7 @@ integrationTest("MetricsAggregationService cleans up old metrics of all types", 
 
     // Add old metrics of various types
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "day",
       avgTimeMs: 100,
       maxTimeMs: 150,
@@ -472,7 +472,7 @@ integrationTest("MetricsAggregationService cleans up old metrics of all types", 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "hour",
       avgTimeMs: 50,
       maxTimeMs: 75,
@@ -481,7 +481,7 @@ integrationTest("MetricsAggregationService cleans up old metrics of all types", 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "minute",
       avgTimeMs: 25,
       maxTimeMs: 40,
@@ -491,7 +491,7 @@ integrationTest("MetricsAggregationService cleans up old metrics of all types", 
 
     // Add recent day metric
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "day",
       avgTimeMs: 200,
       maxTimeMs: 250,
@@ -503,15 +503,15 @@ integrationTest("MetricsAggregationService cleans up old metrics of all types", 
     await setup.aggregationService.runOnce();
 
     // Only the recent day metric should remain - all old metrics deleted
-    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
+    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "day");
     expect(dayMetrics.length).toBe(1);
     expect(dayMetrics[0].executionCount).toBe(2000);
 
     // Old hour and minute metrics should also be deleted
-    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
     expect(hourMetrics.length).toBe(0);
 
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);
@@ -531,7 +531,7 @@ integrationTest("MetricsAggregationService processes multiple minutes in one run
 
     for (let minute = 0; minute < 5; minute++) {
       await setup.ctx.executionMetricsService.store({
-        routeId: 1,
+        routeId: "1",
         type: "execution",
         avgTimeMs: 100 + minute * 10,
         maxTimeMs: 100 + minute * 10,
@@ -544,13 +544,13 @@ integrationTest("MetricsAggregationService processes multiple minutes in one run
     await setup.aggregationService.runOnce();
 
     // All executions should be deleted
-    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const executionMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(executionMetrics.length).toBe(0);
 
     // The 5 executions should be aggregated into minute (and possibly hour) records
     // If the 5 minutes span an hour boundary, some may be further aggregated into hour records
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
-    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
+    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
 
     // Calculate total execution count from all aggregated records
     const minuteCount = minuteMetrics.reduce((sum, m) => sum + m.executionCount, 0);
@@ -593,7 +593,7 @@ integrationTest("MetricsAggregationService can be run multiple times", async () 
     const minuteStart = getPastMinute(5);
     for (let i = 0; i < 10; i++) {
       await setup.ctx.executionMetricsService.store({
-        routeId: 1,
+        routeId: "1",
         type: "execution",
         avgTimeMs: 100,
         maxTimeMs: 100,
@@ -608,7 +608,7 @@ integrationTest("MetricsAggregationService can be run multiple times", async () 
     await setup.aggregationService.runOnce();
 
     // Processing should have completed
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(1);
   } finally {
     await cleanup(setup);
@@ -630,7 +630,7 @@ integrationTest("MetricsAggregationService processes pending minutes into hours 
     // Create minute records directly (as if executions were already processed)
     // This simulates the state where execution→minute happened but minute→hour didn't
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "minute",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -639,7 +639,7 @@ integrationTest("MetricsAggregationService processes pending minutes into hours 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "minute",
       avgTimeMs: 200,
       maxTimeMs: 200,
@@ -648,7 +648,7 @@ integrationTest("MetricsAggregationService processes pending minutes into hours 
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "minute",
       avgTimeMs: 150,
       maxTimeMs: 150,
@@ -657,7 +657,7 @@ integrationTest("MetricsAggregationService processes pending minutes into hours 
     });
 
     // Verify no executions exist
-    const execsBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const execsBefore = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(execsBefore.length).toBe(0);
 
     // Run aggregation once
@@ -666,17 +666,17 @@ integrationTest("MetricsAggregationService processes pending minutes into hours 
     if (crossesDayBoundary) {
       // When running at 00:xx or 01:xx, getPastHour(2) returns yesterday's hour,
       // so hour records get aggregated into day records
-      const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
+      const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "day");
       expect(dayMetrics.length).toBe(1);
       expect(dayMetrics[0].executionCount).toBe(3);
       expect(dayMetrics[0].maxTimeMs).toBe(200);
 
       // Hour records from yesterday should be aggregated into day
-      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
       expect(hourMetrics.length).toBe(0);
     } else {
       // Normal case: hour record exists for the previous hour
-      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
       expect(hourMetrics.length).toBe(1);
       expect(hourMetrics[0].executionCount).toBe(3);
       expect(hourMetrics[0].maxTimeMs).toBe(200);
@@ -684,7 +684,7 @@ integrationTest("MetricsAggregationService processes pending minutes into hours 
     }
 
     // Check that minute metrics were deleted (aggregated into hour)
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);
@@ -701,7 +701,7 @@ integrationTest("MetricsAggregationService processes pending hours into days whe
     // Create hour records directly (as if minute→hour already happened)
     // This simulates the state where minute→hour happened but hour→day didn't
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "hour",
       avgTimeMs: 100,
       maxTimeMs: 150,
@@ -710,7 +710,7 @@ integrationTest("MetricsAggregationService processes pending hours into days whe
     });
 
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "hour",
       avgTimeMs: 200,
       maxTimeMs: 300,
@@ -719,23 +719,23 @@ integrationTest("MetricsAggregationService processes pending hours into days whe
     });
 
     // Verify no executions or minutes exist
-    const execsBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const execsBefore = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(execsBefore.length).toBe(0);
-    const minutesBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minutesBefore = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minutesBefore.length).toBe(0);
 
     // Run aggregation once
     await setup.aggregationService.runOnce();
 
     // Check day aggregate was created
-    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
+    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "day");
     expect(dayMetrics.length).toBe(1);
     expect(dayMetrics[0].executionCount).toBe(150); // 50 + 100
     expect(dayMetrics[0].maxTimeMs).toBe(300);
     expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
 
     // Check that hour metrics were deleted (aggregated into day)
-    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+    const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
     expect(hourMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);
@@ -753,7 +753,7 @@ integrationTest("MetricsAggregationService processes both pending minutes and ho
 
     // Create hour records from yesterday (should become day record)
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "hour",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -763,7 +763,7 @@ integrationTest("MetricsAggregationService processes both pending minutes and ho
 
     // Create minute records from 2 hours ago (should become hour record)
     await setup.ctx.executionMetricsService.store({
-      routeId: 1,
+      routeId: "1",
       type: "minute",
       avgTimeMs: 200,
       maxTimeMs: 200,
@@ -772,14 +772,14 @@ integrationTest("MetricsAggregationService processes both pending minutes and ho
     });
 
     // Verify no executions exist
-    const execsBefore = await setup.ctx.executionMetricsService.getByRouteId(1, "execution");
+    const execsBefore = await setup.ctx.executionMetricsService.getByRouteId("1", "execution");
     expect(execsBefore.length).toBe(0);
 
     // Run aggregation once
     await setup.aggregationService.runOnce();
 
     // Check day aggregate was created from yesterday's hour
-    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "day");
+    const dayMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "day");
     expect(dayMetrics.length).toBe(1);
     expect(dayMetrics[0].timestamp.toISOString()).toBe(prevDayStart.toISOString());
 
@@ -790,21 +790,21 @@ integrationTest("MetricsAggregationService processes both pending minutes and ho
       expect(dayMetrics[0].executionCount).toBe(30); // 25 + 5
 
       // Hour records from yesterday should be aggregated into day
-      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
       expect(hourMetrics.length).toBe(0);
     } else {
       // Normal case: day record only contains the 12:00 hour
       expect(dayMetrics[0].executionCount).toBe(25);
 
       // Hour record from today's minutes exists
-      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "hour");
+      const hourMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "hour");
       expect(hourMetrics.length).toBe(1);
       expect(hourMetrics[0].executionCount).toBe(5);
       expect(hourMetrics[0].timestamp.toISOString()).toBe(prevHourStart.toISOString());
     }
 
     // All minutes should be processed
-    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId(1, "minute");
+    const minuteMetrics = await setup.ctx.executionMetricsService.getByRouteId("1", "minute");
     expect(minuteMetrics.length).toBe(0);
   } finally {
     await cleanup(setup);

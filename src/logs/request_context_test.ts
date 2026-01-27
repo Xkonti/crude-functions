@@ -12,7 +12,7 @@ import type { RequestContext } from "./types.ts";
 /**
  * Create a test RequestContext with the given values.
  */
-function createContext(requestId: string, routeId: number): RequestContext {
+function createContext(requestId: string, routeId: string): RequestContext {
   return { requestId, routeId };
 }
 
@@ -26,7 +26,7 @@ Deno.test("getCurrentRequestContext returns undefined outside any context", () =
 });
 
 Deno.test("getCurrentRequestContext returns the context inside runInRequestContext", () => {
-  const ctx = createContext("req-123", 42);
+  const ctx = createContext("req-123", "42");
 
   runInRequestContext(ctx, () => {
     const result = getCurrentRequestContext();
@@ -35,12 +35,12 @@ Deno.test("getCurrentRequestContext returns the context inside runInRequestConte
 });
 
 Deno.test("context contains correct requestId and routeId values", () => {
-  const ctx = createContext("test-request-id", 99);
+  const ctx = createContext("test-request-id", "99");
 
   runInRequestContext(ctx, () => {
     const result = getCurrentRequestContext();
     expect(result?.requestId).toBe("test-request-id");
-    expect(result?.routeId).toBe(99);
+    expect(result?.routeId).toBe("99");
   });
 });
 
@@ -49,7 +49,7 @@ Deno.test("context contains correct requestId and routeId values", () => {
 // =====================
 
 Deno.test("runInRequestContext works with synchronous functions", () => {
-  const ctx = createContext("sync-test", 1);
+  const ctx = createContext("sync-test", "1");
 
   const result = runInRequestContext(ctx, () => {
     return "sync-result";
@@ -59,7 +59,7 @@ Deno.test("runInRequestContext works with synchronous functions", () => {
 });
 
 Deno.test("runInRequestContext works with async functions", async () => {
-  const ctx = createContext("async-test", 2);
+  const ctx = createContext("async-test", "2");
 
   const result = await runInRequestContext(ctx, async () => {
     await Promise.resolve();
@@ -70,7 +70,7 @@ Deno.test("runInRequestContext works with async functions", async () => {
 });
 
 Deno.test("return values are properly passed through", () => {
-  const ctx = createContext("return-test", 3);
+  const ctx = createContext("return-test", "3");
 
   const objectResult = runInRequestContext(ctx, () => ({ key: "value" }));
   expect(objectResult).toEqual({ key: "value" });
@@ -83,7 +83,7 @@ Deno.test("return values are properly passed through", () => {
 });
 
 Deno.test("context is available through await points", async () => {
-  const ctx = createContext("await-test", 4);
+  const ctx = createContext("await-test", "4");
 
   await runInRequestContext(ctx, async () => {
     expect(getCurrentRequestContext()).toBe(ctx);
@@ -99,10 +99,10 @@ Deno.test("context is available through await points", async () => {
 // =====================
 
 Deno.test("concurrent executions see their own contexts", async () => {
-  const results: { requestId: string; routeId: number }[] = [];
+  const results: { requestId: string; routeId: string }[] = [];
 
-  const ctx1 = createContext("request-1", 100);
-  const ctx2 = createContext("request-2", 200);
+  const ctx1 = createContext("request-1", "100");
+  const ctx2 = createContext("request-2", "200");
 
   const execution1 = runInRequestContext(ctx1, async () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -125,13 +125,13 @@ Deno.test("concurrent executions see their own contexts", async () => {
   await Promise.all([execution1, execution2]);
 
   // Both executions should have seen their own contexts
-  expect(results).toContainEqual({ requestId: "request-1", routeId: 100 });
-  expect(results).toContainEqual({ requestId: "request-2", routeId: 200 });
+  expect(results).toContainEqual({ requestId: "request-1", routeId: "100" });
+  expect(results).toContainEqual({ requestId: "request-2", routeId: "200" });
 });
 
 Deno.test("each runInRequestContext call is isolated", () => {
-  const ctx1 = createContext("first", 1);
-  const ctx2 = createContext("second", 2);
+  const ctx1 = createContext("first", "1");
+  const ctx2 = createContext("second", "2");
 
   runInRequestContext(ctx1, () => {
     expect(getCurrentRequestContext()?.requestId).toBe("first");
@@ -150,8 +150,8 @@ Deno.test("each runInRequestContext call is isolated", () => {
 // =====================
 
 Deno.test("nested contexts use innermost context", () => {
-  const outer = createContext("outer", 1);
-  const inner = createContext("inner", 2);
+  const outer = createContext("outer", "1");
+  const inner = createContext("inner", "2");
 
   runInRequestContext(outer, () => {
     expect(getCurrentRequestContext()).toBe(outer);
@@ -168,24 +168,24 @@ Deno.test("nested contexts use innermost context", () => {
 });
 
 Deno.test("deeply nested contexts work correctly", () => {
-  const level1 = createContext("level-1", 1);
-  const level2 = createContext("level-2", 2);
-  const level3 = createContext("level-3", 3);
+  const level1 = createContext("level-1", "1");
+  const level2 = createContext("level-2", "2");
+  const level3 = createContext("level-3", "3");
 
   runInRequestContext(level1, () => {
-    expect(getCurrentRequestContext()?.routeId).toBe(1);
+    expect(getCurrentRequestContext()?.routeId).toBe("1");
 
     runInRequestContext(level2, () => {
-      expect(getCurrentRequestContext()?.routeId).toBe(2);
+      expect(getCurrentRequestContext()?.routeId).toBe("2");
 
       runInRequestContext(level3, () => {
-        expect(getCurrentRequestContext()?.routeId).toBe(3);
+        expect(getCurrentRequestContext()?.routeId).toBe("3");
       });
 
-      expect(getCurrentRequestContext()?.routeId).toBe(2);
+      expect(getCurrentRequestContext()?.routeId).toBe("2");
     });
 
-    expect(getCurrentRequestContext()?.routeId).toBe(1);
+    expect(getCurrentRequestContext()?.routeId).toBe("1");
   });
 });
 
@@ -194,7 +194,7 @@ Deno.test("deeply nested contexts work correctly", () => {
 // =====================
 
 Deno.test("errors thrown in the function are propagated", () => {
-  const ctx = createContext("error-test", 1);
+  const ctx = createContext("error-test", "1");
 
   expect(() => {
     runInRequestContext(ctx, () => {
@@ -204,7 +204,7 @@ Deno.test("errors thrown in the function are propagated", () => {
 });
 
 Deno.test("async errors are propagated", async () => {
-  const ctx = createContext("async-error-test", 2);
+  const ctx = createContext("async-error-test", "2");
 
   await expect(
     runInRequestContext(ctx, async () => {
@@ -215,7 +215,7 @@ Deno.test("async errors are propagated", async () => {
 });
 
 Deno.test("context is cleared after error", () => {
-  const ctx = createContext("cleanup-test", 1);
+  const ctx = createContext("cleanup-test", "1");
 
   try {
     runInRequestContext(ctx, () => {
@@ -230,8 +230,8 @@ Deno.test("context is cleared after error", () => {
 });
 
 Deno.test("nested context error restores outer context", () => {
-  const outer = createContext("outer", 1);
-  const inner = createContext("inner", 2);
+  const outer = createContext("outer", "1");
+  const inner = createContext("inner", "2");
 
   runInRequestContext(outer, () => {
     try {

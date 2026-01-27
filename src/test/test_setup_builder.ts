@@ -833,7 +833,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     // STEP 7: Create routes service if needed (after API keys for key resolution, after secrets for cascade delete)
     if (this.flags.routesService) {
       // Pass secretsService for cascade delete of function-scoped secrets
-      context.routesService = createRoutesService(db, context.secretsService);
+      context.routesService = createRoutesService(surrealFactory, context.secretsService);
 
       // Create deferred routes
       for (const { path, fileName, options } of this.deferredRoutes) {
@@ -857,7 +857,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
           name: options?.name ?? fileName.replace(/\.ts$/, ""),
           description: options?.description,
           handler: fileName,
-          route: path,
+          routePath: path,
           methods: options?.methods ?? ["GET"],
           keys: resolvedKeys,
         });

@@ -194,8 +194,8 @@ export class SecretsService {
   /**
    * Get all secrets for a specific function (with decrypted values)
    */
-  async getFunctionSecrets(functionId: number): Promise<Secret[]> {
-    const scopeRef = new RecordId("function", String(functionId));
+  async getFunctionSecrets(functionId: string): Promise<Secret[]> {
+    const scopeRef = new RecordId("route", functionId);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[SecretRow[]]>(
@@ -210,10 +210,10 @@ export class SecretsService {
    * Get a function secret by ID (with decrypted value)
    */
   async getFunctionSecretById(
-    functionId: number,
+    functionId: string,
     secretId: string
   ): Promise<Secret | null> {
-    const scopeRef = new RecordId("function", String(functionId));
+    const scopeRef = new RecordId("route", functionId);
     const recordId = new RecordId("secret", secretId);
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -233,7 +233,7 @@ export class SecretsService {
    * @throws Error if name is invalid or already exists for this function
    */
   async createFunctionSecret(
-    functionId: number,
+    functionId: string,
     name: string,
     value: string,
     comment?: string
@@ -242,7 +242,7 @@ export class SecretsService {
     this.validateSecretName(name);
 
     const encryptedValue = await this.encryptionService.encrypt(value);
-    const scopeRef = new RecordId("function", String(functionId));
+    const scopeRef = new RecordId("route", functionId);
 
     try {
       return await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -270,7 +270,7 @@ export class SecretsService {
    * @throws Error if secret not found
    */
   async updateFunctionSecret(
-    functionId: number,
+    functionId: string,
     secretId: string,
     value: string,
     comment?: string
@@ -301,12 +301,12 @@ export class SecretsService {
    * @throws Error if secret not found
    */
   async deleteFunctionSecret(
-    functionId: number,
+    functionId: string,
     secretId: string
   ): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    const scopeRef = new RecordId("function", String(functionId));
+    const scopeRef = new RecordId("route", functionId);
     const recordId = new RecordId("secret", secretId);
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -324,10 +324,10 @@ export class SecretsService {
    * Delete all function-scoped secrets for a given function ID
    * Used for cascade delete when a route is deleted
    */
-  async deleteFunctionSecretsByFunctionId(functionId: number): Promise<void> {
+  async deleteFunctionSecretsByFunctionId(functionId: string): Promise<void> {
     using _lock = await this.writeMutex.acquire();
 
-    const scopeRef = new RecordId("function", String(functionId));
+    const scopeRef = new RecordId("route", functionId);
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
       await db.query(
@@ -629,7 +629,7 @@ export class SecretsService {
   async getSecretByScope(
     name: string,
     scopeType: SecretScopeType,
-    functionId?: number,
+    functionId?: string,
     apiGroupId?: string,
     apiKeyId?: string
   ): Promise<string | undefined> {
@@ -641,7 +641,7 @@ export class SecretsService {
         break;
       case "function":
         if (functionId === undefined) return undefined;
-        scopeRef = new RecordId("function", String(functionId));
+        scopeRef = new RecordId("route", functionId);
         break;
       case "group":
         if (apiGroupId === undefined) return undefined;
@@ -667,7 +667,7 @@ export class SecretsService {
    */
   async getSecretHierarchical(
     name: string,
-    functionId: number,
+    functionId: string,
     apiGroupId?: string,
     apiKeyId?: string
   ): Promise<string | undefined> {
@@ -686,7 +686,7 @@ export class SecretsService {
     }
 
     // 3. Function scope
-    const functionScopeRef = new RecordId("function", String(functionId));
+    const functionScopeRef = new RecordId("route", functionId);
     const functionSecret = await this.getSecretValueByNameAndScope(name, "function", functionScopeRef);
     if (functionSecret !== undefined) return functionSecret;
 
@@ -700,7 +700,7 @@ export class SecretsService {
    */
   async getCompleteSecret(
     name: string,
-    functionId: number,
+    functionId: string,
     apiGroupId?: string,
     apiKeyId?: string
   ): Promise<
@@ -740,7 +740,7 @@ export class SecretsService {
     }
 
     // 2. Function scope
-    const functionScopeRef = new RecordId("function", String(functionId));
+    const functionScopeRef = new RecordId("route", functionId);
     const functionSecret = await this.getSecretValueByNameAndScope(name, "function", functionScopeRef);
     if (functionSecret !== undefined) {
       result.function = functionSecret;
@@ -812,7 +812,7 @@ export class SecretsService {
    * Only includes group/key secrets from groups the function accepts.
    */
   async getSecretsPreviewForFunction(
-    functionId: number,
+    functionId: string,
     acceptedGroupIds: string[]
   ): Promise<SecretPreview[]> {
     const previewMap = new Map<string, SecretPreview>();
@@ -988,7 +988,7 @@ export class SecretsService {
    */
   async getAllSecrets(options: {
     scopeType?: SecretScopeType;
-    functionId?: number;
+    functionId?: string;
     groupId?: string;
     keyId?: string;
   } = {}): Promise<Secret[]> {
@@ -1004,7 +1004,7 @@ export class SecretsService {
       }
 
       if (functionId !== undefined) {
-        const scopeRef = new RecordId("function", String(functionId));
+        const scopeRef = new RecordId("route", functionId);
         query += ` AND scopeRef = $scopeRef`;
         params.scopeRef = scopeRef;
       } else if (groupId !== undefined) {
@@ -1033,7 +1033,7 @@ export class SecretsService {
     value: string;
     comment?: string;
     scopeType: SecretScopeType;
-    functionId?: number;
+    functionId?: string;
     groupId?: string;
     keyId?: string;
   }): Promise<RecordId> {

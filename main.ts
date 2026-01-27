@@ -403,7 +403,7 @@ const secretsService = new SecretsService({
 
 // Initialize routes service
 const routesService = new RoutesService({
-  db,
+  surrealFactory,
   secretsService, // For cascade delete of function-scoped secrets
 });
 

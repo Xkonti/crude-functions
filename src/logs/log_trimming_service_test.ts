@@ -3,12 +3,14 @@ import { expect } from "@std/expect";
 import { LogTrimmingService } from "./log_trimming_service.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { BaseTestContext, LogsContext, RoutesContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 type LogTrimmingTestContext = BaseTestContext & LogsContext & RoutesContext;
 
 /**
  * Creates a test context with logs and routes services,
  * plus a LogTrimmingService with the given configuration.
+ * Returns the route IDs as strings for use in tests.
  */
 async function createTestSetup(
   options: {
@@ -19,6 +21,8 @@ async function createTestSetup(
 ): Promise<{
   ctx: LogTrimmingTestContext;
   trimmingService: LogTrimmingService;
+  routeId1: string;
+  routeId2: string;
 }> {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
@@ -35,7 +39,16 @@ async function createTestSetup(
     },
   });
 
-  return { ctx, trimmingService };
+  // Get the route IDs for use in tests
+  const route1 = await ctx.routesService.getByName("test-route-1");
+  const route2 = await ctx.routesService.getByName("test-route-2");
+
+  return {
+    ctx,
+    trimmingService,
+    routeId1: recordIdToString(route1!.id),
+    routeId2: recordIdToString(route2!.id),
+  };
 }
 
 async function cleanup(setup: {
@@ -58,13 +71,13 @@ integrationTest("LogTrimmingService deletes logs older than retention period", a
     await setup.ctx.db.execute(
       `INSERT INTO executionLogs (requestId, routeId, level, message, timestamp)
        VALUES (?, ?, ?, ?, ?)`,
-      ["old-request", 1, "log", "Old message", sqliteFormat]
+      ["old-request", setup.routeId1, "log", "Old message", sqliteFormat]
     );
 
     // Insert a recent log
     setup.ctx.consoleLogService.store({
       requestId: "new-request",
-      routeId: 1,
+      routeId: setup.routeId1,
       level: "log",
       message: "New message",
     });
@@ -97,7 +110,7 @@ integrationTest("LogTrimmingService skips time-based deletion when retentionSeco
     await setup.ctx.db.execute(
       `INSERT INTO executionLogs (requestId, routeId, level, message, timestamp)
        VALUES (?, ?, ?, ?, ?)`,
-      ["ancient-request", 1, "log", "Ancient message", sqliteFormat]
+      ["ancient-request", setup.routeId1, "log", "Ancient message", sqliteFormat]
     );
 
     // Run trimming
@@ -126,7 +139,7 @@ integrationTest("LogTrimmingService trims logs exceeding max per route", async (
     for (let i = 0; i < 10; i++) {
       setup.ctx.consoleLogService.store({
         requestId: `request-${i}`,
-        routeId: 1,
+        routeId: setup.routeId1,
         level: "log",
         message: `Message ${i}`,
       });
@@ -140,7 +153,7 @@ integrationTest("LogTrimmingService trims logs exceeding max per route", async (
     expect(result.trimmedByCount).toBe(5);
 
     // Should have only 5 logs remaining
-    const logs = await setup.ctx.consoleLogService.getByRouteId(1);
+    const logs = await setup.ctx.consoleLogService.getByRouteId(setup.routeId1);
     expect(logs.length).toBe(5);
     // Newest should be kept (DESC order)
     expect(logs[0].message).toBe("Message 9");
@@ -157,7 +170,7 @@ integrationTest("LogTrimmingService processes multiple routes independently", as
     for (let i = 0; i < 5; i++) {
       setup.ctx.consoleLogService.store({
         requestId: `r1-${i}`,
-        routeId: 1,
+        routeId: setup.routeId1,
         level: "log",
         message: `Route1 ${i}`,
       });
@@ -165,7 +178,7 @@ integrationTest("LogTrimmingService processes multiple routes independently", as
     for (let i = 0; i < 2; i++) {
       setup.ctx.consoleLogService.store({
         requestId: `r2-${i}`,
-        routeId: 2,
+        routeId: setup.routeId2,
         level: "log",
         message: `Route2 ${i}`,
       });
@@ -179,11 +192,11 @@ integrationTest("LogTrimmingService processes multiple routes independently", as
     expect(result.trimmedByCount).toBe(2);
 
     // Route 1: 5 -> 3 (trimmed)
-    const route1Logs = await setup.ctx.consoleLogService.getByRouteId(1);
+    const route1Logs = await setup.ctx.consoleLogService.getByRouteId(setup.routeId1);
     expect(route1Logs.length).toBe(3);
 
     // Route 2: 2 -> 2 (unchanged, under limit)
-    const route2Logs = await setup.ctx.consoleLogService.getByRouteId(2);
+    const route2Logs = await setup.ctx.consoleLogService.getByRouteId(setup.routeId2);
     expect(route2Logs.length).toBe(2);
   } finally {
     await cleanup(setup);
@@ -205,7 +218,7 @@ integrationTest("LogTrimmingService applies time-based deletion before count-bas
       await setup.ctx.db.execute(
         `INSERT INTO executionLogs (requestId, routeId, level, message, timestamp)
          VALUES (?, ?, ?, ?, ?)`,
-        [`old-${i}`, 1, "log", `Old ${i}`, sqliteFormat]
+        [`old-${i}`, setup.routeId1, "log", `Old ${i}`, sqliteFormat]
       );
     }
 
@@ -213,7 +226,7 @@ integrationTest("LogTrimmingService applies time-based deletion before count-bas
     for (let i = 0; i < 4; i++) {
       setup.ctx.consoleLogService.store({
         requestId: `new-${i}`,
-        routeId: 1,
+        routeId: setup.routeId1,
         level: "log",
         message: `New ${i}`,
       });
@@ -228,7 +241,7 @@ integrationTest("LogTrimmingService applies time-based deletion before count-bas
     expect(result.trimmedByCount).toBe(0);
 
     // Should have 4 new logs (old ones deleted by time, new ones under count limit)
-    const logs = await setup.ctx.consoleLogService.getByRouteId(1);
+    const logs = await setup.ctx.consoleLogService.getByRouteId(setup.routeId1);
     expect(logs.length).toBe(4);
     expect(logs.every((l) => l.message.startsWith("New"))).toBe(true);
   } finally {
@@ -248,7 +261,7 @@ integrationTest("LogTrimmingService can be called multiple times", async () => {
     for (let i = 0; i < 10; i++) {
       setup.ctx.consoleLogService.store({
         requestId: `request-${i}`,
-        routeId: 1,
+        routeId: setup.routeId1,
         level: "log",
         message: `Message ${i}`,
       });
@@ -264,7 +277,7 @@ integrationTest("LogTrimmingService can be called multiple times", async () => {
     expect(result2.trimmedByCount).toBe(0);
 
     // Logs should still be at 5
-    const logs = await setup.ctx.consoleLogService.getByRouteId(1);
+    const logs = await setup.ctx.consoleLogService.getByRouteId(setup.routeId1);
     expect(logs.length).toBe(5);
   } finally {
     await cleanup(setup);
@@ -309,7 +322,7 @@ integrationTest("LogTrimmingService handles logs with null routeId", async () =>
     for (let i = 0; i < 3; i++) {
       setup.ctx.consoleLogService.store({
         requestId: `normal-${i}`,
-        routeId: 1,
+        routeId: setup.routeId1,
         level: "log",
         message: `Normal ${i}`,
       });
@@ -327,7 +340,7 @@ integrationTest("LogTrimmingService handles logs with null routeId", async () =>
     expect(orphanLogs.length).toBe(1);
 
     // Normal logs should still exist (under limit)
-    const normalLogs = await setup.ctx.consoleLogService.getByRouteId(1);
+    const normalLogs = await setup.ctx.consoleLogService.getByRouteId(setup.routeId1);
     expect(normalLogs.length).toBe(3);
   } finally {
     await cleanup(setup);

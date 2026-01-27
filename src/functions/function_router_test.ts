@@ -4,6 +4,7 @@ import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { FunctionRouter } from "./function_router.ts";
 import type { TestContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /** Creates a FunctionRouter with all required services from TestSetupBuilder context */
 function createFunctionRouterWithContext(ctx: TestContext) {
@@ -643,7 +644,7 @@ integrationTest("FunctionRouter rebuilds router when routes are added", async ()
     await ctx.routesService.addRoute({
       name: "goodbye",
       handler: "goodbye.ts",
-      route: "/goodbye",
+      routePath: "/goodbye",
       methods: ["GET"],
     });
 
@@ -746,7 +747,7 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     // Get the route ID
     const route = await ctx.routesService.getByName("test-route");
     expect(route).not.toBeNull();
-    const routeId = route!.id;
+    const routeId = recordIdToString(route!.id);
 
     // Add console logs for this route
     ctx.consoleLogService.store({

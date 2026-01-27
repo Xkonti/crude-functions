@@ -239,13 +239,13 @@ export function createConsoleLogService(
 
 /**
  * Creates the RoutesService.
- * Requires database, optionally accepts SecretsService for cascade delete.
+ * Requires SurrealDB connection factory, optionally accepts SecretsService for cascade delete.
  */
 export function createRoutesService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   secretsService?: SecretsService
 ): RoutesService {
-  return new RoutesService({ db, secretsService });
+  return new RoutesService({ surrealFactory, secretsService });
 }
 
 // =============================================================================

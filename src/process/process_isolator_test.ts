@@ -21,7 +21,7 @@ function teardownIsolator() {
 // Test helpers
 const createTestContext = () => ({
   requestId: crypto.randomUUID(),
-  routeId: 1,
+  routeId: "1",
 });
 
 describe("ProcessIsolator", () => {

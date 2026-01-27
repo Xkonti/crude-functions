@@ -4,8 +4,8 @@ export type MetricType = "execution" | "minute" | "hour" | "day";
 /** A stored execution metric entry */
 export interface ExecutionMetric {
   id: number;
-  /** Route ID, or null for global (combined) metrics */
-  routeId: number | null;
+  /** Route ID (SurrealDB RecordId string), or null for global (combined) metrics */
+  routeId: string | null;
   type: MetricType;
   avgTimeMs: number;
   maxTimeMs: number;

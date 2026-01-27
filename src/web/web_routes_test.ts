@@ -197,7 +197,7 @@ const SETTINGS_SCHEMA = `
 interface TestRoute {
   name: string;
   handler: string;
-  route: string;
+  routePath: string;
   methods: string[];
   description?: string;
   keys?: string[];
@@ -263,7 +263,7 @@ async function createTestApp(
 
   // Add default management key via service (which handles group creation)
   await apiKeyService.addKey("management", "test-key", "testkey123", "admin");
-  const routesService = new RoutesService({ db });
+  const routesService = new RoutesService({ surrealFactory: surrealTestContext.factory });
   const settingsService = new SettingsService({ surrealFactory: surrealTestContext.factory, encryptionService });
   await settingsService.bootstrapGlobalSettings();
   const consoleLogService = new ConsoleLogService({ db, settingsService });
@@ -411,7 +411,7 @@ Deno.test({ name: "GET /web/functions lists functions", sanitizeResources: false
     {
       name: "test-fn",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
       description: "Test function",
     },
@@ -463,7 +463,7 @@ Deno.test({ name: "POST /web/functions/create creates function", sanitizeResourc
 
     const fn = await routesService.getByName("new-fn");
     expect(fn).not.toBeNull();
-    expect(fn!.route).toBe("/api/new");
+    expect(fn!.routePath).toBe("/api/new");
     expect(fn!.methods).toContain("GET");
     expect(fn!.methods).toContain("POST");
   } finally {
@@ -473,19 +473,20 @@ Deno.test({ name: "POST /web/functions/create creates function", sanitizeResourc
 
 Deno.test({ name: "POST /web/functions/delete/:id removes function", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
+    { name: "to-delete", handler: "t.ts", routePath: "/del", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("to-delete");
+    const routeId = recordIdToString(route!.id);
 
-    const res = await app.request(`/web/functions/delete/${route!.id}`, {
+    const res = await app.request(`/web/functions/delete/${routeId}`, {
       method: "POST",
     });
     expect(res.status).toBe(302);
     expect(res.headers.get("Location")).toContain("/web/functions?success=");
 
-    const fn = await routesService.getById(route!.id);
+    const fn = await routesService.getById(routeId);
     expect(fn).toBeNull();
   } finally {
     await cleanup(db, tempDir, surrealTestContext, consoleLogService);
@@ -494,13 +495,14 @@ Deno.test({ name: "POST /web/functions/delete/:id removes function", sanitizeRes
 
 Deno.test({ name: "GET /web/functions/edit/:id shows edit form", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"], description: "Test" },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"], description: "Test" },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
+    const routeId = recordIdToString(route!.id);
 
-    const res = await app.request(`/web/functions/edit/${route!.id}`);
+    const res = await app.request(`/web/functions/edit/${routeId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Edit");
@@ -514,12 +516,12 @@ Deno.test({ name: "GET /web/functions/edit/:id shows edit form", sanitizeResourc
 
 Deno.test({ name: "POST /web/functions/edit/:id updates function and allows name change", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "old-name", handler: "old.ts", route: "/old", methods: ["GET"] },
+    { name: "old-name", handler: "old.ts", routePath: "/old", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("old-name");
-    const originalId = route!.id;
+    const originalId = recordIdToString(route!.id);
 
     const formData = new FormData();
     formData.append("name", "new-name");
@@ -538,7 +540,7 @@ Deno.test({ name: "POST /web/functions/edit/:id updates function and allows name
     const updated = await routesService.getById(originalId);
     expect(updated?.name).toBe("new-name");
     expect(updated?.handler).toBe("new.ts");
-    expect(updated?.route).toBe("/new");
+    expect(updated?.routePath).toBe("/new");
     expect(updated?.methods).toContain("POST");
 
     // Old name should not exist
@@ -573,13 +575,14 @@ Deno.test({ name: "GET /web/functions/edit/:id returns error for non-existent ID
 
 Deno.test({ name: "GET /web/functions/delete/:id shows confirmation", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "to-delete", handler: "t.ts", route: "/del", methods: ["GET"] },
+    { name: "to-delete", handler: "t.ts", routePath: "/del", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("to-delete");
+    const routeId = recordIdToString(route!.id);
 
-    const res = await app.request(`/web/functions/delete/${route!.id}`);
+    const res = await app.request(`/web/functions/delete/${routeId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Delete Function");
@@ -784,13 +787,14 @@ Deno.test({ name: "GET /web/keys/delete-group blocks deleting management group",
 // Metrics pages tests
 Deno.test({ name: "GET /web/functions/metrics/:id shows metrics page", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
+    const routeId = recordIdToString(route!.id);
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}`);
+    const res = await app.request(`/web/functions/metrics/${routeId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Metrics: test-fn");
@@ -804,13 +808,14 @@ Deno.test({ name: "GET /web/functions/metrics/:id shows metrics page", sanitizeR
 
 Deno.test({ name: "GET /web/functions/metrics/:id with mode=day shows day view", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
+    const routeId = recordIdToString(route!.id);
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}?mode=day`);
+    const res = await app.request(`/web/functions/metrics/${routeId}?mode=day`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("Last 24 Hours");
@@ -821,13 +826,14 @@ Deno.test({ name: "GET /web/functions/metrics/:id with mode=day shows day view",
 
 Deno.test({ name: "GET /web/functions/metrics/:id shows no data message for new function", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
+    const routeId = recordIdToString(route!.id);
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}`);
+    const res = await app.request(`/web/functions/metrics/${routeId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("No metrics recorded");
@@ -838,11 +844,12 @@ Deno.test({ name: "GET /web/functions/metrics/:id shows no data message for new 
 
 Deno.test({ name: "GET /web/functions/metrics/:id with data shows charts", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
+    const routeId = recordIdToString(route!.id);
 
     // Add some minute-level metrics
     const now = new Date();
@@ -850,7 +857,7 @@ Deno.test({ name: "GET /web/functions/metrics/:id with data shows charts", sanit
       const timestamp = new Date(now.getTime() - i * 60 * 1000);
       timestamp.setUTCSeconds(0, 0);
       await executionMetricsService.store({
-        routeId: route!.id,
+        routeId,
         type: "minute",
         avgTimeMs: 100 + i * 10,
         maxTimeMs: 150 + i * 10,
@@ -859,7 +866,7 @@ Deno.test({ name: "GET /web/functions/metrics/:id with data shows charts", sanit
       });
     }
 
-    const res = await app.request(`/web/functions/metrics/${route!.id}`);
+    const res = await app.request(`/web/functions/metrics/${routeId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("executionTimeChart");
@@ -894,7 +901,7 @@ Deno.test({ name: "GET /web/functions/metrics/:id returns error for non-existent
 
 Deno.test({ name: "Functions list includes Metrics link", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService } = await createTestApp({ initialRoutes });
   try {
@@ -909,16 +916,17 @@ Deno.test({ name: "Functions list includes Metrics link", sanitizeResources: fal
 
 Deno.test({ name: "GET /web/functions/metrics/:id shows current period from raw execution data", sanitizeResources: false, sanitizeOps: false }, async () => {
   const initialRoutes = [
-    { name: "test-fn", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test-fn", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const { app, db, tempDir, surrealTestContext, consoleLogService, routesService, executionMetricsService } = await createTestApp({ initialRoutes });
   try {
     const route = await routesService.getByName("test-fn");
+    const routeId = recordIdToString(route!.id);
 
     // Add raw execution records (not yet aggregated into minute records)
     const now = new Date();
     await executionMetricsService.store({
-      routeId: route!.id,
+      routeId,
       type: "execution",
       avgTimeMs: 50,
       maxTimeMs: 50,
@@ -926,7 +934,7 @@ Deno.test({ name: "GET /web/functions/metrics/:id shows current period from raw 
       timestamp: now,
     });
     await executionMetricsService.store({
-      routeId: route!.id,
+      routeId,
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 100,
@@ -935,7 +943,7 @@ Deno.test({ name: "GET /web/functions/metrics/:id shows current period from raw 
     });
 
     // Metrics page should show data even without aggregation running
-    const res = await app.request(`/web/functions/metrics/${route!.id}`);
+    const res = await app.request(`/web/functions/metrics/${routeId}`);
     expect(res.status).toBe(200);
     const html = await res.text();
     // Should show charts because we have execution data

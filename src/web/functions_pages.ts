@@ -31,7 +31,7 @@ import {
   parseSecretEditFormData,
 } from "./templates.ts";
 import { csrfInput } from "../csrf/csrf_helpers.ts";
-import { validateId } from "../validation/common.ts";
+import { validateSurrealId } from "../validation/common.ts";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
@@ -287,7 +287,7 @@ function aggregateMetrics(metrics: ExecutionMetric[]): {
  */
 async function calculateCurrentPeriodMetric(
   metricsService: ExecutionMetricsService,
-  routeId: number | null,
+  routeId: string | null,
   mode: MetricsDisplayMode,
   now: Date
 ): Promise<ExecutionMetric | null> {
@@ -423,7 +423,7 @@ function applyTimeInterpolation(dataPoints: ChartDataPoint[]): ChartDataPoint[] 
  */
 async function fetchMetricsData(
   metricsService: ExecutionMetricsService,
-  routeId: number | null,
+  routeId: string | null,
   mode: MetricsDisplayMode,
   retentionDays: number
 ): Promise<ChartDataPoint[]> {
@@ -564,7 +564,7 @@ interface LogsPaginationOptions {
 
 function renderLogsPage(
   functionName: string,
-  routeId: number,
+  routeId: string,
   logs: ConsoleLog[],
   pagination: LogsPaginationOptions
 ): string {
@@ -752,7 +752,7 @@ function renderLogsPage(
 
 function renderMetricsPage(
   functionName: string,
-  routeId: number | null,
+  routeId: string | null,
   mode: MetricsDisplayMode,
   dataPoints: ChartDataPoint[],
   summary: MetricsSummary,
@@ -1019,8 +1019,10 @@ function renderMetricsPage(
   const sourceOptions = [
     `<option value="/web/functions/metrics/global?mode=${mode}" ${isGlobal ? "selected" : ""}>Global metrics</option>`,
     ...allFunctions.map(
-      (fn) =>
-        `<option value="/web/functions/metrics/${fn.id}?mode=${mode}" ${fn.id === routeId ? "selected" : ""}>Function: ${escapeHtml(fn.name)}</option>`
+      (fn) => {
+        const fnId = recordIdToString(fn.id);
+        return `<option value="/web/functions/metrics/${fnId}?mode=${mode}" ${fnId === routeId ? "selected" : ""}>Function: ${escapeHtml(fn.name)}</option>`;
+      }
     ),
   ].join("");
 
@@ -1134,7 +1136,7 @@ function renderFunctionForm(
       </label>
       <label>
         Route Path
-        <input type="text" name="route" value="${escapeHtml(route.route ?? "")}"
+        <input type="text" name="route" value="${escapeHtml(route.routePath ?? "")}"
                required placeholder="/api/users/:id">
         <small>URL path pattern (must start with /)</small>
       </label>
@@ -1170,10 +1172,10 @@ function renderFunctionForm(
               ).join("")
         }
       </fieldset>
-      ${isEdit ? `
+      ${isEdit && route.id ? `
       <div style="margin: 1rem 0;">
         <button type="button" id="secrets-preview-btn"
-                onclick="loadSecretsPreview(${route.id})"
+                onclick="loadSecretsPreview('${recordIdToString(route.id)}')"
                 class="secondary">
           Show Secrets Preview
         </button>
@@ -1286,7 +1288,7 @@ function parseFormData(formData: FormData): {
     name,
     description,
     handler,
-    route: routePath,
+    routePath,
     methods,
     keys,
   };
@@ -1297,7 +1299,7 @@ function parseFormData(formData: FormData): {
 /**
  * Renders the secrets table with show/hide and copy functionality
  */
-function renderSecretsTable(secrets: Secret[], functionId: number): string {
+function renderSecretsTable(secrets: Secret[], functionId: string): string {
   return `
     <table>
       <thead>
@@ -1313,7 +1315,9 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
       <tbody>
         ${secrets
           .map(
-            (secret) => `
+            (secret) => {
+              const secretId = recordIdToString(secret.id);
+              return `
           <tr>
             <td><code>${escapeHtml(secret.name)}</code></td>
             <td class="secret-value">
@@ -1340,11 +1344,12 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
             <td>${formatDate(new Date(secret.createdAt))}</td>
             <td>${formatDate(new Date(secret.updatedAt))}</td>
             <td class="actions">
-              ${secret.decryptionError ? "" : `<a href="/web/functions/secrets/${functionId}/edit/${secret.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
-              <a href="/web/functions/secrets/${functionId}/delete/${secret.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+              ${secret.decryptionError ? "" : `<a href="/web/functions/secrets/${functionId}/edit/${secretId}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>`}
+              <a href="/web/functions/secrets/${functionId}/delete/${secretId}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
             </td>
           </tr>
-        `
+        `;
+            }
           )
           .join("")}
       </tbody>
@@ -1358,7 +1363,7 @@ function renderSecretsTable(secrets: Secret[], functionId: number): string {
  * Renders the create secret form
  */
 function renderFunctionSecretCreateForm(
-  functionId: number,
+  functionId: string,
   data: { name?: string; value?: string; comment?: string } = {},
   error?: string,
   csrfToken: string = ""
@@ -1400,7 +1405,7 @@ function renderFunctionSecretCreateForm(
  * Accepts Secret type with RecordId, converts to string for URLs.
  */
 function renderFunctionSecretEditForm(
-  functionId: number,
+  functionId: string,
   secret: Secret,
   error?: string,
   csrfToken: string = ""
@@ -1527,30 +1532,33 @@ export function createFunctionsPages(
           <tbody>
             ${routesWithGroupNames
               .map(
-                (fn) => `
-              <tr id="route-row-${fn.id}">
+                (fn) => {
+                  const fnId = recordIdToString(fn.id);
+                  return `
+              <tr id="route-row-${fnId}">
                 <td style="text-align: center;">
                   <span
                     class="toggle-switch"
-                    id="toggle-${fn.id}"
-                    onclick="toggleRoute(${fn.id})"
+                    id="toggle-${fnId}"
+                    onclick="toggleRoute('${fnId}')"
                     title="Click to ${fn.enabled ? 'disable' : 'enable'}"
                   >${fn.enabled ? '✅' : '❌'}</span>
                 </td>
                 <td><strong>${escapeHtml(fn.name)}</strong></td>
-                <td><code>${escapeHtml(fn.route)}</code></td>
+                <td><code>${escapeHtml(fn.routePath)}</code></td>
                 <td>${renderMethodBadges(fn.methods)}</td>
                 <td>${fn.keyGroupNames}</td>
                 <td>${fn.description ? escapeHtml(fn.description) : ""}</td>
                 <td class="actions">
-                  <a href="/web/functions/logs/${fn.id}" title="Logs" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📝</a>
-                  <a href="/web/functions/metrics/${fn.id}" title="Metrics" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📊</a>
-                  <a href="/web/functions/secrets/${fn.id}" title="Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a>
-                  <a href="/web/functions/edit/${fn.id}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
-                  <a href="/web/functions/delete/${fn.id}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
+                  <a href="/web/functions/logs/${fnId}" title="Logs" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📝</a>
+                  <a href="/web/functions/metrics/${fnId}" title="Metrics" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">📊</a>
+                  <a href="/web/functions/secrets/${fnId}" title="Secrets" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">🔐</a>
+                  <a href="/web/functions/edit/${fnId}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
+                  <a href="/web/functions/delete/${fnId}" title="Delete" style="color: #d32f2f; text-decoration: none; font-size: 1.2rem;">❌</a>
                 </td>
               </tr>
-            `
+            `;
+                }
               )
               .join("")}
           </tbody>
@@ -1569,9 +1577,10 @@ export function createFunctionsPages(
             toggleEl.style.cursor = 'wait';
 
             try {
+              // id is now a string (SurrealDB RecordId)
               const endpoint = newEnabled
-                ? '/api/functions/' + id + '/enable'
-                : '/api/functions/' + id + '/disable';
+                ? '/api/functions/' + encodeURIComponent(id) + '/enable'
+                : '/api/functions/' + encodeURIComponent(id) + '/disable';
               const response = await fetch(endpoint, { method: 'PUT' });
 
               if (!response.ok) {
@@ -1641,11 +1650,11 @@ export function createFunctionsPages(
 
   // Edit form
   routes.get("/edit/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
     const error = c.req.query("error");
     const csrfToken = getCsrfToken(c);
 
-    if (id === null) {
+    if (!id) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1666,9 +1675,9 @@ export function createFunctionsPages(
 
   // Handle edit (update in place)
   routes.post("/edit/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
 
-    if (id === null) {
+    if (!id) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1692,12 +1701,12 @@ export function createFunctionsPages(
 
     if (errors.length > 0) {
       // Need to include id for the form template to detect edit mode
-      const routeWithId = { ...route, id };
+      // The form uses existingRoute.id (RecordId) for display
       const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, errors.join(". "), csrfToken),
+          renderFunctionForm(`/web/functions/edit/${id}`, { ...route, id: existingRoute.id }, groups, errors.join(". "), csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -1710,12 +1719,11 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?success=" + encodeURIComponent(`Function updated: ${route.name}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update function";
-      const routeWithId = { ...route, id };
       const csrfToken = getCsrfToken(c);
       return c.html(
         layout(
           `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, routeWithId, groups, message, csrfToken),
+          renderFunctionForm(`/web/functions/edit/${id}`, { ...route, id: existingRoute.id }, groups, message, csrfToken),
           getLayoutUser(c), settingsService
         ),
         400
@@ -1725,9 +1733,9 @@ export function createFunctionsPages(
 
   // Preview secrets for a function (returns HTML fragment)
   routes.get("/preview-secrets/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
 
-    if (id === null) {
+    if (!id) {
       return c.text("Invalid function ID", 400);
     }
 
@@ -1747,9 +1755,9 @@ export function createFunctionsPages(
 
   // Delete confirmation
   routes.get("/delete/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
 
-    if (id === null) {
+    if (!id) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1773,9 +1781,9 @@ export function createFunctionsPages(
 
   // Handle delete
   routes.post("/delete/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
 
-    if (id === null) {
+    if (!id) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1794,9 +1802,9 @@ export function createFunctionsPages(
 
   // View logs for a function
   routes.get("/logs/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
 
-    if (id === null) {
+    if (!id) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1815,6 +1823,7 @@ export function createFunctionsPages(
     const beforeId = beforeIdParam ? parseInt(beforeIdParam, 10) : null;
 
     // Get logs - either newest or before a specific log id
+    // NOTE: Logs still use string routeId (stored in TEXT column) - will be migrated separately
     const logs = beforeId
       ? await consoleLogService.getByRouteIdBeforeId(id, beforeId, limit)
       : await consoleLogService.getByRouteId(id, limit);
@@ -1876,7 +1885,7 @@ export function createFunctionsPages(
 
   // View metrics for a function
   routes.get("/metrics/:id", async (c) => {
-    const id = validateId(c.req.param("id"));
+    const id = validateSurrealId(c.req.param("id"));
     const modeParam = c.req.query("mode") || "hour";
 
     // Validate mode
@@ -1885,7 +1894,7 @@ export function createFunctionsPages(
       ? (modeParam as MetricsDisplayMode)
       : "hour";
 
-    if (id === null) {
+    if (!id) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
@@ -1899,6 +1908,7 @@ export function createFunctionsPages(
     const retentionDays = retentionDaysStr ? parseInt(retentionDaysStr, 10) : 90;
 
     // Fetch metrics data
+    // NOTE: Metrics still expect routeId - will be migrated separately
     const dataPoints = await fetchMetricsData(
       executionMetricsService,
       id,
@@ -1929,10 +1939,9 @@ export function createFunctionsPages(
 
   // GET /secrets/:id - List secrets for function
   routes.get("/secrets/:id", async (c) => {
-    const idParam = c.req.param("id");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
 
-    if (isNaN(functionId)) {
+    if (!functionId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid function ID")
       );
@@ -1980,10 +1989,9 @@ export function createFunctionsPages(
 
   // GET /secrets/:id/create - Create secret form
   routes.get("/secrets/:id/create", async (c) => {
-    const idParam = c.req.param("id");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
 
-    if (isNaN(functionId)) {
+    if (!functionId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid function ID")
       );
@@ -2016,10 +2024,9 @@ export function createFunctionsPages(
 
   // POST /secrets/:id/create - Handle secret creation
   routes.post("/secrets/:id/create", async (c) => {
-    const idParam = c.req.param("id");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
 
-    if (isNaN(functionId)) {
+    if (!functionId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid function ID")
       );
@@ -2095,11 +2102,10 @@ export function createFunctionsPages(
 
   // GET /secrets/:id/edit/:secretId - Edit secret form
   routes.get("/secrets/:id/edit/:secretId", async (c) => {
-    const idParam = c.req.param("id");
-    const secretId = c.req.param("secretId");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
+    const secretId = validateSurrealId(c.req.param("secretId"));
 
-    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
+    if (!functionId || !secretId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );
@@ -2142,11 +2148,10 @@ export function createFunctionsPages(
 
   // POST /secrets/:id/edit/:secretId - Handle secret update
   routes.post("/secrets/:id/edit/:secretId", async (c) => {
-    const idParam = c.req.param("id");
-    const secretId = c.req.param("secretId");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
+    const secretId = validateSurrealId(c.req.param("secretId"));
 
-    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
+    if (!functionId || !secretId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );
@@ -2241,11 +2246,10 @@ export function createFunctionsPages(
 
   // GET /secrets/:id/delete/:secretId - Delete confirmation
   routes.get("/secrets/:id/delete/:secretId", async (c) => {
-    const idParam = c.req.param("id");
-    const secretId = c.req.param("secretId");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
+    const secretId = validateSurrealId(c.req.param("secretId"));
 
-    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
+    if (!functionId || !secretId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );
@@ -2283,11 +2287,10 @@ export function createFunctionsPages(
 
   // POST /secrets/:id/delete/:secretId - Handle deletion
   routes.post("/secrets/:id/delete/:secretId", async (c) => {
-    const idParam = c.req.param("id");
-    const secretId = c.req.param("secretId");
-    const functionId = parseInt(idParam);
+    const functionId = validateSurrealId(c.req.param("id"));
+    const secretId = validateSurrealId(c.req.param("secretId"));
 
-    if (isNaN(functionId) || !secretId || secretId.trim() === "") {
+    if (!functionId || !secretId) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Invalid ID")
       );

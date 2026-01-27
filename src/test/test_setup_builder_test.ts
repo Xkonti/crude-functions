@@ -84,7 +84,7 @@ integrationTest("TestSetupBuilder.withRoute creates route", async () => {
   try {
     const routes = await ctx.routesService.getAll();
     expect(routes.length).toBe(1);
-    expect(routes[0].route).toBe("/test");
+    expect(routes[0].routePath).toBe("/test");
     expect(routes[0].handler).toBe("test.ts");
     expect(routes[0].methods).toContain("GET");
     expect(routes[0].methods).toContain("POST");
@@ -212,7 +212,7 @@ integrationTest("TestSetupBuilder full integration", async () => {
 
     // Verify route
     const routes = await ctx.routesService.getAll();
-    expect(routes.some((r) => r.route === "/hello")).toBe(true);
+    expect(routes.some((r) => r.routePath === "/hello")).toBe(true);
 
     // Verify file
     expect(await ctx.fileService.fileExists("hello.ts")).toBe(true);

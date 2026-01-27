@@ -15,7 +15,7 @@ export interface ExecutionMetricsServiceOptions {
 interface ExecutionMetricRow {
   [key: string]: unknown;
   id: number;
-  routeId: number | null;
+  routeId: string | null;
   type: string;
   avgTimeMs: number;
   maxTimeMs: number;
@@ -33,7 +33,7 @@ interface AggregationRow {
 
 // Row type for per-route aggregation queries
 interface PerRouteAggregationRow extends AggregationRow {
-  routeId: number;
+  routeId: string;
 }
 
 /**
@@ -92,7 +92,7 @@ export class ExecutionMetricsService {
    * Optionally filter by metric type.
    */
   async getByRouteId(
-    routeId: number,
+    routeId: string,
     type?: MetricType,
     limit?: number
   ): Promise<ExecutionMetric[]> {
@@ -178,7 +178,7 @@ export class ExecutionMetricsService {
    * Delete all metrics for a specific route.
    * Returns the number of deleted metrics.
    */
-  async deleteByRouteId(routeId: number): Promise<number> {
+  async deleteByRouteId(routeId: string): Promise<number> {
     const result = await this.db.execute(
       `DELETE FROM executionMetrics WHERE routeId = ?`,
       [routeId]
@@ -191,8 +191,8 @@ export class ExecutionMetricsService {
    * Get all distinct route IDs that have metrics of any type.
    * Excludes global metrics (routeId IS NULL).
    */
-  async getDistinctRouteIds(): Promise<number[]> {
-    const rows = await this.db.queryAll<{ routeId: number }>(
+  async getDistinctRouteIds(): Promise<string[]> {
+    const rows = await this.db.queryAll<{ routeId: string }>(
       `SELECT DISTINCT routeId FROM executionMetrics WHERE routeId IS NOT NULL`
     );
     return rows.map((row) => row.routeId);
@@ -202,8 +202,8 @@ export class ExecutionMetricsService {
    * Get all distinct route IDs that have metrics of a specific type.
    * Excludes global metrics (routeId IS NULL).
    */
-  async getDistinctRouteIdsByType(type: MetricType): Promise<number[]> {
-    const rows = await this.db.queryAll<{ routeId: number }>(
+  async getDistinctRouteIdsByType(type: MetricType): Promise<string[]> {
+    const rows = await this.db.queryAll<{ routeId: string }>(
       `SELECT DISTINCT routeId FROM executionMetrics WHERE type = ? AND routeId IS NOT NULL`,
       [type]
     );
@@ -215,7 +215,7 @@ export class ExecutionMetricsService {
    * Start is inclusive, end is exclusive.
    */
   async getByRouteIdTypeAndTimeRange(
-    routeId: number,
+    routeId: string,
     type: MetricType,
     start: Date,
     end: Date
@@ -278,7 +278,7 @@ export class ExecutionMetricsService {
    * Returns the number of deleted metrics.
    */
   async deleteByRouteIdTypeAndTimeRange(
-    routeId: number,
+    routeId: string,
     type: MetricType,
     start: Date,
     end: Date
@@ -394,7 +394,7 @@ export class ExecutionMetricsService {
     type: MetricType,
     start: Date,
     end: Date
-  ): Promise<Map<number, AggregationResult>> {
+  ): Promise<Map<string, AggregationResult>> {
     const rows = await this.db.queryAll<PerRouteAggregationRow>(
       `SELECT
         routeId,
@@ -410,7 +410,7 @@ export class ExecutionMetricsService {
       [type, formatForSqlite(start), formatForSqlite(end)]
     );
 
-    const result = new Map<number, AggregationResult>();
+    const result = new Map<string, AggregationResult>();
     for (const row of rows) {
       if (row.executionCount !== null && row.executionCount > 0) {
         result.set(row.routeId, {

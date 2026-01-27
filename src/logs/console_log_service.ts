@@ -22,7 +22,7 @@ interface ConsoleLogRow {
   [key: string]: unknown;
   id: number;
   requestId: string;
-  routeId: number | null;
+  routeId: string | null;  // SurrealDB RecordId string (was number before routes migration)
   level: string;
   message: string;
   args: string | null;
@@ -252,7 +252,7 @@ export class ConsoleLogService {
    * Retrieve logs for a specific route.
    * Results are ordered from newest to oldest.
    */
-  async getByRouteId(routeId: number, limit?: number): Promise<ConsoleLog[]> {
+  async getByRouteId(routeId: string, limit?: number): Promise<ConsoleLog[]> {
     // Validate limit if provided
     if (limit !== undefined && limit <= 0) {
       throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
@@ -281,7 +281,7 @@ export class ConsoleLogService {
    * Results are ordered from newest to oldest.
    */
   async getByRouteIdBeforeId(
-    routeId: number,
+    routeId: string,
     beforeId: number,
     limit: number
   ): Promise<ConsoleLog[]> {
@@ -435,7 +435,7 @@ export class ConsoleLogService {
    * Delete all logs for a specific route.
    * Returns the number of deleted logs.
    */
-  async deleteByRouteId(routeId: number): Promise<number> {
+  async deleteByRouteId(routeId: string): Promise<number> {
     const result = await this.db.execute(
       `DELETE FROM executionLogs WHERE routeId = ?`,
       [routeId]
@@ -447,8 +447,8 @@ export class ConsoleLogService {
   /**
    * Get all distinct route IDs that have logs.
    */
-  async getDistinctRouteIds(): Promise<number[]> {
-    const rows = await this.db.queryAll<{ routeId: number }>(
+  async getDistinctRouteIds(): Promise<string[]> {
+    const rows = await this.db.queryAll<{ routeId: string }>(
       `SELECT DISTINCT routeId FROM executionLogs WHERE routeId IS NOT NULL`
     );
     return rows.map((row) => row.routeId);
@@ -462,7 +462,7 @@ export class ConsoleLogService {
    * - Gets the id of the Nth newest log
    * - Deletes all logs with id less than that threshold
    */
-  async trimToLimit(routeId: number, maxLogs: number): Promise<number> {
+  async trimToLimit(routeId: string, maxLogs: number): Promise<number> {
     // Find the id threshold - the id of the (maxLogs)th newest log
     // Logs older than this will be deleted
     const thresholdRow = await this.db.queryOne<{ id: number }>(
@@ -492,7 +492,7 @@ export class ConsoleLogService {
     return {
       id: row.id,
       requestId: row.requestId,
-      routeId: row.routeId ?? 0, // Default to 0 for orphaned logs
+      routeId: row.routeId ?? "", // Default to empty string for orphaned logs
       level: row.level as ConsoleLog["level"],
       message: row.message,
       args: row.args ?? undefined,

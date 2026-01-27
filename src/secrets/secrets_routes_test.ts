@@ -93,11 +93,11 @@ integrationTest("GET /api/secrets?scope=global filters by scope", async () => {
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
     const route = await ctx.routesService.getByName("test");
-    await ctx.secretsService.createFunctionSecret(route!.id, "FUNCTION", "value2");
+    await ctx.secretsService.createFunctionSecret(recordIdToString(route!.id), "FUNCTION", "value2");
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/secrets?scope=global");
@@ -123,30 +123,32 @@ integrationTest("GET /api/secrets?scope=function&functionId=1 filters by functio
     await ctx.routesService.addRoute({
       name: "test1",
       handler: "test1.ts",
-      route: "/test1",
+      routePath: "/test1",
       methods: ["GET"],
     });
     await ctx.routesService.addRoute({
       name: "test2",
       handler: "test2.ts",
-      route: "/test2",
+      routePath: "/test2",
       methods: ["GET"],
     });
 
     const route1 = await ctx.routesService.getByName("test1");
     const route2 = await ctx.routesService.getByName("test2");
+    const route1Id = recordIdToString(route1!.id);
+    const route2Id = recordIdToString(route2!.id);
 
-    await ctx.secretsService.createFunctionSecret(route1!.id, "SECRET1", "value1");
-    await ctx.secretsService.createFunctionSecret(route2!.id, "SECRET2", "value2");
+    await ctx.secretsService.createFunctionSecret(route1Id, "SECRET1", "value1");
+    await ctx.secretsService.createFunctionSecret(route2Id, "SECRET2", "value2");
 
     const app = createTestApp(ctx);
-    const res = await app.request(`/api/secrets?scope=function&functionId=${route1!.id}`);
+    const res = await app.request(`/api/secrets?scope=function&functionId=${route1Id}`);
     expect(res.status).toBe(200);
 
     const json = await res.json();
     expect(json.secrets.length).toBe(1);
     expect(json.secrets[0].name).toBe("SECRET1");
-    expect(json.secrets[0].scopeRef).toBe(String(route1!.id));
+    expect(json.secrets[0].scopeRef).toBe(route1Id);
   } finally {
     await ctx.cleanup();
   }
@@ -176,7 +178,8 @@ integrationTest("GET /api/secrets rejects invalid functionId", async () => {
 
   try {
     const app = createTestApp(ctx);
-    const res = await app.request("/api/secrets?functionId=abc");
+    // Use special characters that fail SurrealDB ID validation
+    const res = await app.request("/api/secrets?functionId=@@@");
     expect(res.status).toBe(400);
 
     const json = await res.json();
@@ -302,11 +305,11 @@ integrationTest("GET /api/secrets/by-name/:name?scope=global filters by scope", 
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
     const route = await ctx.routesService.getByName("test");
-    await ctx.secretsService.createFunctionSecret(route!.id, "MY_SECRET", "function_value");
+    await ctx.secretsService.createFunctionSecret(recordIdToString(route!.id), "MY_SECRET", "function_value");
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/secrets/by-name/MY_SECRET?scope=global");
@@ -384,10 +387,11 @@ integrationTest("POST /api/secrets creates function-scoped secret", async () => 
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
     const route = await ctx.routesService.getByName("test");
+    const routeId = recordIdToString(route!.id);
 
     const app = createTestApp(ctx);
     const res = await app.request("/api/secrets", {
@@ -397,7 +401,7 @@ integrationTest("POST /api/secrets creates function-scoped secret", async () => 
         name: "FUNCTION_SECRET",
         value: "func_value",
         scopeType: "function",
-        functionId: route!.id,
+        functionId: routeId,
       }),
     });
 
@@ -407,7 +411,7 @@ integrationTest("POST /api/secrets creates function-scoped secret", async () => 
     expect(json.scopeType).toBe("function");
 
     // Verify secret was created
-    const secrets = await ctx.secretsService.getFunctionSecrets(route!.id);
+    const secrets = await ctx.secretsService.getFunctionSecrets(routeId);
     expect(secrets.length).toBe(1);
     expect(secrets[0].name).toBe("FUNCTION_SECRET");
   } finally {

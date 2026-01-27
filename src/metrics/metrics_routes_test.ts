@@ -8,6 +8,7 @@ import type { RoutesService } from "../routes/routes_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import type { FunctionRoute } from "../routes/routes_service.ts";
 import type { MetricType } from "./types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 interface MetricsTestContext {
   app: Hono;
@@ -28,14 +29,14 @@ async function createTestContext(): Promise<MetricsTestContext> {
   // Create test routes
   await ctx.routesService.addRoute({
     name: "test-function-1",
-    route: "/test1",
+    routePath: "/test1",
     handler: "code/test1.ts",
     methods: ["GET"],
   });
 
   await ctx.routesService.addRoute({
     name: "test-function-2",
-    route: "/test2",
+    routePath: "/test2",
     handler: "code/test2.ts",
     methods: ["GET"],
   });
@@ -68,7 +69,7 @@ async function createTestContext(): Promise<MetricsTestContext> {
 // Helper to insert test metrics
 async function insertMetric(
   service: ExecutionMetricsService,
-  routeId: number | null,
+  routeId: string | null,
   type: MetricType,
   timestamp: Date,
   avgTimeMs = 50,
@@ -114,7 +115,7 @@ integrationTest("GET /api/metrics returns metrics for specific function", async 
 
     await insertMetric(
       ctx.executionMetricsService,
-      ctx.routes.route1.id,
+      recordIdToString(ctx.routes.route1.id),
       "minute",
       timestamp,
       45.5,
@@ -123,13 +124,13 @@ integrationTest("GET /api/metrics returns metrics for specific function", async 
     );
 
     const res = await ctx.app.request(
-      `/?functionId=${ctx.routes.route1.id}&resolution=minutes`,
+      `/?functionId=${recordIdToString(ctx.routes.route1.id)}&resolution=minutes`,
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.data.metrics.length).toBe(1);
-    expect(json.data.functionId).toBe(ctx.routes.route1.id);
+    expect(json.data.functionId).toBe(recordIdToString(ctx.routes.route1.id));
     expect(json.data.resolution).toBe("minutes");
     expect(json.data.metrics[0].avgTimeMs).toBe(45.5);
     expect(json.data.metrics[0].maxTimeMs).toBe(120);
@@ -502,7 +503,7 @@ integrationTest("GET /api/metrics handles metrics with identical timestamps", as
     // Insert two metrics with the exact same timestamp for different routes
     await insertMetric(
       ctx.executionMetricsService,
-      ctx.routes.route1.id,
+      recordIdToString(ctx.routes.route1.id),
       "minute",
       sameTimestamp,
       50,
@@ -511,7 +512,7 @@ integrationTest("GET /api/metrics handles metrics with identical timestamps", as
     );
     await insertMetric(
       ctx.executionMetricsService,
-      ctx.routes.route2.id,
+      recordIdToString(ctx.routes.route2.id),
       "minute",
       sameTimestamp,
       60,
@@ -521,7 +522,7 @@ integrationTest("GET /api/metrics handles metrics with identical timestamps", as
 
     // Query for route1
     const res = await ctx.app.request(
-      `/?functionId=${ctx.routes.route1.id}&resolution=minutes`,
+      `/?functionId=${recordIdToString(ctx.routes.route1.id)}&resolution=minutes`,
     );
     const json = await res.json();
 
