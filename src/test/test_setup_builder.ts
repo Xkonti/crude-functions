@@ -920,7 +920,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     // STEP 12: Create job queue service if needed
     if (this.flags.jobQueueService || this.flags.schedulingService) {
       context.jobQueueService = createJobQueueService(
-        db,
+        surrealFactory,
         context.instanceIdService,
         context.encryptionService,
       );
@@ -932,26 +932,46 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
         const payloadStr = job.payload !== undefined
           ? JSON.stringify(job.payload)
           : null;
-        await db.execute(
-          `INSERT INTO jobQueue (type, status, executionMode, payload, priority, referenceType, referenceId, createdAt)
-           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-          [
-            job.type,
-            job.status ?? "pending",
-            job.executionMode ?? "sequential",
-            payloadStr,
-            job.priority ?? 0,
-            job.referenceType ?? null,
-            job.referenceId ?? null,
-          ],
-        );
+        const referenceIdStr = job.referenceId !== undefined && job.referenceId !== null
+          ? String(job.referenceId)
+          : null;
+        await surrealFactory.withSystemConnection({}, async (db) => {
+          await db.query(
+            `CREATE job SET
+               type = $type,
+               status = $status,
+               executionMode = $executionMode,
+               payload = $payload,
+               result = NONE,
+               processInstanceId = NONE,
+               retryCount = 0,
+               maxRetries = 1,
+               priority = $priority,
+               referenceType = $referenceType,
+               referenceId = $referenceId,
+               createdAt = time::now(),
+               startedAt = NONE,
+               completedAt = NONE,
+               cancelledAt = NONE,
+               cancelReason = NONE`,
+            {
+              type: job.type,
+              status: job.status ?? "pending",
+              executionMode: job.executionMode ?? "sequential",
+              payload: payloadStr,
+              priority: job.priority ?? 0,
+              referenceType: job.referenceType ?? null,
+              referenceId: referenceIdStr,
+            },
+          );
+        });
       }
     }
 
     // STEP 13: Create scheduling service if needed
     if (this.flags.schedulingService || this.flags.codeSourceService) {
       context.schedulingService = createSchedulingService(
-        db,
+        surrealFactory,
         context.jobQueueService,
       );
     }

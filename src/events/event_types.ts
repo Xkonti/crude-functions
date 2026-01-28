@@ -1,3 +1,5 @@
+import type { RecordId } from "surrealdb";
+
 /**
  * All event types in the application.
  * Add new event types here as needed.
@@ -17,11 +19,11 @@ export type EventType = (typeof EventType)[keyof typeof EventType];
  */
 export interface EventPayloads {
   [EventType.JOB_ENQUEUED]: {
-    jobId: number;
+    jobId: RecordId;
     type: string;
   };
   [EventType.JOB_COMPLETED]: {
-    jobId: number;
+    jobId: RecordId;
     type: string;
     status: "completed" | "failed" | "cancelled";
   };

@@ -15,6 +15,7 @@ import {
 import { CancellationTokenImpl } from "./cancellation_token.ts";
 import { logger } from "../utils/logger.ts";
 import { type EventBus, EventType } from "../events/mod.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
  * Background service for processing jobs from the queue.
@@ -64,10 +65,10 @@ export class JobProcessorService {
   private consecutiveFailures = 0;
   private wakeupRequested = false;
 
-  /** Active cancellation tokens for running jobs (job ID -> token) */
-  private readonly activeCancellationTokens = new Map<number, CancellationTokenImpl>();
-  /** Unsubscribe functions for active cancellation subscriptions */
-  private readonly cancellationUnsubscribers = new Map<number, () => void>();
+  /** Active cancellation tokens for running jobs (job ID string -> token) */
+  private readonly activeCancellationTokens = new Map<string, CancellationTokenImpl>();
+  /** Unsubscribe functions for active cancellation subscriptions (job ID string -> unsubscribe) */
+  private readonly cancellationUnsubscribers = new Map<string, () => void>();
   /** Unsubscribe function for job enqueued events */
   private enqueuedUnsubscribe: (() => void) | null = null;
   /** Unsubscribe function for job completed events */
@@ -376,7 +377,7 @@ export class JobProcessorService {
       try {
         await this.jobQueueService.resetOrphanedJob(job.id);
         logger.info(
-          `[JobQueue] Reset orphaned job ${job.id} (type: ${job.type}, ` +
+          `[JobQueue] Reset orphaned job ${recordIdToString(job.id)} (type: ${job.type}, ` +
             `retry: ${job.retryCount + 1}/${job.maxRetries})`,
         );
       } catch (error) {
@@ -389,11 +390,11 @@ export class JobProcessorService {
             maxRetries: job.maxRetries,
           });
           logger.warn(
-            `[JobQueue] Orphaned job ${job.id} exceeded max retries, marked as failed`,
+            `[JobQueue] Orphaned job ${recordIdToString(job.id)} exceeded max retries, marked as failed`,
           );
         } else {
           logger.error(
-            `[JobQueue] Failed to reset orphaned job ${job.id}:`,
+            `[JobQueue] Failed to reset orphaned job ${recordIdToString(job.id)}:`,
             error,
           );
         }
@@ -407,6 +408,7 @@ export class JobProcessorService {
    */
   private async processJob(job: Job): Promise<void> {
     const handler = this.handlers.get(job.type);
+    const jobIdStr = recordIdToString(job.id);
 
     if (!handler) {
       logger.error(`[JobQueue] No handler for job type: ${job.type}`);
@@ -424,7 +426,7 @@ export class JobProcessorService {
       // Check if job was already cancelled before we claim it
       const preCancellation = await this.jobQueueService.getCancellationStatus(job.id);
       if (preCancellation) {
-        logger.info(`[JobQueue] Job ${job.id} was cancelled before processing, marking as cancelled`);
+        logger.info(`[JobQueue] Job ${jobIdStr} was cancelled before processing, marking as cancelled`);
         await this.jobQueueService.markJobCancelled(job.id, preCancellation.reason);
         return;
       }
@@ -433,43 +435,43 @@ export class JobProcessorService {
       const claimedJob = await this.jobQueueService.claimJob(job.id);
 
       // Register token and subscribe to cancellation events
-      this.activeCancellationTokens.set(job.id, cancellationToken);
+      this.activeCancellationTokens.set(jobIdStr, cancellationToken);
       const unsubscribe = this.jobQueueService.subscribeToCancellation(job.id, (event) => {
-        logger.debug(`[JobQueue] Cancellation event received for job ${job.id}`);
+        logger.debug(`[JobQueue] Cancellation event received for job ${jobIdStr}`);
         cancellationToken._cancel(event.reason);
       });
-      this.cancellationUnsubscribers.set(job.id, unsubscribe);
+      this.cancellationUnsubscribers.set(jobIdStr, unsubscribe);
 
-      logger.debug(`[JobQueue] Processing job ${job.id} (type: ${job.type})`);
+      logger.debug(`[JobQueue] Processing job ${jobIdStr} (type: ${job.type})`);
 
       // Execute handler with cancellation token
       const result = await handler(claimedJob, cancellationToken);
 
       // Check if cancellation was requested during execution
       if (cancellationToken.isCancelled) {
-        logger.info(`[JobQueue] Job ${job.id} completed but was cancelled, marking as cancelled`);
+        logger.info(`[JobQueue] Job ${jobIdStr} completed but was cancelled, marking as cancelled`);
         await this.jobQueueService.markJobCancelled(job.id, cancellationToken.reason);
       } else {
         // Mark complete
         await this.jobQueueService.completeJob(job.id, result);
-        logger.info(`[JobQueue] Completed job ${job.id} (type: ${job.type})`);
+        logger.info(`[JobQueue] Completed job ${jobIdStr} (type: ${job.type})`);
       }
     } catch (error) {
       if (error instanceof JobAlreadyClaimedError) {
         // Another process claimed it - not an error
-        logger.debug(`[JobQueue] Job ${job.id} claimed by another process`);
+        logger.debug(`[JobQueue] Job ${jobIdStr} claimed by another process`);
         return;
       }
 
       if (error instanceof JobCancellationError) {
         // Handler threw cancellation error - mark as cancelled
-        logger.info(`[JobQueue] Job ${job.id} cancelled: ${error.reason ?? "no reason provided"}`);
+        logger.info(`[JobQueue] Job ${jobIdStr} cancelled: ${error.reason ?? "no reason provided"}`);
         await this.jobQueueService.markJobCancelled(job.id, error.reason);
         return;
       }
 
       // Handler error or other failure
-      logger.error(`[JobQueue] Job ${job.id} failed:`, error);
+      logger.error(`[JobQueue] Job ${jobIdStr} failed:`, error);
 
       const errorDetails =
         error instanceof Error
@@ -479,11 +481,11 @@ export class JobProcessorService {
       await this.jobQueueService.failJob(job.id, errorDetails);
     } finally {
       // Always clean up the token and subscription
-      this.activeCancellationTokens.delete(job.id);
-      const unsubscribe = this.cancellationUnsubscribers.get(job.id);
+      this.activeCancellationTokens.delete(jobIdStr);
+      const unsubscribe = this.cancellationUnsubscribers.get(jobIdStr);
       if (unsubscribe) {
         unsubscribe();
-        this.cancellationUnsubscribers.delete(job.id);
+        this.cancellationUnsubscribers.delete(jobIdStr);
       }
     }
   }

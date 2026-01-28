@@ -1,4 +1,5 @@
-import type { DatabaseService } from "../database/database_service.ts";
+import type { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { ExecutionMode } from "../jobs/types.ts";
 
@@ -46,8 +47,8 @@ export function isScheduleStatus(status: string): status is ScheduleStatus {
  * A schedule definition.
  */
 export interface Schedule {
-  /** Unique schedule identifier */
-  id: number;
+  /** Unique schedule identifier (SurrealDB RecordId) */
+  id: RecordId;
   /** Unique schedule name (used as API identifier) */
   name: string;
   /** Human-readable description */
@@ -74,10 +75,10 @@ export interface Schedule {
   jobExecutionMode: ExecutionMode;
   /** Job reference type for duplicate detection */
   jobReferenceType: string | null;
-  /** Job reference ID (number or string for named resources) */
-  jobReferenceId: number | string | null;
+  /** Job reference ID (always string in SurrealDB) */
+  jobReferenceId: string | null;
   /** Currently active job ID (for tracking completion) */
-  activeJobId: number | null;
+  activeJobId: RecordId | null;
   /** Consecutive failure count */
   consecutiveFailures: number;
   /** Max failures before error state */
@@ -131,7 +132,7 @@ export interface NewSchedule {
   jobExecutionMode?: ExecutionMode;
   /** Job reference type for duplicate detection */
   jobReferenceType?: string;
-  /** Job reference ID for duplicate detection (number or string for named resources) */
+  /** Job reference ID for duplicate detection (converted to string) */
   jobReferenceId?: number | string;
   /** Max consecutive failures before error state (default: 5) */
   maxConsecutiveFailures?: number;
@@ -207,8 +208,8 @@ export interface SchedulingServiceConfig {
  * Options for SchedulingService constructor.
  */
 export interface SchedulingServiceOptions {
-  /** Database service instance */
-  db: DatabaseService;
+  /** SurrealDB connection factory */
+  surrealFactory: SurrealConnectionFactory;
   /** Job queue service for creating jobs */
   jobQueueService: JobQueueService;
   /** Service configuration */
@@ -216,17 +217,18 @@ export interface SchedulingServiceOptions {
 }
 
 /**
- * Database row type for schedule queries.
+ * Database row type for schedule queries (SurrealDB).
+ * Dates come as SurrealDB DateTime objects - use toDate() helper.
  */
 export interface ScheduleRow {
   [key: string]: unknown; // Index signature for Row compatibility
-  id: number;
+  id: RecordId;
   name: string;
   description: string | null;
   type: string;
   status: string;
-  isPersistent: number;
-  nextRunAt: string | null;
+  isPersistent: boolean;
+  nextRunAt: unknown | null;
   intervalMs: number | null;
   jobType: string;
   jobPayload: string | null;
@@ -234,13 +236,14 @@ export interface ScheduleRow {
   jobMaxRetries: number;
   jobExecutionMode: string;
   jobReferenceType: string | null;
-  jobReferenceId: number | string | null;
-  activeJobId: number | null;
+  jobReferenceId: string | null;
+  activeJobId: RecordId | null;
   consecutiveFailures: number;
   maxConsecutiveFailures: number;
   lastError: string | null;
-  createdAt: string;
-  updatedAt: string;
-  lastTriggeredAt: string | null;
-  lastCompletedAt: string | null;
+  // SurrealDB DateTime objects - use toDate() helper
+  createdAt: unknown;
+  updatedAt: unknown;
+  lastTriggeredAt: unknown | null;
+  lastCompletedAt: unknown | null;
 }

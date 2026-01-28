@@ -1,6 +1,7 @@
 import { Mutex } from "@core/asyncutil/mutex";
-import type { BindValue } from "@db/sqlite";
-import type { DatabaseService } from "../database/database_service.ts";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { recordIdToString, toDate } from "../database/surreal_helpers.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { Job, JobCompletionEvent } from "../jobs/types.ts";
 import {
@@ -28,7 +29,7 @@ import { logger } from "../utils/logger.ts";
 /**
  * Service for managing scheduled job execution.
  *
- * Owns all database access to the schedules table. Other code should
+ * Owns all database access to the schedule table. Other code should
  * never query this table directly - always go through this service.
  *
  * Features:
@@ -40,7 +41,7 @@ import { logger } from "../utils/logger.ts";
  * @example
  * ```typescript
  * const schedulingService = new SchedulingService({
- *   db,
+ *   surrealFactory,
  *   jobQueueService,
  * });
  *
@@ -65,7 +66,7 @@ import { logger } from "../utils/logger.ts";
  * ```
  */
 export class SchedulingService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly jobQueueService: JobQueueService;
   private readonly config: Required<SchedulingServiceConfig>;
   private readonly writeMutex = new Mutex();
@@ -85,7 +86,7 @@ export class SchedulingService {
   };
 
   constructor(options: SchedulingServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.jobQueueService = options.jobQueueService;
     this.config = {
       ...SchedulingService.DEFAULT_CONFIG,
@@ -232,36 +233,64 @@ export class SchedulingService {
         ? JSON.stringify(schedule.jobPayload)
         : null;
 
-    const result = await this.db.execute(
-      `INSERT INTO schedules (
-        name, description, type, isPersistent, nextRunAt, intervalMs,
-        jobType, jobPayload, jobPriority, jobMaxRetries, jobExecutionMode,
-        jobReferenceType, jobReferenceId, maxConsecutiveFailures
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        schedule.name,
-        schedule.description ?? null,
-        schedule.type,
-        (schedule.isPersistent ?? true) ? 1 : 0,
-        nextRunAt?.toISOString() ?? null,
-        schedule.intervalMs ?? null,
-        schedule.jobType,
-        payloadStr,
-        schedule.jobPriority ?? 0,
-        schedule.jobMaxRetries ?? 1,
-        schedule.jobExecutionMode ?? "sequential",
-        schedule.jobReferenceType ?? null,
-        schedule.jobReferenceId ?? null,
-        schedule.maxConsecutiveFailures ?? 5,
-      ],
-    );
+    // Convert referenceId to string if provided
+    const jobReferenceId = schedule.jobReferenceId !== undefined && schedule.jobReferenceId !== null
+      ? String(schedule.jobReferenceId)
+      : null;
 
-    const created = await this.getScheduleInternal(
-      Number(result.lastInsertRowId),
-    );
-    if (!created) {
-      throw new Error("Failed to retrieve created schedule");
-    }
+    const created = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow | undefined]>(
+        `CREATE schedule SET
+           name = $name,
+           description = $description,
+           type = $type,
+           status = 'active',
+           isPersistent = $isPersistent,
+           nextRunAt = $nextRunAt,
+           intervalMs = $intervalMs,
+           jobType = $jobType,
+           jobPayload = $jobPayload,
+           jobPriority = $jobPriority,
+           jobMaxRetries = $jobMaxRetries,
+           jobExecutionMode = $jobExecutionMode,
+           jobReferenceType = $jobReferenceType,
+           jobReferenceId = $jobReferenceId,
+           activeJobId = NONE,
+           consecutiveFailures = 0,
+           maxConsecutiveFailures = $maxConsecutiveFailures,
+           lastError = NONE,
+           createdAt = time::now(),
+           updatedAt = time::now(),
+           lastTriggeredAt = NONE,
+           lastCompletedAt = NONE
+         RETURN AFTER`,
+        {
+          name: schedule.name,
+          description: schedule.description ?? undefined,
+          type: schedule.type,
+          isPersistent: schedule.isPersistent ?? true,
+          nextRunAt: nextRunAt,
+          intervalMs: schedule.intervalMs ?? undefined,
+          jobType: schedule.jobType,
+          jobPayload: payloadStr,
+          jobPriority: schedule.jobPriority ?? 0,
+          jobMaxRetries: schedule.jobMaxRetries ?? 1,
+          jobExecutionMode: schedule.jobExecutionMode ?? "sequential",
+          jobReferenceType: schedule.jobReferenceType ?? undefined,
+          jobReferenceId,
+          maxConsecutiveFailures: schedule.maxConsecutiveFailures ?? 5,
+        },
+      );
+
+      // CREATE returns an array with a single element
+      const row = Array.isArray(result[0]) ? result[0][0] : result[0];
+      if (!row) {
+        throw new Error("Failed to create schedule");
+      }
+      return row;
+    });
+
+    const createdSchedule = this.rowToSchedule(created);
 
     // Reschedule if service is running
     if (this.isRunning()) {
@@ -271,7 +300,7 @@ export class SchedulingService {
     logger.info(
       `[Scheduling] Registered schedule '${schedule.name}' (type: ${schedule.type})`,
     );
-    return created;
+    return createdSchedule;
   }
 
   /**
@@ -302,25 +331,29 @@ export class SchedulingService {
       } catch {
         // Job may have already completed
         logger.debug(
-          `[Scheduling] Could not cancel active job ${schedule.activeJobId}`,
+          `[Scheduling] Could not cancel active job ${recordIdToString(schedule.activeJobId)}`,
         );
       }
     }
 
-    await this.db.execute(
-      `UPDATE schedules
-       SET status = 'completed',
-           nextRunAt = NULL,
-           activeJobId = NULL,
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [schedule.id],
-    );
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow[]]>(
+        `UPDATE $scheduleId SET
+           status = 'completed',
+           nextRunAt = NONE,
+           activeJobId = NONE,
+           updatedAt = time::now()
+         RETURN AFTER`,
+        { scheduleId: schedule.id },
+      );
+      return result[0]?.[0];
+    });
 
-    const updated = await this.getScheduleInternal(schedule.id);
     if (!updated) {
       throw new Error("Failed to retrieve cancelled schedule");
     }
+
+    const updatedSchedule = this.rowToSchedule(updated);
 
     // Reschedule
     if (this.isRunning()) {
@@ -328,7 +361,7 @@ export class SchedulingService {
     }
 
     logger.info(`[Scheduling] Cancelled schedule '${name}'`);
-    return updated;
+    return updatedSchedule;
   }
 
   /**
@@ -351,18 +384,22 @@ export class SchedulingService {
       throw new ScheduleStateError(name, schedule.status, "pause");
     }
 
-    await this.db.execute(
-      `UPDATE schedules
-       SET status = 'paused',
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [schedule.id],
-    );
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow[]]>(
+        `UPDATE $scheduleId SET
+           status = 'paused',
+           updatedAt = time::now()
+         RETURN AFTER`,
+        { scheduleId: schedule.id },
+      );
+      return result[0]?.[0];
+    });
 
-    const updated = await this.getScheduleInternal(schedule.id);
     if (!updated) {
       throw new Error("Failed to retrieve paused schedule");
     }
+
+    const updatedSchedule = this.rowToSchedule(updated);
 
     // Reschedule
     if (this.isRunning()) {
@@ -370,7 +407,7 @@ export class SchedulingService {
     }
 
     logger.info(`[Scheduling] Paused schedule '${name}'`);
-    return updated;
+    return updatedSchedule;
   }
 
   /**
@@ -396,19 +433,23 @@ export class SchedulingService {
     // Calculate nextRunAt - preserve stored time for one-off/dynamic schedules
     const nextRunAt = this.calculateNextRunAtFromNow(schedule, true);
 
-    await this.db.execute(
-      `UPDATE schedules
-       SET status = 'active',
-           nextRunAt = ?,
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [nextRunAt.toISOString(), schedule.id],
-    );
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow[]]>(
+        `UPDATE $scheduleId SET
+           status = 'active',
+           nextRunAt = $nextRunAt,
+           updatedAt = time::now()
+         RETURN AFTER`,
+        { scheduleId: schedule.id, nextRunAt },
+      );
+      return result[0]?.[0];
+    });
 
-    const updated = await this.getScheduleInternal(schedule.id);
     if (!updated) {
       throw new Error("Failed to retrieve resumed schedule");
     }
+
+    const updatedSchedule = this.rowToSchedule(updated);
 
     // Reschedule
     if (this.isRunning()) {
@@ -416,7 +457,7 @@ export class SchedulingService {
     }
 
     logger.info(`[Scheduling] Resumed schedule '${name}'`);
-    return updated;
+    return updatedSchedule;
   }
 
   /**
@@ -436,18 +477,19 @@ export class SchedulingService {
    * @returns Array of schedules
    */
   async getSchedules(status?: ScheduleStatus): Promise<Schedule[]> {
-    let sql = `SELECT * FROM schedules`;
-    const params: string[] = [];
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      if (status) {
+        return await db.query<[ScheduleRow[]]>(
+          `SELECT * FROM schedule WHERE status = $status ORDER BY createdAt ASC`,
+          { status },
+        );
+      }
+      return await db.query<[ScheduleRow[]]>(
+        `SELECT * FROM schedule ORDER BY createdAt ASC`,
+      );
+    });
 
-    if (status) {
-      sql += ` WHERE status = ?`;
-      params.push(status);
-    }
-
-    sql += ` ORDER BY createdAt ASC`;
-
-    const rows = await this.db.queryAll<ScheduleRow>(sql, params);
-    return rows.map((row) => this.rowToSchedule(row));
+    return (rows[0] ?? []).map((row) => this.rowToSchedule(row));
   }
 
   /**
@@ -508,7 +550,9 @@ export class SchedulingService {
       }
     }
 
-    await this.db.execute(`DELETE FROM schedules WHERE id = ?`, [schedule.id]);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(`DELETE $scheduleId`, { scheduleId: schedule.id });
+    });
 
     // Reschedule
     if (this.isRunning()) {
@@ -550,38 +594,31 @@ export class SchedulingService {
     // Validate update values for schedule type
     this.validateScheduleUpdate(schedule, update);
 
-    // Build update fields
-    const fields: string[] = [];
-    const values: BindValue[] = [];
+    // Build update object
+    const updateFields: Record<string, unknown> = {};
 
     if (update.description !== undefined) {
-      fields.push("description = ?");
-      values.push(update.description);
+      updateFields.description = update.description;
     }
 
     if (update.intervalMs !== undefined) {
-      fields.push("intervalMs = ?");
-      values.push(update.intervalMs);
+      updateFields.intervalMs = update.intervalMs;
     }
 
     if (update.jobPayload !== undefined) {
-      fields.push("jobPayload = ?");
-      values.push(JSON.stringify(update.jobPayload));
+      updateFields.jobPayload = JSON.stringify(update.jobPayload);
     }
 
     if (update.jobPriority !== undefined) {
-      fields.push("jobPriority = ?");
-      values.push(update.jobPriority);
+      updateFields.jobPriority = update.jobPriority;
     }
 
     if (update.jobMaxRetries !== undefined) {
-      fields.push("jobMaxRetries = ?");
-      values.push(update.jobMaxRetries);
+      updateFields.jobMaxRetries = update.jobMaxRetries;
     }
 
     if (update.maxConsecutiveFailures !== undefined) {
-      fields.push("maxConsecutiveFailures = ?");
-      values.push(update.maxConsecutiveFailures);
+      updateFields.maxConsecutiveFailures = update.maxConsecutiveFailures;
     }
 
     // Calculate nextRunAt if interval changed or explicitly provided
@@ -591,35 +628,54 @@ export class SchedulingService {
       options,
     );
     if (newNextRunAt !== undefined) {
-      fields.push("nextRunAt = ?");
-      values.push(newNextRunAt?.toISOString() ?? null);
+      updateFields.nextRunAt = newNextRunAt;
     }
 
-    // Add updatedAt
-    fields.push("updatedAt = CURRENT_TIMESTAMP");
+    // Build SET clause dynamically
+    const setClause = Object.keys(updateFields)
+      .map((key) => `${key} = $${key}`)
+      .join(", ");
 
     // Execute update if there are fields to update
-    if (fields.length > 1) {
-      // > 1 because updatedAt is always added
-      values.push(schedule.id);
-      await this.db.execute(
-        `UPDATE schedules SET ${fields.join(", ")} WHERE id = ?`,
-        values,
-      );
+    if (Object.keys(updateFields).length > 0) {
+      const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const result = await db.query<[ScheduleRow[]]>(
+          `UPDATE $scheduleId SET ${setClause}, updatedAt = time::now() RETURN AFTER`,
+          { scheduleId: schedule.id, ...updateFields },
+        );
+        return result[0]?.[0];
+      });
+
+      if (!updated) {
+        throw new Error("Failed to retrieve updated schedule");
+      }
+
+      const updatedSchedule = this.rowToSchedule(updated);
+
+      // Reschedule if service is running
+      if (this.isRunning()) {
+        this.requestReschedule();
+      }
+
+      logger.info(`[Scheduling] Updated schedule '${name}'`);
+      return updatedSchedule;
     }
 
-    const updated = await this.getScheduleInternal(schedule.id);
+    // No fields changed, just update updatedAt
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow[]]>(
+        `UPDATE $scheduleId SET updatedAt = time::now() RETURN AFTER`,
+        { scheduleId: schedule.id },
+      );
+      return result[0]?.[0];
+    });
+
     if (!updated) {
       throw new Error("Failed to retrieve updated schedule");
     }
 
-    // Reschedule if service is running
-    if (this.isRunning()) {
-      this.requestReschedule();
-    }
-
     logger.info(`[Scheduling] Updated schedule '${name}'`);
-    return updated;
+    return this.rowToSchedule(updated);
   }
 
   // ============== Internal Implementation ==============
@@ -765,12 +821,17 @@ export class SchedulingService {
    * Clear transient schedules on startup.
    */
   private async clearTransientSchedules(): Promise<void> {
-    const result = await this.db.execute(
-      `DELETE FROM schedules WHERE isPersistent = 0`,
-    );
-    if (result.changes > 0) {
+    const result = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const deleted = await db.query<[{ count: number }[]]>(
+        `SELECT count() AS count FROM schedule WHERE isPersistent = false GROUP ALL`,
+      );
+      await db.query(`DELETE schedule WHERE isPersistent = false`);
+      return deleted[0]?.[0]?.count ?? 0;
+    });
+
+    if (result > 0) {
       logger.info(
-        `[Scheduling] Cleared ${result.changes} transient schedule(s)`,
+        `[Scheduling] Cleared ${result} transient schedule(s)`,
       );
     }
   }
@@ -781,48 +842,57 @@ export class SchedulingService {
    */
   private async resetStaleActiveJobs(): Promise<void> {
     // Find schedules with activeJobId where the job is no longer active
-    const staleSchedules = await this.db.queryAll<{
-      id: number;
-      name: string;
-      activeJobId: number;
-      [key: string]: unknown;
-    }>(
-      `SELECT s.id, s.name, s.activeJobId
-       FROM schedules s
-       LEFT JOIN jobQueue j ON s.activeJobId = j.id
-       WHERE s.activeJobId IS NOT NULL
-       AND (j.id IS NULL OR j.status NOT IN ('pending', 'running'))`,
-    );
+    const staleSchedules = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Get all schedules with activeJobId set
+      const schedules = await db.query<[ScheduleRow[]]>(
+        `SELECT * FROM schedule WHERE activeJobId IS NOT NONE`,
+      );
 
-    for (const schedule of staleSchedules) {
+      const stale: ScheduleRow[] = [];
+      for (const schedule of schedules[0] ?? []) {
+        // Check if the job exists and is active
+        const job = await db.query<[{ id: RecordId; status: string } | undefined]>(
+          `RETURN $jobId.{ id, status }`,
+          { jobId: schedule.activeJobId },
+        );
+
+        if (!job[0] || (job[0].status !== "pending" && job[0].status !== "running")) {
+          stale.push(schedule);
+        }
+      }
+
+      return stale;
+    });
+
+    for (const scheduleRow of staleSchedules) {
+      const schedule = this.rowToSchedule(scheduleRow);
       logger.info(
         `[Scheduling] Resetting stale activeJobId for schedule '${schedule.name}'`,
       );
-      // For interval schedules, recalculate nextRunAt
-      const fullSchedule = await this.getScheduleInternal(schedule.id);
-      if (!fullSchedule) continue;
 
       if (
-        fullSchedule.type === "sequential_interval" ||
-        fullSchedule.type === "concurrent_interval"
+        schedule.type === "sequential_interval" ||
+        schedule.type === "concurrent_interval"
       ) {
-        const nextRunAt = new Date(Date.now() + (fullSchedule.intervalMs ?? 0));
-        await this.db.execute(
-          `UPDATE schedules
-           SET activeJobId = NULL,
-               nextRunAt = ?,
-               updatedAt = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [nextRunAt.toISOString(), schedule.id],
-        );
+        const nextRunAt = new Date(Date.now() + (schedule.intervalMs ?? 0));
+        await this.surrealFactory.withSystemConnection({}, async (db) => {
+          await db.query(
+            `UPDATE $scheduleId SET
+               activeJobId = NONE,
+               nextRunAt = $nextRunAt,
+               updatedAt = time::now()`,
+            { scheduleId: schedule.id, nextRunAt },
+          );
+        });
       } else {
-        await this.db.execute(
-          `UPDATE schedules
-           SET activeJobId = NULL,
-               updatedAt = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [schedule.id],
-        );
+        await this.surrealFactory.withSystemConnection({}, async (db) => {
+          await db.query(
+            `UPDATE $scheduleId SET
+               activeJobId = NONE,
+               updatedAt = time::now()`,
+            { scheduleId: schedule.id },
+          );
+        });
       }
     }
   }
@@ -842,16 +912,15 @@ export class SchedulingService {
     }
 
     // Find the soonest active schedule
-    const nextSchedule = await this.db.queryOne<{
-      nextRunAt: string;
-      [key: string]: unknown;
-    }>(
-      `SELECT nextRunAt
-       FROM schedules
-       WHERE status = 'active' AND nextRunAt IS NOT NULL
-       ORDER BY nextRunAt ASC
-       LIMIT 1`,
-    );
+    const nextSchedule = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ nextRunAt: unknown }[]]>(
+        `SELECT nextRunAt FROM schedule
+         WHERE status = 'active' AND nextRunAt IS NOT NONE
+         ORDER BY nextRunAt ASC
+         LIMIT 1`,
+      );
+      return result[0]?.[0];
+    });
 
     if (!nextSchedule) {
       logger.debug("[Scheduling] No active schedules to trigger");
@@ -859,7 +928,7 @@ export class SchedulingService {
       return;
     }
 
-    const nextTime = new Date(nextSchedule.nextRunAt);
+    const nextTime = toDate(nextSchedule.nextRunAt);
     this.nextScheduledTime = nextTime;
 
     const delay = Math.max(0, nextTime.getTime() - Date.now());
@@ -889,15 +958,17 @@ export class SchedulingService {
       const now = new Date();
 
       // Find all due schedules
-      const dueSchedules = await this.db.queryAll<ScheduleRow>(
-        `SELECT * FROM schedules
-         WHERE status = 'active'
-         AND nextRunAt IS NOT NULL
-         AND nextRunAt <= ?`,
-        [now.toISOString()],
-      );
+      const dueSchedules = await this.surrealFactory.withSystemConnection({}, async (db) => {
+        return await db.query<[ScheduleRow[]]>(
+          `SELECT * FROM schedule
+           WHERE status = 'active'
+           AND nextRunAt IS NOT NONE
+           AND nextRunAt <= $now`,
+          { now },
+        );
+      });
 
-      for (const row of dueSchedules) {
+      for (const row of dueSchedules[0] ?? []) {
         if (this.stopRequested) break;
 
         const schedule = this.rowToSchedule(row);
@@ -941,47 +1012,50 @@ export class SchedulingService {
     // Update schedule based on type
     if (schedule.type === "one_off") {
       // One-off: mark as completed
-      await this.db.execute(
-        `UPDATE schedules
-         SET status = 'completed',
-             nextRunAt = NULL,
-             activeJobId = ?,
-             lastTriggeredAt = CURRENT_TIMESTAMP,
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             status = 'completed',
+             nextRunAt = NONE,
+             activeJobId = $jobId,
+             lastTriggeredAt = time::now(),
              consecutiveFailures = 0,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [job.id, schedule.id],
-      );
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, jobId: job.id },
+        );
+      });
     } else if (
       schedule.type === "dynamic" ||
       schedule.type === "sequential_interval"
     ) {
       // Dynamic and sequential: wait for job completion before scheduling next
-      await this.db.execute(
-        `UPDATE schedules
-         SET nextRunAt = NULL,
-             activeJobId = ?,
-             lastTriggeredAt = CURRENT_TIMESTAMP,
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             nextRunAt = NONE,
+             activeJobId = $jobId,
+             lastTriggeredAt = time::now(),
              consecutiveFailures = 0,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [job.id, schedule.id],
-      );
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, jobId: job.id },
+        );
+      });
 
       // Subscribe to job completion events
       this.subscribeToJobCompletion(schedule.id, job.id);
     } else if (schedule.type === "concurrent_interval") {
       // Concurrent: schedule next immediately
       const nextRunAt = new Date(Date.now() + schedule.intervalMs!);
-      await this.db.execute(
-        `UPDATE schedules
-         SET nextRunAt = ?,
-             lastTriggeredAt = CURRENT_TIMESTAMP,
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             nextRunAt = $nextRunAt,
+             lastTriggeredAt = time::now(),
              consecutiveFailures = 0,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [nextRunAt.toISOString(), schedule.id],
-      );
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, nextRunAt },
+        );
+      });
     }
 
     return job;
@@ -998,27 +1072,29 @@ export class SchedulingService {
     const errorMessage = error instanceof Error ? error.message : String(error);
 
     if (newFailureCount >= schedule.maxConsecutiveFailures) {
-      await this.db.execute(
-        `UPDATE schedules
-         SET status = 'error',
-             consecutiveFailures = ?,
-             lastError = ?,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [newFailureCount, errorMessage, schedule.id],
-      );
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             status = 'error',
+             consecutiveFailures = $consecutiveFailures,
+             lastError = $lastError,
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, consecutiveFailures: newFailureCount, lastError: errorMessage },
+        );
+      });
       logger.error(
         `[Scheduling] Schedule '${schedule.name}' entered error state after ${newFailureCount} failures`,
       );
     } else {
-      await this.db.execute(
-        `UPDATE schedules
-         SET consecutiveFailures = ?,
-             lastError = ?,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [newFailureCount, errorMessage, schedule.id],
-      );
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             consecutiveFailures = $consecutiveFailures,
+             lastError = $lastError,
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, consecutiveFailures: newFailureCount, lastError: errorMessage },
+        );
+      });
     }
   }
 
@@ -1026,7 +1102,7 @@ export class SchedulingService {
    * Subscribe to job completion events for a schedule.
    * Called when a schedule triggers a job that needs completion tracking.
    */
-  private subscribeToJobCompletion(scheduleId: number, jobId: number): void {
+  private subscribeToJobCompletion(scheduleId: RecordId, jobId: RecordId): void {
     this.jobQueueService.subscribeToCompletion(jobId, async (event: JobCompletionEvent) => {
       await this.handleJobCompletionEvent(scheduleId, event);
     });
@@ -1035,18 +1111,18 @@ export class SchedulingService {
   /**
    * Handle a job completion event from the subscription.
    */
-  private async handleJobCompletionEvent(scheduleId: number, event: JobCompletionEvent): Promise<void> {
+  private async handleJobCompletionEvent(scheduleId: RecordId, event: JobCompletionEvent): Promise<void> {
     const schedule = await this.getScheduleInternal(scheduleId);
     if (!schedule) {
-      logger.warn(`[Scheduling] Schedule ${scheduleId} not found for job ${event.job.id} completion`);
+      logger.warn(`[Scheduling] Schedule ${recordIdToString(scheduleId)} not found for job ${recordIdToString(event.job.id)} completion`);
       return;
     }
 
     // Verify this is still the active job for this schedule
-    if (schedule.activeJobId !== event.job.id) {
+    if (!schedule.activeJobId || recordIdToString(schedule.activeJobId) !== recordIdToString(event.job.id)) {
       logger.debug(
-        `[Scheduling] Job ${event.job.id} completion ignored for schedule '${schedule.name}' ` +
-        `(activeJobId is ${schedule.activeJobId})`
+        `[Scheduling] Job ${recordIdToString(event.job.id)} completion ignored for schedule '${schedule.name}' ` +
+        `(activeJobId is ${schedule.activeJobId ? recordIdToString(schedule.activeJobId) : "null"})`
       );
       return;
     }
@@ -1063,13 +1139,15 @@ export class SchedulingService {
    * Re-subscribe to active jobs on startup (handles orphaned subscriptions from crash).
    */
   private async resubscribeToActiveJobs(): Promise<void> {
-    const waitingSchedules = await this.db.queryAll<ScheduleRow>(
-      `SELECT * FROM schedules
-       WHERE activeJobId IS NOT NULL
-       AND status = 'active'`,
-    );
+    const waitingSchedules = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      return await db.query<[ScheduleRow[]]>(
+        `SELECT * FROM schedule
+         WHERE activeJobId IS NOT NONE
+         AND status = 'active'`,
+      );
+    });
 
-    for (const row of waitingSchedules) {
+    for (const row of waitingSchedules[0] ?? []) {
       const schedule = this.rowToSchedule(row);
       const job = await this.jobQueueService.getJob(schedule.activeJobId!);
 
@@ -1081,7 +1159,7 @@ export class SchedulingService {
 
       // Job still exists - re-subscribe
       logger.debug(
-        `[Scheduling] Re-subscribing to job ${job.id} for schedule '${schedule.name}'`
+        `[Scheduling] Re-subscribing to job ${recordIdToString(job.id)} for schedule '${schedule.name}'`
       );
       this.subscribeToJobCompletion(schedule.id, job.id);
     }
@@ -1095,7 +1173,7 @@ export class SchedulingService {
     job: Job,
   ): Promise<void> {
     logger.debug(
-      `[Scheduling] Job ${job.id} completed for schedule '${schedule.name}'`,
+      `[Scheduling] Job ${recordIdToString(job.id)} completed for schedule '${schedule.name}'`,
     );
 
     let nextRunAt: Date | null = null;
@@ -1107,15 +1185,16 @@ export class SchedulingService {
         nextRunAt = new Date(result.nextRunAt);
       } else {
         // No next time - mark schedule as completed
-        await this.db.execute(
-          `UPDATE schedules
-           SET status = 'completed',
-               activeJobId = NULL,
-               lastCompletedAt = CURRENT_TIMESTAMP,
-               updatedAt = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [schedule.id],
-        );
+        await this.surrealFactory.withSystemConnection({}, async (db) => {
+          await db.query(
+            `UPDATE $scheduleId SET
+               status = 'completed',
+               activeJobId = NONE,
+               lastCompletedAt = time::now(),
+               updatedAt = time::now()`,
+            { scheduleId: schedule.id },
+          );
+        });
         logger.info(
           `[Scheduling] Dynamic schedule '${schedule.name}' completed (no next time)`,
         );
@@ -1129,15 +1208,16 @@ export class SchedulingService {
     }
 
     if (nextRunAt) {
-      await this.db.execute(
-        `UPDATE schedules
-         SET nextRunAt = ?,
-             activeJobId = NULL,
-             lastCompletedAt = CURRENT_TIMESTAMP,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [nextRunAt.toISOString(), schedule.id],
-      );
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             nextRunAt = $nextRunAt,
+             activeJobId = NONE,
+             lastCompletedAt = time::now(),
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, nextRunAt },
+        );
+      });
 
       // Reschedule trigger
       await this.scheduleNextTrigger();
@@ -1149,7 +1229,7 @@ export class SchedulingService {
    */
   private async handleJobFailure(schedule: Schedule, job: Job): Promise<void> {
     logger.warn(
-      `[Scheduling] Job ${job.id} ${job.status} for schedule '${schedule.name}'`,
+      `[Scheduling] Job ${recordIdToString(job.id)} ${job.status} for schedule '${schedule.name}'`,
     );
 
     const newFailureCount = schedule.consecutiveFailures + 1;
@@ -1160,16 +1240,17 @@ export class SchedulingService {
 
     if (newFailureCount >= schedule.maxConsecutiveFailures) {
       // Enter error state
-      await this.db.execute(
-        `UPDATE schedules
-         SET status = 'error',
-             activeJobId = NULL,
-             consecutiveFailures = ?,
-             lastError = ?,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [newFailureCount, errorMessage, schedule.id],
-      );
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             status = 'error',
+             activeJobId = NONE,
+             consecutiveFailures = $consecutiveFailures,
+             lastError = $lastError,
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, consecutiveFailures: newFailureCount, lastError: errorMessage },
+        );
+      });
       logger.error(
         `[Scheduling] Schedule '${schedule.name}' entered error state after ${newFailureCount} job failures`,
       );
@@ -1187,16 +1268,17 @@ export class SchedulingService {
         nextRunAt = new Date();
       }
 
-      await this.db.execute(
-        `UPDATE schedules
-         SET nextRunAt = ?,
-             activeJobId = NULL,
-             consecutiveFailures = ?,
-             lastError = ?,
-             updatedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [nextRunAt.toISOString(), newFailureCount, errorMessage, schedule.id],
-      );
+      await this.surrealFactory.withSystemConnection({}, async (db) => {
+        await db.query(
+          `UPDATE $scheduleId SET
+             nextRunAt = $nextRunAt,
+             activeJobId = NONE,
+             consecutiveFailures = $consecutiveFailures,
+             lastError = $lastError,
+             updatedAt = time::now()`,
+          { scheduleId: schedule.id, nextRunAt, consecutiveFailures: newFailureCount, lastError: errorMessage },
+        );
+      });
 
       await this.scheduleNextTrigger();
     }
@@ -1213,35 +1295,44 @@ export class SchedulingService {
     // Calculate nextRunAt - don't preserve stored time since job was deleted
     const nextRunAt = this.calculateNextRunAtFromNow(schedule, false);
 
-    await this.db.execute(
-      `UPDATE schedules
-       SET nextRunAt = ?,
-           activeJobId = NULL,
-           updatedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [nextRunAt.toISOString(), schedule.id],
-    );
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `UPDATE $scheduleId SET
+           nextRunAt = $nextRunAt,
+           activeJobId = NONE,
+           updatedAt = time::now()`,
+        { scheduleId: schedule.id, nextRunAt },
+      );
+    });
 
     await this.scheduleNextTrigger();
   }
 
   // ============== Query Helpers ==============
 
-  private async getScheduleInternal(id: number): Promise<Schedule | null> {
-    const row = await this.db.queryOne<ScheduleRow>(
-      `SELECT * FROM schedules WHERE id = ?`,
-      [id],
-    );
+  private async getScheduleInternal(id: RecordId): Promise<Schedule | null> {
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow | undefined]>(
+        `RETURN $scheduleId.*`,
+        { scheduleId: id },
+      );
+      return result[0];
+    });
+
     return row ? this.rowToSchedule(row) : null;
   }
 
   private async getScheduleByNameInternal(
     name: string,
   ): Promise<Schedule | null> {
-    const row = await this.db.queryOne<ScheduleRow>(
-      `SELECT * FROM schedules WHERE name = ?`,
-      [name],
-    );
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[ScheduleRow[]]>(
+        `SELECT * FROM schedule WHERE name = $name LIMIT 1`,
+        { name },
+      );
+      return result[0]?.[0];
+    });
+
     return row ? this.rowToSchedule(row) : null;
   }
 
@@ -1261,7 +1352,7 @@ export class SchedulingService {
         payload = JSON.parse(row.jobPayload);
       } catch (e) {
         logger.warn(
-          `[Scheduling] Failed to parse jobPayload for schedule ${row.id}, using raw value:`,
+          `[Scheduling] Failed to parse jobPayload for schedule ${recordIdToString(row.id)}, using raw value:`,
           e,
         );
         payload = row.jobPayload;
@@ -1271,30 +1362,30 @@ export class SchedulingService {
     return {
       id: row.id,
       name: row.name,
-      description: row.description,
+      description: row.description ?? null,
       type: row.type,
       status: row.status,
-      isPersistent: row.isPersistent === 1,
-      nextRunAt: row.nextRunAt ? new Date(row.nextRunAt) : null,
-      intervalMs: row.intervalMs,
+      isPersistent: row.isPersistent,
+      nextRunAt: row.nextRunAt ? toDate(row.nextRunAt) : null,
+      intervalMs: row.intervalMs ?? null,
       jobType: row.jobType,
       jobPayload: payload,
       jobPriority: row.jobPriority,
       jobMaxRetries: row.jobMaxRetries,
       jobExecutionMode: row.jobExecutionMode as Schedule["jobExecutionMode"],
-      jobReferenceType: row.jobReferenceType,
-      jobReferenceId: row.jobReferenceId,
-      activeJobId: row.activeJobId,
+      jobReferenceType: row.jobReferenceType ?? null,
+      jobReferenceId: row.jobReferenceId ?? null,
+      activeJobId: row.activeJobId ?? null,
       consecutiveFailures: row.consecutiveFailures,
-      maxConsecutiveFailures: row.maxConsecutiveFailures,
-      lastError: row.lastError,
-      createdAt: new Date(row.createdAt),
-      updatedAt: new Date(row.updatedAt),
+      maxConsecutiveFailures: row.maxConsecutiveFailures ?? null,
+      lastError: row.lastError ?? null,
+      createdAt: toDate(row.createdAt),
+      updatedAt: toDate(row.updatedAt),
       lastTriggeredAt: row.lastTriggeredAt
-        ? new Date(row.lastTriggeredAt)
+        ? toDate(row.lastTriggeredAt)
         : null,
       lastCompletedAt: row.lastCompletedAt
-        ? new Date(row.lastCompletedAt)
+        ? toDate(row.lastCompletedAt)
         : null,
     };
   }

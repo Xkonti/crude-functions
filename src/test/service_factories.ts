@@ -418,15 +418,15 @@ export function createInstanceIdService(): InstanceIdService {
 
 /**
  * Creates the JobQueueService.
- * Requires database and instance ID service. Encryption is optional.
+ * Requires SurrealDB connection factory and instance ID service. Encryption is optional.
  */
 export function createJobQueueService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   instanceIdService: InstanceIdService,
   encryptionService?: VersionedEncryptionService,
 ): JobQueueService {
   return new JobQueueService({
-    db,
+    surrealFactory,
     instanceIdService,
     encryptionService,
   });
@@ -438,14 +438,14 @@ export function createJobQueueService(
 
 /**
  * Creates the SchedulingService.
- * Requires database and job queue service.
+ * Requires SurrealDB connection factory and job queue service.
  */
 export function createSchedulingService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   jobQueueService: JobQueueService,
 ): SchedulingService {
   return new SchedulingService({
-    db,
+    surrealFactory,
     jobQueueService,
   });
 }

@@ -1,5 +1,6 @@
 import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
+import { RecordId } from "surrealdb";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { JobProcessorService } from "./job_processor_service.ts";
 import { JobCancellationError } from "./errors.ts";
@@ -429,7 +430,7 @@ integrationTest("JobProcessorService processes multiple jobs in sequence", async
   });
 
   try {
-    const processedIds: number[] = [];
+    const processedIds: RecordId[] = [];
 
     processor.registerHandler("sequential-job", (job, _token) => {
       processedIds.push(job.id);
@@ -483,7 +484,7 @@ integrationTest("JobProcessorService passes full job context to handler", async 
       payload: { data: "test" },
       priority: 5,
       referenceType: "test-entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     await processor.processOne();

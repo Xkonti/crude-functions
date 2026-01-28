@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { RecordId } from "surrealdb";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
 import { JobProcessorService } from "../jobs/job_processor_service.ts";

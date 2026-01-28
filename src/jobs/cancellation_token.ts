@@ -1,3 +1,4 @@
+import type { RecordId } from "surrealdb";
 import type { CancellationToken } from "./types.ts";
 import { JobCancellationError } from "./errors.ts";
 
@@ -33,11 +34,11 @@ import { JobCancellationError } from "./errors.ts";
 export class CancellationTokenImpl implements CancellationToken {
   private _isCancelled = false;
   private _reason?: string;
-  private _jobId: number;
+  private _jobId: RecordId;
   private _resolveWhenCancelled?: () => void;
   private _whenCancelledPromise: Promise<void>;
 
-  constructor(jobId: number) {
+  constructor(jobId: RecordId) {
     this._jobId = jobId;
     this._whenCancelledPromise = new Promise<void>((resolve) => {
       this._resolveWhenCancelled = resolve;

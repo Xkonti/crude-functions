@@ -1,5 +1,7 @@
 import { Mutex } from "@core/asyncutil/mutex";
-import type { DatabaseService } from "../database/database_service.ts";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { recordIdToString, toDate } from "../database/surreal_helpers.ts";
 import type { InstanceIdService } from "../instance/instance_id_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type {
@@ -24,9 +26,9 @@ import {
 import { type EventBus, EventType } from "../events/mod.ts";
 
 /**
- * Service for managing job queue entries in SQLite database.
+ * Service for managing job queue entries in SurrealDB.
  *
- * Owns all database access to the jobQueue table. Other code should
+ * Owns all database access to the job table. Other code should
  * never query this table directly - always go through this service.
  *
  * Features:
@@ -38,7 +40,7 @@ import { type EventBus, EventType } from "../events/mod.ts";
  * @example
  * ```typescript
  * const jobQueueService = new JobQueueService({
- *   db,
+ *   surrealFactory,
  *   instanceIdService,
  *   encryptionService, // optional
  * });
@@ -46,26 +48,26 @@ import { type EventBus, EventType } from "../events/mod.ts";
  * // Enqueue a job
  * const job = await jobQueueService.enqueue({
  *   type: "process-upload",
- *   payload: { fileId: 123 },
+ *   payload: { fileId: "123" },
  *   referenceType: "file",
- *   referenceId: 123,
+ *   referenceId: "123",
  * });
  * ```
  */
 export class JobQueueService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly instanceIdService: InstanceIdService;
   private readonly encryptionService?: IEncryptionService;
   private readonly eventBus?: EventBus;
   private readonly writeMutex = new Mutex();
 
-  /** Per-job subscribers for completion events (completed/failed/cancelled) */
-  private readonly completionSubscribers = new Map<number, JobCompletionSubscriber[]>();
-  /** Per-job subscribers for cancellation request events */
-  private readonly cancellationSubscribers = new Map<number, JobCancellationSubscriber[]>();
+  /** Per-job subscribers for completion events (completed/failed/cancelled) - keyed by recordIdToString */
+  private readonly completionSubscribers = new Map<string, JobCompletionSubscriber[]>();
+  /** Per-job subscribers for cancellation request events - keyed by recordIdToString */
+  private readonly cancellationSubscribers = new Map<string, JobCancellationSubscriber[]>();
 
   constructor(options: JobQueueServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.instanceIdService = options.instanceIdService;
     this.encryptionService = options.encryptionService;
     this.eventBus = options.eventBus;
@@ -89,51 +91,80 @@ export class JobQueueService {
 
     const executionMode: ExecutionMode = job.executionMode ?? "sequential";
 
-    // Check for existing active job if reference is provided and mode is sequential
-    if (executionMode === "sequential" && job.referenceType && job.referenceId) {
-      const existing = await this.db.queryOne<{ id: number }>(
-        `SELECT id FROM jobQueue
-         WHERE referenceType = ? AND referenceId = ?
-         AND status IN ('pending', 'running')
-         AND executionMode = 'sequential'`,
-        [job.referenceType, job.referenceId],
-      );
+    // Convert referenceId to string if provided
+    const referenceId = job.referenceId !== undefined && job.referenceId !== null
+      ? String(job.referenceId)
+      : undefined;
 
-      if (existing) {
-        throw new DuplicateActiveJobError(job.referenceType, job.referenceId);
+    // Check for existing active job if reference is provided and mode is sequential
+    if (executionMode === "sequential" && job.referenceType && referenceId) {
+      const existing = await this.surrealFactory.withSystemConnection({}, async (db) => {
+        return await db.query<[{ id: RecordId }[] | undefined]>(
+          `SELECT id FROM job
+           WHERE referenceType = $referenceType AND referenceId = $referenceId
+           AND status IN ['pending', 'running']
+           AND executionMode = 'sequential'
+           LIMIT 1`,
+          { referenceType: job.referenceType, referenceId },
+        );
+      });
+
+      if (existing[0] && existing[0].length > 0) {
+        throw new DuplicateActiveJobError(job.referenceType, referenceId);
       }
     }
 
     // Serialize payload (with optional encryption)
     const payloadStr = await this.serializePayload(job.payload);
 
-    const result = await this.db.execute(
-      `INSERT INTO jobQueue (type, status, executionMode, payload, maxRetries, priority,
-                             referenceType, referenceId, createdAt)
-       VALUES (?, 'pending', ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-      [
-        job.type,
-        executionMode,
-        payloadStr,
-        job.maxRetries ?? 1,
-        job.priority ?? 0,
-        job.referenceType ?? null,
-        job.referenceId ?? null,
-      ],
-    );
+    const created = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[JobRow | undefined]>(
+        `CREATE job SET
+           type = $type,
+           status = 'pending',
+           executionMode = $executionMode,
+           payload = $payload,
+           result = NONE,
+           processInstanceId = NONE,
+           retryCount = 0,
+           maxRetries = $maxRetries,
+           priority = $priority,
+           referenceType = $referenceType,
+           referenceId = $referenceId,
+           createdAt = time::now(),
+           startedAt = NONE,
+           completedAt = NONE,
+           cancelledAt = NONE,
+           cancelReason = NONE
+         RETURN AFTER`,
+        {
+          type: job.type,
+          executionMode,
+          payload: payloadStr,
+          maxRetries: job.maxRetries ?? 1,
+          priority: job.priority ?? 0,
+          referenceType: job.referenceType ?? undefined,
+          referenceId,
+        },
+      );
 
-    const created = await this.getJobInternal(Number(result.lastInsertRowId));
-    if (!created) {
-      throw new Error("Failed to retrieve created job");
-    }
+      // CREATE returns an array with a single element
+      const row = Array.isArray(result[0]) ? result[0][0] : result[0];
+      if (!row) {
+        throw new Error("Failed to create job");
+      }
+      return row;
+    });
+
+    const createdJob = await this.rowToJob(created);
 
     // Publish event for immediate processing (fire-and-forget)
     this.eventBus?.publish(EventType.JOB_ENQUEUED, {
-      jobId: created.id,
-      type: created.type,
+      jobId: createdJob.id,
+      type: createdJob.type,
     });
 
-    return created;
+    return createdJob;
   }
 
   /**
@@ -159,24 +190,24 @@ export class JobQueueService {
   /**
    * Get a single job by ID.
    *
-   * @param id - Job ID
+   * @param id - Job ID (RecordId)
    * @returns The job with decrypted payload, or null if not found
    */
-  async getJob(id: number): Promise<Job | null> {
+  async getJob(id: RecordId): Promise<Job | null> {
     return await this.getJobInternal(id);
   }
 
   /**
    * Internal method to get a job by ID (used by both public and internal methods).
    */
-  private async getJobInternal(id: number): Promise<Job | null> {
-    const row = await this.db.queryOne<JobRow>(
-      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-              retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt, cancelledAt, cancelReason
-       FROM jobQueue WHERE id = ?`,
-      [id],
-    );
+  private async getJobInternal(id: RecordId): Promise<Job | null> {
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[JobRow | undefined]>(
+        `RETURN $jobId.*`,
+        { jobId: id },
+      );
+      return result[0];
+    });
 
     if (!row) {
       return null;
@@ -193,17 +224,16 @@ export class JobQueueService {
    * @returns Array of jobs matching the status
    */
   async getJobsByStatus(status: JobStatus): Promise<Job[]> {
-    const rows = await this.db.queryAll<JobRow>(
-      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-              retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt, cancelledAt, cancelReason
-       FROM jobQueue
-       WHERE status = ?
-       ORDER BY priority DESC, createdAt ASC`,
-      [status],
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      return await db.query<[JobRow[]]>(
+        `SELECT * FROM job
+         WHERE status = $status
+         ORDER BY priority DESC, createdAt ASC`,
+        { status },
+      );
+    });
 
-    return Promise.all(rows.map((row) => this.rowToJob(row)));
+    return Promise.all((rows[0] ?? []).map((row) => this.rowToJob(row)));
   }
 
   /**
@@ -215,44 +245,47 @@ export class JobQueueService {
    * @returns Array of matching jobs
    */
   async getJobsByType(type: string, status?: JobStatus): Promise<Job[]> {
-    let sql = `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-                      retryCount, maxRetries, priority, referenceType, referenceId,
-                      createdAt, startedAt, completedAt, cancelledAt, cancelReason
-               FROM jobQueue
-               WHERE type = ?`;
-    const params: (string | number)[] = [type];
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      if (status) {
+        return await db.query<[JobRow[]]>(
+          `SELECT * FROM job
+           WHERE type = $type AND status = $status
+           ORDER BY priority DESC, createdAt ASC`,
+          { type, status },
+        );
+      }
+      return await db.query<[JobRow[]]>(
+        `SELECT * FROM job
+         WHERE type = $type
+         ORDER BY priority DESC, createdAt ASC`,
+        { type },
+      );
+    });
 
-    if (status) {
-      sql += ` AND status = ?`;
-      params.push(status);
-    }
-
-    sql += ` ORDER BY priority DESC, createdAt ASC`;
-
-    const rows = await this.db.queryAll<JobRow>(sql, params);
-    return Promise.all(rows.map((row) => this.rowToJob(row)));
+    return Promise.all((rows[0] ?? []).map((row) => this.rowToJob(row)));
   }
 
   /**
    * Check if an active (pending/running) job exists for a reference.
    *
    * @param referenceType - Reference type (e.g., "code_source", "file")
-   * @param referenceId - Reference ID
+   * @param referenceId - Reference ID (string)
    * @returns The active job if it exists, null otherwise
    */
   async getActiveJobForReference(
     referenceType: string,
-    referenceId: number,
+    referenceId: string,
   ): Promise<Job | null> {
-    const row = await this.db.queryOne<JobRow>(
-      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-              retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt, cancelledAt, cancelReason
-       FROM jobQueue
-       WHERE referenceType = ? AND referenceId = ?
-       AND status IN ('pending', 'running')`,
-      [referenceType, referenceId],
-    );
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[JobRow[]]>(
+        `SELECT * FROM job
+         WHERE referenceType = $referenceType AND referenceId = $referenceId
+         AND status IN ['pending', 'running']
+         LIMIT 1`,
+        { referenceType, referenceId },
+      );
+      return result[0]?.[0];
+    });
 
     if (!row) {
       return null;
@@ -270,21 +303,25 @@ export class JobQueueService {
    * @returns The next job to process, or null if queue is empty
    */
   async getNextPendingJob(type?: string): Promise<Job | null> {
-    let sql = `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-                      retryCount, maxRetries, priority, referenceType, referenceId,
-                      createdAt, startedAt, completedAt, cancelledAt, cancelReason
-               FROM jobQueue
-               WHERE status = 'pending' AND cancelledAt IS NULL`;
-    const params: string[] = [];
-
-    if (type) {
-      sql += ` AND type = ?`;
-      params.push(type);
-    }
-
-    sql += ` ORDER BY priority DESC, createdAt ASC LIMIT 1`;
-
-    const row = await this.db.queryOne<JobRow>(sql, params);
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      if (type) {
+        const result = await db.query<[JobRow[]]>(
+          `SELECT * FROM job
+           WHERE status = 'pending' AND cancelledAt IS NONE AND type = $type
+           ORDER BY priority DESC, createdAt ASC
+           LIMIT 1`,
+          { type },
+        );
+        return result[0]?.[0];
+      }
+      const result = await db.query<[JobRow[]]>(
+        `SELECT * FROM job
+         WHERE status = 'pending' AND cancelledAt IS NONE
+         ORDER BY priority DESC, createdAt ASC
+         LIMIT 1`,
+      );
+      return result[0]?.[0];
+    });
 
     if (!row) {
       return null;
@@ -301,27 +338,31 @@ export class JobQueueService {
    *
    * Uses optimistic concurrency: only succeeds if job is still pending.
    *
-   * @param id - Job ID to claim
+   * @param id - Job ID to claim (RecordId)
    * @returns The claimed job with updated status
    * @throws {JobNotFoundError} If job doesn't exist
    * @throws {JobAlreadyClaimedError} If job is not pending (race condition)
    */
-  async claimJob(id: number): Promise<Job> {
+  async claimJob(id: RecordId): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
     const instanceId = this.instanceIdService.getId();
 
-    // Atomic claim with optimistic concurrency
-    const result = await this.db.execute(
-      `UPDATE jobQueue
-       SET status = 'running',
-           processInstanceId = ?,
-           startedAt = CURRENT_TIMESTAMP
-       WHERE id = ? AND status = 'pending'`,
-      [instanceId, id],
-    );
+    const result = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Atomic claim with optimistic concurrency
+      const updated = await db.query<[JobRow[]]>(
+        `UPDATE $jobId SET
+           status = 'running',
+           processInstanceId = $instanceId,
+           startedAt = time::now()
+         WHERE status = 'pending'
+         RETURN AFTER`,
+        { jobId: id, instanceId },
+      );
+      return updated[0];
+    });
 
-    if (result.changes === 0) {
+    if (!result || result.length === 0) {
       // Check if job exists at all
       const job = await this.getJobInternal(id);
       if (!job) {
@@ -331,44 +372,40 @@ export class JobQueueService {
       throw new JobAlreadyClaimedError(id);
     }
 
-    const claimed = await this.getJobInternal(id);
-    if (!claimed) {
-      throw new Error("Failed to retrieve claimed job");
-    }
-    return claimed;
+    return this.rowToJob(result[0]);
   }
 
   /**
    * Mark a job as completed with result data.
    * Notifies all completion subscribers and deletes the job from the database.
    *
-   * @param id - Job ID
+   * @param id - Job ID (RecordId)
    * @param result - Result data (will be JSON serialized)
    * @returns The completed job (note: job is deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    */
-  async completeJob(id: number, result?: unknown): Promise<Job> {
+  async completeJob(id: RecordId, result?: unknown): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
     const resultStr = result !== undefined ? JSON.stringify(result) : null;
 
-    const execResult = await this.db.execute(
-      `UPDATE jobQueue
-       SET status = 'completed',
-           result = ?,
-           completedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [resultStr, id],
-    );
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const rows = await db.query<[JobRow[]]>(
+        `UPDATE $jobId SET
+           status = 'completed',
+           result = $result,
+           completedAt = time::now()
+         RETURN AFTER`,
+        { jobId: id, result: resultStr },
+      );
+      return rows[0]?.[0];
+    });
 
-    if (execResult.changes === 0) {
+    if (!updated) {
       throw new JobNotFoundError(id);
     }
 
-    const completed = await this.getJobInternal(id);
-    if (!completed) {
-      throw new Error("Failed to retrieve completed job");
-    }
+    const completed = await this.rowToJob(updated);
 
     // Notify subscribers and delete job
     await this.notifyCompletionAndDelete(completed, "completed");
@@ -380,33 +417,33 @@ export class JobQueueService {
    * Mark a job as failed with error details.
    * Notifies all completion subscribers and deletes the job from the database.
    *
-   * @param id - Job ID
+   * @param id - Job ID (RecordId)
    * @param error - Error details (will be JSON serialized)
    * @returns The failed job (note: job is deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    */
-  async failJob(id: number, error: unknown): Promise<Job> {
+  async failJob(id: RecordId, error: unknown): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
     const errorStr = JSON.stringify(error);
 
-    const result = await this.db.execute(
-      `UPDATE jobQueue
-       SET status = 'failed',
-           result = ?,
-           completedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [errorStr, id],
-    );
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const rows = await db.query<[JobRow[]]>(
+        `UPDATE $jobId SET
+           status = 'failed',
+           result = $error,
+           completedAt = time::now()
+         RETURN AFTER`,
+        { jobId: id, error: errorStr },
+      );
+      return rows[0]?.[0];
+    });
 
-    if (result.changes === 0) {
+    if (!updated) {
       throw new JobNotFoundError(id);
     }
 
-    const failed = await this.getJobInternal(id);
-    if (!failed) {
-      throw new Error("Failed to retrieve failed job");
-    }
+    const failed = await this.rowToJob(updated);
 
     // Notify subscribers and delete job
     await this.notifyCompletionAndDelete(failed, "failed");
@@ -425,32 +462,30 @@ export class JobQueueService {
   async getOrphanedJobs(): Promise<Job[]> {
     const currentInstanceId = this.instanceIdService.getId();
 
-    // Find running jobs that belong to a different process
-    const rows = await this.db.queryAll<JobRow>(
-      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-              retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt, cancelledAt, cancelReason
-       FROM jobQueue
-       WHERE status = 'running'
-       AND processInstanceId != ?
-       AND processInstanceId IS NOT NULL
-       ORDER BY priority DESC, createdAt ASC`,
-      [currentInstanceId],
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      return await db.query<[JobRow[]]>(
+        `SELECT * FROM job
+         WHERE status = 'running'
+         AND processInstanceId != $instanceId
+         AND processInstanceId IS NOT NONE
+         ORDER BY priority DESC, createdAt ASC`,
+        { instanceId: currentInstanceId },
+      );
+    });
 
-    return Promise.all(rows.map((row) => this.rowToJob(row)));
+    return Promise.all((rows[0] ?? []).map((row) => this.rowToJob(row)));
   }
 
   /**
    * Reset an orphaned job back to pending status for retry.
    * Increments retryCount. Fails if maxRetries exceeded.
    *
-   * @param id - Job ID to reset
+   * @param id - Job ID to reset (RecordId)
    * @returns The reset job with incremented retryCount
    * @throws {JobNotFoundError} If job doesn't exist
    * @throws {MaxRetriesExceededError} If retryCount >= maxRetries
    */
-  async resetOrphanedJob(id: number): Promise<Job> {
+  async resetOrphanedJob(id: RecordId): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
     const job = await this.getJobInternal(id);
@@ -463,21 +498,24 @@ export class JobQueueService {
       throw new MaxRetriesExceededError(id, job.retryCount, job.maxRetries);
     }
 
-    await this.db.execute(
-      `UPDATE jobQueue
-       SET status = 'pending',
-           processInstanceId = NULL,
-           startedAt = NULL,
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const rows = await db.query<[JobRow[]]>(
+        `UPDATE $jobId SET
+           status = 'pending',
+           processInstanceId = NONE,
+           startedAt = NONE,
            retryCount = retryCount + 1
-       WHERE id = ?`,
-      [id],
-    );
+         RETURN AFTER`,
+        { jobId: id },
+      );
+      return rows[0]?.[0];
+    });
 
-    const reset = await this.getJobInternal(id);
-    if (!reset) {
+    if (!updated) {
       throw new Error("Failed to retrieve reset job");
     }
-    return reset;
+
+    return this.rowToJob(updated);
   }
 
   // ============== Cancellation Operations ==============
@@ -488,13 +526,13 @@ export class JobQueueService {
    * For pending jobs: Sets status to 'cancelled', notifies subscribers, and deletes the job.
    * For running jobs: Sets cancelledAt to signal handler to stop via cancellation event.
    *
-   * @param id - Job ID to cancel
+   * @param id - Job ID to cancel (RecordId)
    * @param options - Optional cancellation options
    * @returns The updated job (note: pending jobs are deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    * @throws {JobNotCancellableError} If job is already completed/failed/cancelled
    */
-  async cancelJob(id: number, options?: { reason?: string }): Promise<Job> {
+  async cancelJob(id: RecordId, options?: { reason?: string }): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
     const job = await this.getJobInternal(id);
@@ -516,20 +554,24 @@ export class JobQueueService {
 
     if (job.status === "pending") {
       // Pending jobs can be cancelled immediately
-      await this.db.execute(
-        `UPDATE jobQueue
-         SET status = 'cancelled',
-             cancelledAt = CURRENT_TIMESTAMP,
-             cancelReason = ?,
-             completedAt = CURRENT_TIMESTAMP
-         WHERE id = ?`,
-        [reason, id],
-      );
+      const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const rows = await db.query<[JobRow[]]>(
+          `UPDATE $jobId SET
+             status = 'cancelled',
+             cancelledAt = time::now(),
+             cancelReason = $reason,
+             completedAt = time::now()
+           RETURN AFTER`,
+          { jobId: id, reason },
+        );
+        return rows[0]?.[0];
+      });
 
-      const cancelled = await this.getJobInternal(id);
-      if (!cancelled) {
+      if (!updated) {
         throw new Error("Failed to retrieve cancelled job");
       }
+
+      const cancelled = await this.rowToJob(updated);
 
       // Notify subscribers and delete job
       await this.notifyCompletionAndDelete(cancelled, "cancelled");
@@ -537,22 +579,25 @@ export class JobQueueService {
       return cancelled;
     } else {
       // Running jobs: set cancelledAt to signal handler
-      await this.db.execute(
-        `UPDATE jobQueue
-         SET cancelledAt = CURRENT_TIMESTAMP,
-             cancelReason = ?
-         WHERE id = ?`,
-        [reason, id],
-      );
+      const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+        const rows = await db.query<[JobRow[]]>(
+          `UPDATE $jobId SET
+             cancelledAt = time::now(),
+             cancelReason = $reason
+           RETURN AFTER`,
+          { jobId: id, reason },
+        );
+        return rows[0]?.[0];
+      });
+
+      if (!updated) {
+        throw new Error("Failed to retrieve cancelled job");
+      }
 
       // Notify cancellation subscribers (processor will handle the token)
       this.notifyCancellationRequest(id, reason ?? undefined);
 
-      const updated = await this.getJobInternal(id);
-      if (!updated) {
-        throw new Error("Failed to retrieve cancelled job");
-      }
-      return updated;
+      return this.rowToJob(updated);
     }
   }
 
@@ -567,70 +612,72 @@ export class JobQueueService {
   async cancelJobs(options: {
     type?: string;
     referenceType?: string;
-    referenceId?: number;
+    referenceId?: string;
     reason?: string;
   }): Promise<number> {
     using _lock = await this.writeMutex.acquire();
 
-    const conditions: string[] = ["status IN ('pending', 'running')", "cancelledAt IS NULL"];
-    const params: (string | number)[] = [];
+    const conditions: string[] = ["status IN ['pending', 'running']", "cancelledAt IS NONE"];
+    const params: Record<string, unknown> = {};
 
     if (options.type) {
-      conditions.push("type = ?");
-      params.push(options.type);
+      conditions.push("type = $type");
+      params.type = options.type;
     }
     if (options.referenceType) {
-      conditions.push("referenceType = ?");
-      params.push(options.referenceType);
+      conditions.push("referenceType = $referenceType");
+      params.referenceType = options.referenceType;
     }
     if (options.referenceId !== undefined) {
-      conditions.push("referenceId = ?");
-      params.push(options.referenceId);
+      conditions.push("referenceId = $referenceId");
+      params.referenceId = options.referenceId;
     }
 
     const reason = options.reason ?? null;
 
     // Find all matching jobs first
-    const rows = await this.db.queryAll<JobRow>(
-      `SELECT id, type, status, executionMode, payload, result, processInstanceId,
-              retryCount, maxRetries, priority, referenceType, referenceId,
-              createdAt, startedAt, completedAt, cancelledAt, cancelReason
-       FROM jobQueue
-       WHERE ${conditions.join(" AND ")}`,
-      params,
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      return await db.query<[JobRow[]]>(
+        `SELECT * FROM job WHERE ${conditions.join(" AND ")}`,
+        params,
+      );
+    });
 
     let cancelledCount = 0;
 
-    for (const row of rows) {
+    for (const row of rows[0] ?? []) {
       const job = await this.rowToJob(row);
 
       if (job.status === "pending") {
         // Cancel pending jobs immediately
-        await this.db.execute(
-          `UPDATE jobQueue
-           SET status = 'cancelled',
-               cancelledAt = CURRENT_TIMESTAMP,
-               cancelReason = ?,
-               completedAt = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [reason, job.id],
-        );
+        const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+          const result = await db.query<[JobRow[]]>(
+            `UPDATE $jobId SET
+               status = 'cancelled',
+               cancelledAt = time::now(),
+               cancelReason = $reason,
+               completedAt = time::now()
+             RETURN AFTER`,
+            { jobId: job.id, reason },
+          );
+          return result[0]?.[0];
+        });
 
-        const cancelled = await this.getJobInternal(job.id);
-        if (cancelled) {
+        if (updated) {
+          const cancelled = await this.rowToJob(updated);
           await this.notifyCompletionAndDelete(cancelled, "cancelled");
         }
         cancelledCount++;
       } else {
         // For running jobs, set cancelledAt and notify
-        await this.db.execute(
-          `UPDATE jobQueue
-           SET cancelledAt = CURRENT_TIMESTAMP,
-               cancelReason = ?
-           WHERE id = ?`,
-          [reason, job.id],
-        );
+        await this.surrealFactory.withSystemConnection({}, async (db) => {
+          await db.query(
+            `UPDATE $jobId SET
+               cancelledAt = time::now(),
+               cancelReason = $reason`,
+            { jobId: job.id, reason },
+          );
+        });
 
         this.notifyCancellationRequest(job.id, reason ?? undefined);
         cancelledCount++;
@@ -644,21 +691,24 @@ export class JobQueueService {
    * Check if a job has a cancellation request.
    * Used by the processor to poll for cancellation of running jobs.
    *
-   * @param id - Job ID to check
+   * @param id - Job ID to check (RecordId)
    * @returns Cancellation info if requested, null otherwise
    */
-  async getCancellationStatus(id: number): Promise<{ cancelledAt: Date; reason?: string } | null> {
-    const row = await this.db.queryOne<{ cancelledAt: string | null; cancelReason: string | null }>(
-      `SELECT cancelledAt, cancelReason FROM jobQueue WHERE id = ?`,
-      [id],
-    );
+  async getCancellationStatus(id: RecordId): Promise<{ cancelledAt: Date; reason?: string } | null> {
+    const row = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const result = await db.query<[{ cancelledAt: unknown | null; cancelReason: string | null } | undefined]>(
+        `RETURN $jobId.{ cancelledAt, cancelReason }`,
+        { jobId: id },
+      );
+      return result[0];
+    });
 
     if (!row || !row.cancelledAt) {
       return null;
     }
 
     return {
-      cancelledAt: new Date(row.cancelledAt),
+      cancelledAt: toDate(row.cancelledAt),
       reason: row.cancelReason ?? undefined,
     };
   }
@@ -668,12 +718,12 @@ export class JobQueueService {
    * Called by processor when handler finishes after cancellation was requested.
    * Notifies all completion subscribers and deletes the job from the database.
    *
-   * @param id - Job ID
+   * @param id - Job ID (RecordId)
    * @param reason - Optional reason (uses existing cancelReason if not provided)
    * @returns The cancelled job (note: job is deleted after this returns)
    * @throws {JobNotFoundError} If job doesn't exist
    */
-  async markJobCancelled(id: number, reason?: string): Promise<Job> {
+  async markJobCancelled(id: RecordId, reason?: string): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
     const job = await this.getJobInternal(id);
@@ -684,20 +734,24 @@ export class JobQueueService {
     // Use provided reason or existing reason
     const cancelReason = reason ?? job.cancelReason ?? null;
 
-    await this.db.execute(
-      `UPDATE jobQueue
-       SET status = 'cancelled',
-           cancelledAt = COALESCE(cancelledAt, CURRENT_TIMESTAMP),
-           cancelReason = ?,
-           completedAt = CURRENT_TIMESTAMP
-       WHERE id = ?`,
-      [cancelReason, id],
-    );
+    const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const rows = await db.query<[JobRow[]]>(
+        `UPDATE $jobId SET
+           status = 'cancelled',
+           cancelledAt = cancelledAt ?? time::now(),
+           cancelReason = $cancelReason,
+           completedAt = time::now()
+         RETURN AFTER`,
+        { jobId: id, cancelReason },
+      );
+      return rows[0]?.[0];
+    });
 
-    const cancelled = await this.getJobInternal(id);
-    if (!cancelled) {
+    if (!updated) {
       throw new Error("Failed to retrieve cancelled job");
     }
+
+    const cancelled = await this.rowToJob(updated);
 
     // Notify subscribers and delete job
     await this.notifyCompletionAndDelete(cancelled, "cancelled");
@@ -712,24 +766,25 @@ export class JobQueueService {
    * Subscriber will be called when the job reaches a terminal state
    * (completed, failed, or cancelled).
    *
-   * @param jobId - Job ID to subscribe to
+   * @param jobId - Job ID to subscribe to (RecordId)
    * @param subscriber - Callback function
    * @returns Unsubscribe function
    */
-  subscribeToCompletion(jobId: number, subscriber: JobCompletionSubscriber): () => void {
-    const subscribers = this.completionSubscribers.get(jobId) ?? [];
+  subscribeToCompletion(jobId: RecordId, subscriber: JobCompletionSubscriber): () => void {
+    const key = recordIdToString(jobId);
+    const subscribers = this.completionSubscribers.get(key) ?? [];
     subscribers.push(subscriber);
-    this.completionSubscribers.set(jobId, subscribers);
+    this.completionSubscribers.set(key, subscribers);
 
     return () => {
-      const current = this.completionSubscribers.get(jobId);
+      const current = this.completionSubscribers.get(key);
       if (current) {
         const index = current.indexOf(subscriber);
         if (index !== -1) {
           current.splice(index, 1);
         }
         if (current.length === 0) {
-          this.completionSubscribers.delete(jobId);
+          this.completionSubscribers.delete(key);
         }
       }
     };
@@ -739,24 +794,25 @@ export class JobQueueService {
    * Subscribe to cancellation request events for a specific job.
    * Subscriber will be called when cancelJob() is called on a running job.
    *
-   * @param jobId - Job ID to subscribe to
+   * @param jobId - Job ID to subscribe to (RecordId)
    * @param subscriber - Callback function
    * @returns Unsubscribe function
    */
-  subscribeToCancellation(jobId: number, subscriber: JobCancellationSubscriber): () => void {
-    const subscribers = this.cancellationSubscribers.get(jobId) ?? [];
+  subscribeToCancellation(jobId: RecordId, subscriber: JobCancellationSubscriber): () => void {
+    const key = recordIdToString(jobId);
+    const subscribers = this.cancellationSubscribers.get(key) ?? [];
     subscribers.push(subscriber);
-    this.cancellationSubscribers.set(jobId, subscribers);
+    this.cancellationSubscribers.set(key, subscribers);
 
     return () => {
-      const current = this.cancellationSubscribers.get(jobId);
+      const current = this.cancellationSubscribers.get(key);
       if (current) {
         const index = current.indexOf(subscriber);
         if (index !== -1) {
           current.splice(index, 1);
         }
         if (current.length === 0) {
-          this.cancellationSubscribers.delete(jobId);
+          this.cancellationSubscribers.delete(key);
         }
       }
     };
@@ -770,11 +826,11 @@ export class JobQueueService {
    * @returns Object with counts per status
    */
   async getJobCounts(): Promise<Record<JobStatus, number>> {
-    const rows = await this.db.queryAll<{ status: string; count: number }>(
-      `SELECT status, COUNT(*) as count
-       FROM jobQueue
-       GROUP BY status`,
-    );
+    const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
+      return await db.query<[{ status: string; count: number }[]]>(
+        `SELECT status, count() AS count FROM job GROUP BY status`,
+      );
+    });
 
     const counts: Record<JobStatus, number> = {
       pending: 0,
@@ -784,7 +840,7 @@ export class JobQueueService {
       cancelled: 0,
     };
 
-    for (const row of rows) {
+    for (const row of rows[0] ?? []) {
       if (row.status in counts) {
         counts[row.status as JobStatus] = row.count;
       }
@@ -803,21 +859,22 @@ export class JobQueueService {
    * @param type - The type of completion
    */
   private async notifyCompletionAndDelete(job: Job, type: JobCompletionType): Promise<void> {
-    const subscribers = this.completionSubscribers.get(job.id) ?? [];
+    const key = recordIdToString(job.id);
+    const subscribers = this.completionSubscribers.get(key) ?? [];
 
     // Notify all subscribers with full job data
     for (const subscriber of subscribers) {
       try {
         await subscriber({ type, job });
       } catch (error) {
-        logger.error(`[JobQueue] Completion subscriber error for job ${job.id}:`, error);
+        logger.error(`[JobQueue] Completion subscriber error for job ${key}:`, error);
         // Continue notifying other subscribers even if one fails
       }
     }
 
     // Clean up subscribers
-    this.completionSubscribers.delete(job.id);
-    this.cancellationSubscribers.delete(job.id);
+    this.completionSubscribers.delete(key);
+    this.cancellationSubscribers.delete(key);
 
     // Publish global completion event for processor wake-up (fire-and-forget)
     this.eventBus?.publish(EventType.JOB_COMPLETED, {
@@ -827,19 +884,22 @@ export class JobQueueService {
     });
 
     // Delete the job from the database
-    await this.db.execute(`DELETE FROM jobQueue WHERE id = ?`, [job.id]);
-    logger.debug(`[JobQueue] Deleted job ${job.id} after ${type}`);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(`DELETE $jobId`, { jobId: job.id });
+    });
+    logger.debug(`[JobQueue] Deleted job ${key} after ${type}`);
   }
 
   /**
    * Notify cancellation subscribers when a cancellation is requested.
    * Called by cancelJob() for running jobs.
    *
-   * @param jobId - The job ID being cancelled
+   * @param jobId - The job ID being cancelled (RecordId)
    * @param reason - Optional cancellation reason
    */
-  private notifyCancellationRequest(jobId: number, reason?: string): void {
-    const subscribers = this.cancellationSubscribers.get(jobId) ?? [];
+  private notifyCancellationRequest(jobId: RecordId, reason?: string): void {
+    const key = recordIdToString(jobId);
+    const subscribers = this.cancellationSubscribers.get(key) ?? [];
 
     for (const subscriber of subscribers) {
       try {
@@ -847,11 +907,11 @@ export class JobQueueService {
         const result = subscriber({ jobId, reason });
         if (result instanceof Promise) {
           result.catch((error) => {
-            logger.error(`[JobQueue] Cancellation subscriber error for job ${jobId}:`, error);
+            logger.error(`[JobQueue] Cancellation subscriber error for job ${key}:`, error);
           });
         }
       } catch (error) {
-        logger.error(`[JobQueue] Cancellation subscriber error for job ${jobId}:`, error);
+        logger.error(`[JobQueue] Cancellation subscriber error for job ${key}:`, error);
       }
     }
   }
@@ -872,7 +932,7 @@ export class JobQueueService {
       } catch {
         // If parsing fails, return null for type safety
         globalThis.console.error(
-          `[JobQueue] Failed to parse result JSON for job ${row.id}, returning null`,
+          `[JobQueue] Failed to parse result JSON for job ${recordIdToString(row.id)}, returning null`,
         );
         result = null;
       }
@@ -885,17 +945,17 @@ export class JobQueueService {
       executionMode: row.executionMode as ExecutionMode,
       payload,
       result,
-      processInstanceId: row.processInstanceId,
+      processInstanceId: row.processInstanceId ?? null,
       retryCount: row.retryCount,
       maxRetries: row.maxRetries,
       priority: row.priority,
-      referenceType: row.referenceType,
-      referenceId: row.referenceId,
-      createdAt: new Date(row.createdAt),
-      startedAt: row.startedAt ? new Date(row.startedAt) : null,
-      completedAt: row.completedAt ? new Date(row.completedAt) : null,
-      cancelledAt: row.cancelledAt ? new Date(row.cancelledAt) : null,
-      cancelReason: row.cancelReason,
+      referenceType: row.referenceType ?? null,
+      referenceId: row.referenceId ?? null,
+      createdAt: toDate(row.createdAt),
+      startedAt: row.startedAt ? toDate(row.startedAt) : null,
+      completedAt: row.completedAt ? toDate(row.completedAt) : null,
+      cancelledAt: row.cancelledAt ? toDate(row.cancelledAt) : null,
+      cancelReason: row.cancelReason ?? null,
     };
   }
 

@@ -245,7 +245,7 @@ const eventBus = new EventBus();
 
 // Initialize job queue service
 const jobQueueService = new JobQueueService({
-  db,
+  surrealFactory,
   instanceIdService,
   eventBus,
 });
@@ -349,7 +349,7 @@ const jobProcessorService = new JobProcessorService({
 
 // Initialize scheduling service
 const schedulingService = new SchedulingService({
-  db,
+  surrealFactory,
   jobQueueService,
 });
 

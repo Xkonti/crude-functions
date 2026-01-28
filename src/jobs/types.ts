@@ -1,4 +1,5 @@
-import type { DatabaseService } from "../database/database_service.ts";
+import type { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { InstanceIdService } from "../instance/instance_id_service.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { EventBus } from "../events/mod.ts";
@@ -50,8 +51,8 @@ export interface CancellationToken {
  * @template TResult - Type of the job result (defaults to unknown for backwards compatibility)
  */
 export interface Job<TPayload = unknown, TResult = unknown> {
-  /** Unique job identifier */
-  id: number;
+  /** Unique job identifier (SurrealDB RecordId) */
+  id: RecordId;
   /** Job type - used to dispatch to correct handler */
   type: string;
   /** Current job status */
@@ -70,10 +71,10 @@ export interface Job<TPayload = unknown, TResult = unknown> {
   maxRetries: number;
   /** Processing priority (higher = processed first) */
   priority: number;
-  /** Type of entity this job references (e.g., "code_source", "file") */
+  /** Type of entity this job references (e.g., "codeSource", "file") */
   referenceType: string | null;
-  /** ID of the referenced entity (number or string for named resources) */
-  referenceId: number | string | null;
+  /** ID of the referenced entity (always string in SurrealDB) */
+  referenceId: string | null;
   /** When the job was created */
   createdAt: Date;
   /** When the job started processing (null if pending) */
@@ -103,7 +104,7 @@ export interface NewJob<TPayload = unknown> {
   priority?: number;
   /** Type of entity this job references */
   referenceType?: string;
-  /** ID of the referenced entity (number or string for named resources) */
+  /** ID of the referenced entity (will be converted to string) */
   referenceId?: number | string;
   /**
    * Execution mode (default: 'sequential').
@@ -144,8 +145,8 @@ export interface JobProcessorConfig {
  * Options for JobQueueService constructor.
  */
 export interface JobQueueServiceOptions {
-  /** Database service instance */
-  db: DatabaseService;
+  /** SurrealDB connection factory */
+  surrealFactory: SurrealConnectionFactory;
   /** Instance ID service for tracking process ownership */
   instanceIdService: InstanceIdService;
   /** Optional encryption service for sensitive payloads */
@@ -169,11 +170,12 @@ export interface JobProcessorServiceOptions {
 }
 
 /**
- * Database row type for job queries.
+ * Database row type for job queries (SurrealDB).
+ * Dates come as SurrealDB DateTime objects - use toDate() helper.
  */
 export interface JobRow {
   [key: string]: unknown; // Index signature for Row compatibility
-  id: number;
+  id: RecordId;
   type: string;
   status: string;
   executionMode: string;
@@ -184,11 +186,12 @@ export interface JobRow {
   maxRetries: number;
   priority: number;
   referenceType: string | null;
-  referenceId: number | string | null;
-  createdAt: string;
-  startedAt: string | null;
-  completedAt: string | null;
-  cancelledAt: string | null;
+  referenceId: string | null;
+  // SurrealDB DateTime objects - use toDate() helper
+  createdAt: unknown;
+  startedAt: unknown | null;
+  completedAt: unknown | null;
+  cancelledAt: unknown | null;
   cancelReason: string | null;
 }
 
@@ -227,8 +230,8 @@ export type JobCompletionSubscriber<TPayload = unknown, TResult = unknown> = (
  * Event emitted when a cancellation is requested for a running job.
  */
 export interface JobCancellationRequestEvent {
-  /** The job ID being cancelled */
-  jobId: number;
+  /** The job ID being cancelled (RecordId) */
+  jobId: RecordId;
   /** Optional reason for cancellation */
   reason?: string;
 }

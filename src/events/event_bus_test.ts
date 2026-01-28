@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { RecordId } from "surrealdb";
 import { EventBus } from "./event_bus.ts";
 import { EventType } from "./event_types.ts";
 
