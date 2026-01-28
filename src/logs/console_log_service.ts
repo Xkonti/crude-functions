@@ -568,7 +568,7 @@ export class ConsoleLogService {
       message: row.message,
       args: row.args ?? undefined,
       sequence: row.sequence,
-      timestamp: row.timestamp,
+      timestamp: new Date(row.timestamp),
     };
   }
 }
