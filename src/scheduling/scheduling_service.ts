@@ -218,7 +218,8 @@ export class SchedulingService {
     }
 
     // Calculate initial nextRunAt
-    let nextRunAt: Date | null = null;
+    // Use undefined (not null) to map to SurrealDB NONE
+    let nextRunAt: Date | undefined = undefined;
     if (schedule.nextRunAt) {
       nextRunAt = schedule.nextRunAt;
     } else if (
@@ -228,15 +229,17 @@ export class SchedulingService {
       nextRunAt = new Date(Date.now() + (schedule.intervalMs ?? 0));
     }
 
+    // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+    // SurrealDB's option<string> accepts NONE but not NULL
     const payloadStr =
       schedule.jobPayload !== undefined
         ? JSON.stringify(schedule.jobPayload)
-        : null;
+        : undefined;
 
     // Convert referenceId to string if provided
     const jobReferenceId = schedule.jobReferenceId !== undefined && schedule.jobReferenceId !== null
       ? String(schedule.jobReferenceId)
-      : null;
+      : undefined;
 
     const created = await this.surrealFactory.withSystemConnection({}, async (db) => {
       const result = await db.query<[ScheduleRow | undefined]>(
@@ -598,7 +601,8 @@ export class SchedulingService {
     const updateFields: Record<string, unknown> = {};
 
     if (update.description !== undefined) {
-      updateFields.description = update.description;
+      // Convert null to undefined for SurrealDB NONE (option<string> doesn't accept NULL)
+      updateFields.description = update.description === null ? undefined : update.description;
     }
 
     if (update.intervalMs !== undefined) {

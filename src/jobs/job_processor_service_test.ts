@@ -341,11 +341,35 @@ integrationTest("JobProcessorService recovers orphaned jobs on startup", async (
 
   try {
     // Insert orphaned job directly
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, executionMode, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'sequential', 'crashed-instance', datetime('now'), 0, 2, datetime('now'))`,
-      ["orphaned-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "orphaned-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 0,
+      maxRetries: 2,
+      priority: 0,
+    });
 
     // Verify it's orphaned
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
@@ -385,11 +409,35 @@ integrationTest("JobProcessorService marks exhausted orphaned jobs as failed", a
 
   try {
     // Insert orphaned job that has already reached max retries
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, executionMode, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'sequential', 'crashed-instance', datetime('now'), 1, 1, datetime('now'))`,
-      ["exhausted-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "exhausted-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 1,
+      maxRetries: 1,
+      priority: 0,
+    });
 
     const processor = new JobProcessorService({
       jobQueueService: ctx.jobQueueService,
@@ -495,7 +543,7 @@ integrationTest("JobProcessorService passes full job context to handler", async 
     expect(job.payload).toEqual({ data: "test" });
     expect(job.priority).toBe(5);
     expect(job.referenceType).toBe("test-entity");
-    expect(job.referenceId).toBe(123);
+    expect(job.referenceId).toBe("123");
     expect(job.status).toBe("running"); // Job is claimed when handler runs
     expect(job.processInstanceId).toBe(ctx.instanceIdService.getId());
   } finally {

@@ -66,7 +66,7 @@ integrationTest("JobQueueService.getJob retrieves job by ID", async () => {
 
     const retrieved = await ctx.jobQueueService.getJob(created.id);
     expect(retrieved).not.toBeNull();
-    expect(retrieved!.id).toBe(created.id);
+    expect(retrieved!.id).toEqual(created.id);
     expect(retrieved!.type).toBe("test-job");
     expect(retrieved!.payload).toEqual({ key: "value" });
   } finally {
@@ -147,8 +147,8 @@ integrationTest("JobQueueService.enqueue allows different references", async () 
     });
 
     expect(job1.id).not.toBe(job2.id);
-    expect(job1.referenceId).toBe(1);
-    expect(job2.referenceId).toBe(2);
+    expect(job1.referenceId).toBe("1");
+    expect(job2.referenceId).toBe("2");
   } finally {
     await ctx.cleanup();
   }
@@ -513,11 +513,35 @@ integrationTest("JobQueueService.getOrphanedJobs finds jobs with different insta
 
   try {
     // Insert a job with a different instance ID directly (simulating crash)
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, createdAt)
-       VALUES (?, 'running', 'old-crashed-instance', datetime('now'), datetime('now'))`,
-      ["orphaned-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "orphaned-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "old-crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 0,
+      maxRetries: 1,
+      priority: 0,
+    });
 
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
     expect(orphaned.length).toBe(1);
@@ -548,11 +572,35 @@ integrationTest("JobQueueService.resetOrphanedJob resets job to pending", async 
 
   try {
     // Insert an orphaned job
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'crashed-instance', datetime('now'), 0, 2, datetime('now'))`,
-      ["orphaned-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "orphaned-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 0,
+      maxRetries: 2,
+      priority: 0,
+    });
 
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
     expect(orphaned.length).toBe(1);
@@ -573,11 +621,35 @@ integrationTest("JobQueueService.resetOrphanedJob throws MaxRetriesExceededError
 
   try {
     // Insert an orphaned job that has already reached max retries
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'crashed-instance', datetime('now'), 1, 1, datetime('now'))`,
-      ["exhausted-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "exhausted-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 1,
+      maxRetries: 1,
+      priority: 0,
+    });
 
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
     expect(orphaned.length).toBe(1);
@@ -1018,8 +1090,8 @@ integrationTest("JobQueueService.enqueue allows concurrent jobs with same refere
     });
 
     expect(job1.id).not.toBe(job2.id);
-    expect(job1.referenceId).toBe(123);
-    expect(job2.referenceId).toBe(123);
+    expect(job1.referenceId).toBe("123");
+    expect(job2.referenceId).toBe("123");
   } finally {
     await ctx.cleanup();
   }
@@ -1141,7 +1213,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job completio
 
     expect(receivedEvent).not.toBeNull();
     expect(receivedEvent!.type).toBe("completed");
-    expect(receivedEvent!.job.id).toBe(job.id);
+    expect(receivedEvent!.job.id).toEqual(job.id);
   } finally {
     await ctx.cleanup();
   }
@@ -1164,7 +1236,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job failure",
 
     expect(receivedEvent).not.toBeNull();
     expect(receivedEvent!.type).toBe("failed");
-    expect(receivedEvent!.job.id).toBe(job.id);
+    expect(receivedEvent!.job.id).toEqual(job.id);
   } finally {
     await ctx.cleanup();
   }
@@ -1187,7 +1259,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job cancellat
 
     expect(receivedEvent).not.toBeNull();
     expect(receivedEvent!.type).toBe("cancelled");
-    expect(receivedEvent!.job.id).toBe(job.id);
+    expect(receivedEvent!.job.id).toEqual(job.id);
   } finally {
     await ctx.cleanup();
   }

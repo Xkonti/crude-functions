@@ -929,12 +929,14 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       for (const job of this.deferredJobs) {
         // Insert job directly into database for seeding
         // (bypasses enqueue to allow setting status)
+        // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+        // SurrealDB's option<string> accepts NONE but not NULL
         const payloadStr = job.payload !== undefined
           ? JSON.stringify(job.payload)
-          : null;
+          : undefined;
         const referenceIdStr = job.referenceId !== undefined && job.referenceId !== null
           ? String(job.referenceId)
-          : null;
+          : undefined;
         await surrealFactory.withSystemConnection({}, async (db) => {
           await db.query(
             `CREATE job SET
@@ -960,7 +962,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
               executionMode: job.executionMode ?? "sequential",
               payload: payloadStr,
               priority: job.priority ?? 0,
-              referenceType: job.referenceType ?? null,
+              referenceType: job.referenceType ?? undefined,
               referenceId: referenceIdStr,
             },
           );

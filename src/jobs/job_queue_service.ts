@@ -387,7 +387,9 @@ export class JobQueueService {
   async completeJob(id: RecordId, result?: unknown): Promise<Job> {
     using _lock = await this.writeMutex.acquire();
 
-    const resultStr = result !== undefined ? JSON.stringify(result) : null;
+    // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+    // SurrealDB's option<string> accepts NONE but not NULL
+    const resultStr = result !== undefined ? JSON.stringify(result) : undefined;
 
     const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
       const rows = await db.query<[JobRow[]]>(
@@ -550,7 +552,9 @@ export class JobQueueService {
       return job;
     }
 
-    const reason = options?.reason ?? null;
+    // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+    // SurrealDB's option<string> accepts NONE but not NULL
+    const reason = options?.reason ?? undefined;
 
     if (job.status === "pending") {
       // Pending jobs can be cancelled immediately
@@ -633,7 +637,9 @@ export class JobQueueService {
       params.referenceId = options.referenceId;
     }
 
-    const reason = options.reason ?? null;
+    // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+    // SurrealDB's option<string> accepts NONE but not NULL
+    const reason = options.reason ?? undefined;
 
     // Find all matching jobs first
     const rows = await this.surrealFactory.withSystemConnection({}, async (db) => {
@@ -732,7 +738,8 @@ export class JobQueueService {
     }
 
     // Use provided reason or existing reason
-    const cancelReason = reason ?? job.cancelReason ?? null;
+    // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+    const cancelReason = reason ?? job.cancelReason ?? undefined;
 
     const updated = await this.surrealFactory.withSystemConnection({}, async (db) => {
       const rows = await db.query<[JobRow[]]>(
@@ -962,9 +969,11 @@ export class JobQueueService {
   /**
    * Serialize and optionally encrypt payload.
    */
-  private async serializePayload(payload: unknown): Promise<string | null> {
+  private async serializePayload(payload: unknown): Promise<string | null | undefined> {
     if (payload === undefined || payload === null) {
-      return null;
+      // Return undefined (not null) to map to SurrealDB NONE instead of NULL
+      // SurrealDB's option<string> accepts NONE but not NULL
+      return undefined;
     }
 
     const jsonStr = JSON.stringify(payload);
