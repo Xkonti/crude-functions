@@ -4,7 +4,6 @@ import { MetricsAggregationService } from "./metrics_aggregation_service.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import type { BaseTestContext, MetricsContext, RoutesContext } from "../test/types.ts";
 import type { FunctionRoute } from "../routes/routes_service.ts";
-import { RecordId } from "surrealdb";
 
 // Helper functions for dynamic date calculation
 function floorToMinute(date: Date): Date {

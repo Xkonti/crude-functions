@@ -181,7 +181,6 @@ export class ConsoleLogService {
 
     await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Insert each log individually to ensure all are inserted
-      let insertedCount = 0;
       for (const entry of entries) {
         const log = {
           requestId: entry.requestId,
