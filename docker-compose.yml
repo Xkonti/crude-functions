@@ -18,7 +18,7 @@ services:
     # On first run, create an admin user via the web UI setup page,
     # then manage API keys through the API Keys page.
     volumes:
-      # Mount the data directory for SQLite database and encryption keys
+      # Mount the data directory for SurrealDB database and encryption keys
       - ./data:/app/data
       # Mount the code directory for function handlers
       - ./code:/app/code

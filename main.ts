@@ -127,7 +127,6 @@ console.log("✓ CSRF service initialized");
 // ============================================================================
 
 // Initialize SurrealDB with supervisor for process lifecycle management
-// Runs alongside SQLite - does not replace it
 
 const surrealPort = parseEnvInt("SURREAL_PORT", 5173, { min: 1, max: 65535 });
 const surrealUser = Deno.env.get("SURREAL_USER") || "root";

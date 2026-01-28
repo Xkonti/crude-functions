@@ -184,7 +184,7 @@ DEFINE FIELD IF NOT EXISTS scopeType ON TABLE secret TYPE "global" | "function" 
 
 -- Scope reference as record:
 -- - global: NONE (null)
--- - function: record (e.g., function:123 - synthetic record for SQLite route ID)
+-- - function: record (e.g., function:123 - synthetic record for legacy route ID)
 -- - group: record<apiKeyGroup>
 -- - key: record<apiKey>
 DEFINE FIELD IF NOT EXISTS scopeRef ON TABLE secret TYPE option<record>;

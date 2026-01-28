@@ -13,7 +13,7 @@ deno check main.ts  # Type check entry point
 
 ## Architecture Overview
 
-This is a Deno-based serverless function router called Crude Functions. It a barebones equivalent of Val Town intended to be deployed as a single Docker container. Functions are TypeScript files in `code/` that get dynamically loaded and executed as HTTP endpoints. SQLite for database, Better Auth for web UI auth, custom API keys for function protection. SSR web UI using Pico CSS.
+This is a Deno-based serverless function router called Crude Functions. It a barebones equivalent of Val Town intended to be deployed as a single Docker container. Functions are TypeScript files in `code/` that get dynamically loaded and executed as HTTP endpoints. SurrealDB for database, Better Auth for web UI auth, custom API keys for function protection. SSR web UI using Pico CSS.
 
 ### Request Flow for deployed functions
 
@@ -27,7 +27,7 @@ Function router handles API key verification (if route requires keys) and handle
 
 | Service | Location | Purpose |
 |---------|----------|---------|
-| `DatabaseService` | `database/` | SQLite with WAL mode, mutex-protected writes |
+| `DatabaseService` | `database/` | SurrealDB connection with mutex-protected writes |
 | `MigrationService` | `database/` | Forward-only migrations from `migrations/` |
 | `FunctionRouter` | `functions/` | Dynamic routing, handler execution, context injection |
 | `HandlerLoader` | `functions/` | Hot-reload handlers (tracks file mtime) |
@@ -55,7 +55,7 @@ Function router handles API key verification (if route requires keys) and handle
 - **Single source of truth**: All queries for a domain live in one place
 - **Easier refactoring**: Change query logic once, affects all callers
 - **Caching layer**: Services can add caching without changing consumers
-- **Type safety**: Services provide typed interfaces over raw SQL
+- **Type safety**: Services provide typed interfaces over database queries
 - **Business logic**: Validation and domain rules stay in services, not scattered
 
 **Examples:**
@@ -74,14 +74,13 @@ Function router handles API key verification (if route requires keys) and handle
 
 - `@core/asyncutil/mutex` for write serialization
 - Single-instance design (stateful web service, not ephemeral)
-- WAL mode allows concurrent reads during writes
 
 **Philosophy**:
 Intended as internal tooling. "Crude" means simple and pragmatic - get things done without complex deployment. Not intended as a public service. No sandboxing, no excessive security theater. User can shoot themselves in the foot and that's a feature.
 
 ### Database
 
-SQLite in WAL mode at `./data/database.db`. Schema defined in `migrations/`. Access exclusively through services - never query directly.
+SurrealDB at `./data/surreal/` (namespace: `system`, database: `system`). Schema defined in `migrations/`. Access exclusively through services - never query directly.
 
 ### Endpoints Structure
 

@@ -2,7 +2,7 @@
  * Job Queue Module
  *
  * Provides background job processing capabilities:
- * - Priority-based job queue with SQLite persistence
+ * - Priority-based job queue with SurrealDB persistence
  * - Orphan detection for crashed containers
  * - Optional payload encryption
  * - Cancellation support with tokens

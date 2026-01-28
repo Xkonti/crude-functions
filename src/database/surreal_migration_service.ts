@@ -188,7 +188,7 @@ export class SurrealMigrationService {
   /**
    * Applies a single migration and updates the schema version.
    *
-   * Note: SurrealDB doesn't have explicit transaction support like SQLite,
+   * Note: SurrealDB doesn't have explicit transaction support like traditional SQL databases,
    * so migrations are applied as individual queries. Each query within the
    * migration file is executed sequentially.
    *

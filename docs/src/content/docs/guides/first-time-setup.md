@@ -9,7 +9,7 @@ After deploying Crude Functions for the first time, you'll need to create an adm
 
 On first startup, Crude Functions automatically:
 
-1. Creates SQLite database at `./data/database.db`
+1. Creates SurrealDB database at `./data/surreal/`
 2. Generates encryption keys at `./data/encryption-keys.json`
 3. Runs database migrations
 4. Enables the sign-up page for admin user creation
@@ -83,7 +83,7 @@ Everything persistent lives in `./data/`:
 
 ```
 data/
-├── database.db           # Routes, functions, API keys, users, secrets, logs, metrics
+├── surreal/              # Routes, functions, API keys, users, secrets, logs, metrics
 └── encryption-keys.json  # AES-256-GCM keys for encrypting API keys and secrets
 ```
 
