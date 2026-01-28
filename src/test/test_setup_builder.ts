@@ -898,7 +898,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       // Seed deferred metrics (convert ms to us for storage)
       for (const metric of this.deferredMetrics) {
         await context.executionMetricsService.store({
-          functionId: metric.functionId,
+          functionId: metric.functionId ?? undefined,
           type: metric.type,
           avgTimeUs: metric.avgTimeMs * 1000,
           maxTimeUs: metric.maxTimeMs * 1000,

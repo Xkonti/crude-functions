@@ -37,10 +37,10 @@ integrationTest("TestSetupBuilder creates basic context with all services", asyn
 
     // Verify database is open and migrations ran (check for a table)
     const result = await ctx.db.queryOne<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='apiKeyGroups'"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='jobQueue'"
     );
     expect(result).toBeDefined();
-    expect(result?.name).toBe("apiKeyGroups");
+    expect(result?.name).toBe("jobQueue");
   } finally {
     await ctx.cleanup();
   }
