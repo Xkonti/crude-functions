@@ -55,23 +55,40 @@ export class ExecutionMetricsService {
       await this.surrealFactory.withSystemConnection({}, async (db) => {
         // Use duration::from_micros() to convert microseconds to SurrealDB duration
         // Round to integers since duration::from_micros() requires int (aggregation produces floats)
-        await db.query(
-          `CREATE executionMetric SET
-            functionId = $functionId,
-            type = $type,
-            avgTime = duration::from_micros($avgTimeUs),
-            maxTime = duration::from_micros($maxTimeUs),
-            executionCount = $executionCount,
-            timestamp = $timestamp`,
-          {
-            functionId: metric.functionId ?? undefined,
-            type: MetricTypeCode[metric.type],
-            avgTimeUs: Math.round(metric.avgTimeUs),
-            maxTimeUs: Math.round(metric.maxTimeUs),
-            executionCount: metric.executionCount,
-            timestamp: metric.timestamp ?? new Date(),
-          }
-        );
+        //
+        // For functionId handling:
+        // - If metric.functionId exists (RecordId): Use $functionId parameter
+        // - If metric.functionId is null/undefined: Use NONE literal to create field with NONE value
+        // Note: Simply omitting the field doesn't work - field must be explicitly set to NONE
+        const query = metric.functionId
+          ? `CREATE executionMetric SET
+              functionId = $functionId,
+              type = $type,
+              avgTime = duration::from_micros($avgTimeUs),
+              maxTime = duration::from_micros($maxTimeUs),
+              executionCount = $executionCount,
+              timestamp = $timestamp`
+          : `CREATE executionMetric SET
+              functionId = none,
+              type = $type,
+              avgTime = duration::from_micros($avgTimeUs),
+              maxTime = duration::from_micros($maxTimeUs),
+              executionCount = $executionCount,
+              timestamp = $timestamp`;
+
+        const params: Record<string, unknown> = {
+          type: MetricTypeCode[metric.type],
+          avgTimeUs: Math.round(metric.avgTimeUs),
+          maxTimeUs: Math.round(metric.maxTimeUs),
+          executionCount: metric.executionCount,
+          timestamp: metric.timestamp ?? new Date(),
+        };
+
+        if (metric.functionId) {
+          params.functionId = metric.functionId;
+        }
+
+        await db.query(query, params);
       });
     } catch (error) {
       // Fail silently
