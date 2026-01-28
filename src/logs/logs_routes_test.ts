@@ -4,42 +4,42 @@ import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { createLogsRoutes } from "./logs_routes.ts";
 import type { ConsoleLogService } from "./console_log_service.ts";
-import type { RoutesService } from "../routes/routes_service.ts";
-import type { FunctionRoute } from "../routes/routes_service.ts";
+import type { FunctionsService } from "../routes/functions_service.ts";
+import type { FunctionDefinition } from "../routes/functions_service.ts";
 import type { ConsoleLog, ConsoleLogLevel } from "./types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 
 interface LogsTestContext {
   app: Hono;
   consoleLogService: ConsoleLogService;
-  routesService: RoutesService;
-  routes: { route1: FunctionRoute; route2: FunctionRoute };
+  functionsService: FunctionsService;
+  routes: { route1: FunctionDefinition; route2: FunctionDefinition };
   cleanup: () => Promise<void>;
 }
 
 async function createTestContext(): Promise<LogsTestContext> {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   // Create test routes
-  await ctx.routesService.addRoute({
+  await ctx.functionsService.addFunction({
     name: "test-route-1",
     routePath: "/test1",
     handler: "test1.ts",
     methods: ["GET"],
   });
 
-  await ctx.routesService.addRoute({
+  await ctx.functionsService.addFunction({
     name: "test-route-2",
     routePath: "/test2",
     handler: "test2.ts",
     methods: ["GET"],
   });
 
-  const route1 = await ctx.routesService.getByName("test-route-1");
-  const route2 = await ctx.routesService.getByName("test-route-2");
+  const route1 = await ctx.functionsService.getByName("test-route-1");
+  const route2 = await ctx.functionsService.getByName("test-route-2");
 
   if (!route1 || !route2) {
     throw new Error("Failed to create test routes");
@@ -48,13 +48,13 @@ async function createTestContext(): Promise<LogsTestContext> {
   const app = new Hono();
   app.route("/api/logs", createLogsRoutes({
     consoleLogService: ctx.consoleLogService,
-    routesService: ctx.routesService,
+    functionsService: ctx.functionsService,
   }));
 
   return {
     app,
     consoleLogService: ctx.consoleLogService,
-    routesService: ctx.routesService,
+    functionsService: ctx.functionsService,
     routes: { route1, route2 },
     cleanup: ctx.cleanup,
   };

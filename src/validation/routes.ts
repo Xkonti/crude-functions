@@ -1,5 +1,5 @@
 /**
- * Validation utilities for function routes.
+ * Validation utilities for function definitions.
  */
 
 const VALID_METHODS = [
@@ -13,16 +13,16 @@ const VALID_METHODS = [
 ];
 
 /**
- * Validates that a route name is non-empty
+ * Validates that a function name is non-empty
  */
-export function validateRouteName(name: string): boolean {
+export function validateFunctionName(name: string): boolean {
   return name.trim().length > 0;
 }
 
 /**
- * Validates that a route path starts with / and has no double slashes
+ * Validates that a function path starts with / and has no double slashes
  */
-export function validateRoutePath(path: string): boolean {
+export function validateFunctionPath(path: string): boolean {
   if (!path || !path.startsWith("/")) return false;
   if (path !== "/" && path.includes("//")) return false;
   return true;

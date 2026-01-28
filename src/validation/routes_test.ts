@@ -2,96 +2,96 @@ import { expect } from "@std/expect";
 import {
   getValidMethods,
   validateMethods,
-  validateRouteName,
-  validateRoutePath,
+  validateFunctionName,
+  validateFunctionPath,
 } from "./routes.ts";
 
 // =====================
-// validateRouteName - valid cases
+// validateFunctionName - valid cases
 // =====================
 
-Deno.test("validateRouteName accepts simple name", () => {
-  expect(validateRouteName("hello")).toBe(true);
+Deno.test("validateFunctionName accepts simple name", () => {
+  expect(validateFunctionName("hello")).toBe(true);
 });
 
-Deno.test("validateRouteName accepts name with spaces (has content after trim)", () => {
-  expect(validateRouteName("  hello  ")).toBe(true);
+Deno.test("validateFunctionName accepts name with spaces (has content after trim)", () => {
+  expect(validateFunctionName("  hello  ")).toBe(true);
 });
 
-Deno.test("validateRouteName accepts single character", () => {
-  expect(validateRouteName("a")).toBe(true);
+Deno.test("validateFunctionName accepts single character", () => {
+  expect(validateFunctionName("a")).toBe(true);
 });
 
-Deno.test("validateRouteName accepts name with special characters", () => {
-  expect(validateRouteName("hello-world_v2")).toBe(true);
-});
-
-// =====================
-// validateRouteName - invalid cases
-// =====================
-
-Deno.test("validateRouteName rejects empty string", () => {
-  expect(validateRouteName("")).toBe(false);
-});
-
-Deno.test("validateRouteName rejects whitespace only", () => {
-  expect(validateRouteName("   ")).toBe(false);
-});
-
-Deno.test("validateRouteName rejects tabs only", () => {
-  expect(validateRouteName("\t\t")).toBe(false);
+Deno.test("validateFunctionName accepts name with special characters", () => {
+  expect(validateFunctionName("hello-world_v2")).toBe(true);
 });
 
 // =====================
-// validateRoutePath - valid cases
+// validateFunctionName - invalid cases
 // =====================
 
-Deno.test("validateRoutePath accepts root path", () => {
-  expect(validateRoutePath("/")).toBe(true);
+Deno.test("validateFunctionName rejects empty string", () => {
+  expect(validateFunctionName("")).toBe(false);
 });
 
-Deno.test("validateRoutePath accepts simple path", () => {
-  expect(validateRoutePath("/hello")).toBe(true);
+Deno.test("validateFunctionName rejects whitespace only", () => {
+  expect(validateFunctionName("   ")).toBe(false);
 });
 
-Deno.test("validateRoutePath accepts nested path", () => {
-  expect(validateRoutePath("/api/v1/users")).toBe(true);
-});
-
-Deno.test("validateRoutePath accepts path with dashes", () => {
-  expect(validateRoutePath("/my-route")).toBe(true);
-});
-
-Deno.test("validateRoutePath accepts path with underscores", () => {
-  expect(validateRoutePath("/my_route")).toBe(true);
-});
-
-Deno.test("validateRoutePath accepts path with numbers", () => {
-  expect(validateRoutePath("/api/v2/route123")).toBe(true);
+Deno.test("validateFunctionName rejects tabs only", () => {
+  expect(validateFunctionName("\t\t")).toBe(false);
 });
 
 // =====================
-// validateRoutePath - invalid cases
+// validateFunctionPath - valid cases
 // =====================
 
-Deno.test("validateRoutePath rejects empty string", () => {
-  expect(validateRoutePath("")).toBe(false);
+Deno.test("validateFunctionPath accepts root path", () => {
+  expect(validateFunctionPath("/")).toBe(true);
 });
 
-Deno.test("validateRoutePath rejects path without leading slash", () => {
-  expect(validateRoutePath("hello")).toBe(false);
+Deno.test("validateFunctionPath accepts simple path", () => {
+  expect(validateFunctionPath("/hello")).toBe(true);
 });
 
-Deno.test("validateRoutePath rejects double slash at start", () => {
-  expect(validateRoutePath("//double")).toBe(false);
+Deno.test("validateFunctionPath accepts nested path", () => {
+  expect(validateFunctionPath("/api/v1/users")).toBe(true);
 });
 
-Deno.test("validateRoutePath rejects double slash in middle", () => {
-  expect(validateRoutePath("/path//middle")).toBe(false);
+Deno.test("validateFunctionPath accepts path with dashes", () => {
+  expect(validateFunctionPath("/my-route")).toBe(true);
 });
 
-Deno.test("validateRoutePath rejects multiple consecutive slashes", () => {
-  expect(validateRoutePath("/path///triple")).toBe(false);
+Deno.test("validateFunctionPath accepts path with underscores", () => {
+  expect(validateFunctionPath("/my_route")).toBe(true);
+});
+
+Deno.test("validateFunctionPath accepts path with numbers", () => {
+  expect(validateFunctionPath("/api/v2/route123")).toBe(true);
+});
+
+// =====================
+// validateFunctionPath - invalid cases
+// =====================
+
+Deno.test("validateFunctionPath rejects empty string", () => {
+  expect(validateFunctionPath("")).toBe(false);
+});
+
+Deno.test("validateFunctionPath rejects path without leading slash", () => {
+  expect(validateFunctionPath("hello")).toBe(false);
+});
+
+Deno.test("validateFunctionPath rejects double slash at start", () => {
+  expect(validateFunctionPath("//double")).toBe(false);
+});
+
+Deno.test("validateFunctionPath rejects double slash in middle", () => {
+  expect(validateFunctionPath("/path//middle")).toBe(false);
+});
+
+Deno.test("validateFunctionPath rejects multiple consecutive slashes", () => {
+  expect(validateFunctionPath("/path///triple")).toBe(false);
 });
 
 // =====================

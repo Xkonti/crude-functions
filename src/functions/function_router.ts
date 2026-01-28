@@ -1,5 +1,5 @@
 import { Hono, type Context } from "@hono/hono";
-import { RoutesService, type FunctionRoute } from "../routes/routes_service.ts";
+import { FunctionsService, type FunctionDefinition } from "../routes/functions_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
@@ -19,8 +19,8 @@ import { runInEnvContext, createEnvContext } from "../env/env_context.ts";
 import { originalConsole } from "../logs/stream_interceptor.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 
-export interface FunctionRouterOptions {
-  routesService: RoutesService;
+export interface FunctionDefinitionrOptions {
+  functionsService: FunctionsService;
   apiKeyService: ApiKeyService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
@@ -30,7 +30,7 @@ export interface FunctionRouterOptions {
 }
 
 export class FunctionRouter {
-  private readonly routesService: RoutesService;
+  private readonly functionsService: FunctionsService;
   private readonly apiKeyValidator: ApiKeyValidator;
   private readonly handlerLoader: HandlerLoader;
   private readonly consoleLogService: ConsoleLogService;
@@ -38,8 +38,8 @@ export class FunctionRouter {
   private readonly secretsService: SecretsService;
   private router: Hono = this.createEmptyRouter();
 
-  constructor(options: FunctionRouterOptions) {
-    this.routesService = options.routesService;
+  constructor(options: FunctionDefinitionrOptions) {
+    this.functionsService = options.functionsService;
     this.apiKeyValidator = new ApiKeyValidator({ apiKeyService: options.apiKeyService });
     this.handlerLoader = new HandlerLoader({
       baseDirectory: options.codeDirectory ?? Deno.cwd(),
@@ -51,7 +51,7 @@ export class FunctionRouter {
 
   async handle(c: Context): Promise<Response> {
     // Check if routes need rebuilding - handles all concurrency internally
-    await this.routesService.rebuildIfNeeded((routes) => {
+    await this.functionsService.rebuildIfNeeded((routes) => {
       this.router = this.buildRouter(routes);
     });
 
@@ -76,7 +76,7 @@ export class FunctionRouter {
     return router;
   }
 
-  private buildRouter(routes: FunctionRoute[]): Hono {
+  private buildRouter(routes: FunctionDefinition[]): Hono {
     const router = new Hono();
 
     // Filter out disabled routes - they should behave as if they don't exist
@@ -107,7 +107,7 @@ export class FunctionRouter {
     return router;
   }
 
-  private createHandler(route: FunctionRoute) {
+  private createHandler(route: FunctionDefinition) {
     return async (c: Context): Promise<Response> => {
       const requestId = crypto.randomUUID();
       const method = c.req.method;
@@ -255,7 +255,7 @@ export class FunctionRouter {
           maxTimeUs: durationUs,
           executionCount: 1,
         }).catch((error) => {
-          globalThis.console.error("[FunctionRouter] Failed to store metric:", error);
+          globalThis.console.error("[FunctionDefinitionr] Failed to store metric:", error);
         });
 
         return response;
@@ -297,7 +297,7 @@ export class FunctionRouter {
           maxTimeUs: failedDurationUs,
           executionCount: 1,
         }).catch((metricError) => {
-          globalThis.console.error("[FunctionRouter] Failed to store metric:", metricError);
+          globalThis.console.error("[FunctionDefinitionr] Failed to store metric:", metricError);
         });
 
         const executionError = new HandlerExecutionError(route.handler, error);

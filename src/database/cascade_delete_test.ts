@@ -16,13 +16,13 @@ import { recordIdToString } from "./surreal_helpers.ts";
 
 integrationTest("Deleting function cascades to function-scoped secrets", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withSecrets()
     .build();
 
   try {
     // Setup: Create function and secret
-    const route = await ctx.routesService.addRoute({
+    const route = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -45,7 +45,7 @@ integrationTest("Deleting function cascades to function-scoped secrets", async (
     expect(secretBefore?.name).toBe("test-secret");
 
     // Action: Delete function
-    await ctx.routesService.removeRouteById(functionId);
+    await ctx.functionsService.removeFunctionById(functionId);
 
     // Verify: Secret no longer exists (cascade deleted)
     const secretAfter = await ctx.secretsService.getFunctionSecretById(
@@ -60,13 +60,13 @@ integrationTest("Deleting function cascades to function-scoped secrets", async (
 
 integrationTest("Deleting function cascades to execution logs", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withLogs()
     .build();
 
   try {
     // Setup: Create function and logs
-    const route = await ctx.routesService.addRoute({
+    const route = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -88,7 +88,7 @@ integrationTest("Deleting function cascades to execution logs", async () => {
     expect(logsBefore.length).toBeGreaterThan(0);
 
     // Action: Delete function
-    await ctx.routesService.removeRouteById(functionId);
+    await ctx.functionsService.removeFunctionById(functionId);
 
     // Verify: Logs no longer exist (cascade deleted)
     const logsAfter = await ctx.consoleLogService.getByFunctionId(functionId);
@@ -100,13 +100,13 @@ integrationTest("Deleting function cascades to execution logs", async () => {
 
 integrationTest("Deleting function retains execution metrics", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withMetrics()
     .build();
 
   try {
     // Setup: Create function and metrics
-    const route = await ctx.routesService.addRoute({
+    const route = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -127,7 +127,7 @@ integrationTest("Deleting function retains execution metrics", async () => {
     expect(metricsBefore.length).toBeGreaterThan(0);
 
     // Action: Delete function
-    await ctx.routesService.removeRouteById(recordIdToString(route.id));
+    await ctx.functionsService.removeFunctionById(recordIdToString(route.id));
 
     // Verify: Metrics STILL exist (intentionally retained)
     const metricsAfter = await ctx.executionMetricsService.getByFunctionId(route.id);
@@ -230,13 +230,13 @@ integrationTest("Deleting API key cascades to key-scoped secrets", async () => {
 
 integrationTest("Cascade deletes only affect correct scope", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withSecrets()
     .build();
 
   try {
     // Setup: Create 2 functions with secrets, plus global secret
-    const route1 = await ctx.routesService.addRoute({
+    const route1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "func1.ts",
       routePath: "/func1",
@@ -244,7 +244,7 @@ integrationTest("Cascade deletes only affect correct scope", async () => {
     });
     const func1Id = recordIdToString(route1.id);
 
-    const route2 = await ctx.routesService.addRoute({
+    const route2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "func2.ts",
       routePath: "/func2",
@@ -267,7 +267,7 @@ integrationTest("Cascade deletes only affect correct scope", async () => {
     expect(globalSecretsBefore.length).toBeGreaterThan(0);
 
     // Action: Delete func1
-    await ctx.routesService.removeRouteById(func1Id);
+    await ctx.functionsService.removeFunctionById(func1Id);
 
     // Verify: Only func1 secrets deleted, others intact
     const func1SecretsAfter = await ctx.secretsService.getFunctionSecrets(func1Id);

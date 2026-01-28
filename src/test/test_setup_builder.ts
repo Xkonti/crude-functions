@@ -77,12 +77,12 @@
  * const ctx = await TestSetupBuilder.create()
  *   .withApiKeyGroup("management", "Test keys")
  *   .withApiKey("management", "test-api-key")
- *   .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+ *   .withFunction("/hello", "hello.ts", { methods: ["GET"] })
  *   .build();
  *
  * try {
- *   const routes = await ctx.routesService.getAll();
- *   expect(routes).toHaveLength(1);
+ *   const functions = await ctx.functionsService.getAll();
+ *   expect(functions).toHaveLength(1);
  * } finally {
  *   await ctx.cleanup();
  * }
@@ -97,7 +97,7 @@ import type {
   EncryptionContext,
   SettingsContext,
   LogsContext,
-  RoutesContext,
+  FunctionsContext,
   FilesContext,
   ApiKeysContext,
   SecretsContext,
@@ -107,11 +107,11 @@ import type {
   JobQueueContext,
   SchedulingContext,
   CodeSourcesContext,
-  RouteOptions,
+  FunctionOptions,
   DeferredUser,
   DeferredKeyGroup,
   DeferredApiKey,
-  DeferredRoute,
+  DeferredFunction,
   DeferredFile,
   DeferredSetting,
   DeferredConsoleLog,
@@ -134,7 +134,7 @@ import {
   createExecutionMetricsService,
   createMetricsStateService,
   createConsoleLogService,
-  createRoutesService,
+  createFunctionsService,
   createFileService,
   createApiKeyService,
   createSecretsService,
@@ -170,7 +170,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   private deferredUsers: DeferredUser[] = [];
   private deferredGroups: DeferredKeyGroup[] = [];
   private deferredKeys: DeferredApiKey[] = [];
-  private deferredRoutes: DeferredRoute[] = [];
+  private deferredFunctions: DeferredFunction[] = [];
   private deferredFiles: DeferredFile[] = [];
   private deferredSettings: DeferredSetting[] = [];
   private deferredLogs: DeferredConsoleLog[] = [];
@@ -267,12 +267,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   }
 
   /**
-   * Include RoutesService in the test context.
+   * Include FunctionsService in the test context.
    * No dependencies - works with just the base context.
    */
-  withRoutesService(): TestSetupBuilder<TContext & RoutesContext> {
-    enableServiceWithDependencies(this.flags, "routesService");
-    return this as unknown as TestSetupBuilder<TContext & RoutesContext>;
+  withFunctionsService(): TestSetupBuilder<TContext & FunctionsContext> {
+    enableServiceWithDependencies(this.flags, "functionsService");
+    return this as unknown as TestSetupBuilder<TContext & FunctionsContext>;
   }
 
   /**
@@ -435,11 +435,11 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   }
 
   /**
-   * Include routes service.
-   * Alias for withRoutesService() for semantic clarity.
+   * Include functions service.
+   * Alias for withFunctionsService() for semantic clarity.
    */
-  withRoutes(): TestSetupBuilder<TContext & RoutesContext> {
-    return this.withRoutesService() as unknown as TestSetupBuilder<TContext & RoutesContext>;
+  withFunctions(): TestSetupBuilder<TContext & FunctionsContext> {
+    return this.withFunctionsService() as unknown as TestSetupBuilder<TContext & FunctionsContext>;
   }
 
   /**
@@ -585,21 +585,21 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   }
 
   /**
-   * Add a route to be created during build.
-   * Auto-enables: routesService.
+   * Add a function to be created during build.
+   * Auto-enables: functionsService.
    *
-   * @param path - Route path (e.g., "/hello")
+   * @param path - Function path (e.g., "/hello")
    * @param fileName - Handler filename (e.g., "hello.ts")
-   * @param options - Optional route configuration
+   * @param options - Optional function configuration
    */
-  withRoute(
+  withFunction(
     path: string,
     fileName: string,
-    options?: RouteOptions
-  ): TestSetupBuilder<TContext & RoutesContext> {
-    this.deferredRoutes.push({ path, fileName, options });
-    this.withRoutesService();
-    return this as unknown as TestSetupBuilder<TContext & RoutesContext>;
+    options?: FunctionOptions
+  ): TestSetupBuilder<TContext & FunctionsContext> {
+    this.deferredFunctions.push({ path, fileName, options });
+    this.withFunctionsService();
+    return this as unknown as TestSetupBuilder<TContext & FunctionsContext>;
   }
 
   /**
@@ -803,13 +803,13 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
       context.secretsService = createSecretsService(surrealFactory, context.encryptionService);
     }
 
-    // STEP 7: Create routes service if needed (after API keys for key resolution, after secrets for cascade delete)
-    if (this.flags.routesService) {
+    // STEP 7: Create functions service if needed (after API keys for key resolution, after secrets for cascade delete)
+    if (this.flags.functionsService) {
       // Pass secretsService for cascade delete of function-scoped secrets
-      context.routesService = createRoutesService(surrealFactory, context.secretsService);
+      context.functionsService = createFunctionsService(surrealFactory, context.secretsService);
 
-      // Create deferred routes
-      for (const { path, fileName, options } of this.deferredRoutes) {
+      // Create deferred functions
+      for (const { path, fileName, options } of this.deferredFunctions) {
         // Resolve any string keys to their IDs (now string IDs)
         let resolvedKeys: string[] | undefined;
         if (options?.keys && options.keys.length > 0) {
@@ -818,15 +818,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
             const id = groupNameToId.get(key);
             if (id === undefined) {
               throw new Error(
-                `Test setup error: Route "${path}" references API key group "${key}" ` +
-                `which was not created. Add .withApiKeyGroup("${key}") before the route.`
+                `Test setup error: Function "${path}" references API key group "${key}" ` +
+                `which was not created. Add .withApiKeyGroup("${key}") before the function.`
               );
             }
             return id;
           });
         }
 
-        await context.routesService.addRoute({
+        await context.functionsService.addFunction({
           name: options?.name ?? fileName.replace(/\.ts$/, ""),
           description: options?.description,
           handler: fileName,

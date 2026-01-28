@@ -3,7 +3,7 @@ import { Hono } from "@hono/hono";
 import { createFunctionsRoutes } from "./functions_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
-import type { BaseTestContext, RoutesContext } from "../test/types.ts";
+import type { BaseTestContext, FunctionsContext } from "../test/types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 
 interface TestFunction {
@@ -15,16 +15,16 @@ interface TestFunction {
   keys?: string[];
 }
 
-function createTestApp(ctx: BaseTestContext & RoutesContext): Hono {
+function createTestApp(ctx: BaseTestContext & FunctionsContext): Hono {
   const app = new Hono();
-  app.route("/api/functions", createFunctionsRoutes(ctx.routesService));
+  app.route("/api/functions", createFunctionsRoutes(ctx.functionsService));
   return app;
 }
 
 async function buildTestContext(functions: TestFunction[] = []) {
-  const builder = TestSetupBuilder.create().withRoutes();
+  const builder = TestSetupBuilder.create().withFunctions();
   for (const f of functions) {
-    builder.withRoute(f.routePath, f.handler, {
+    builder.withFunction(f.routePath, f.handler, {
       name: f.name,
       methods: f.methods,
       description: f.description,
@@ -82,7 +82,7 @@ integrationTest("GET /api/functions/:id returns function for existing ID", async
   const app = createTestApp(ctx);
 
   try {
-    const allFunctions = await ctx.routesService.getAll();
+    const allFunctions = await ctx.functionsService.getAll();
     const funcId = recordIdToString(allFunctions[0].id);
 
     const res = await app.request(`/api/functions/${funcId}`);
@@ -158,7 +158,7 @@ integrationTest("POST /api/functions creates function and returns it", async () 
     expect(json.function.enabled).toBe(true);
 
     // Verify function was added
-    const func = await ctx.routesService.getById(json.function.id);
+    const func = await ctx.functionsService.getById(json.function.id);
     expect(func).not.toBe(null);
     expect(func!.handler).toBe("new.ts");
   } finally {
@@ -321,7 +321,7 @@ integrationTest("PUT /api/functions/:id updates function and returns it", async 
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     const res = await app.request(`/api/functions/${recordIdToString(func!.id)}`, {
       method: "PUT",
@@ -345,7 +345,7 @@ integrationTest("PUT /api/functions/:id updates function and returns it", async 
     expect(json.function.methods).toEqual(["POST"]);
 
     // Verify update persisted
-    const updated = await ctx.routesService.getById(recordIdToString(func!.id));
+    const updated = await ctx.functionsService.getById(recordIdToString(func!.id));
     expect(updated?.name).toBe("updated");
     expect(updated?.handler).toBe("updated.ts");
   } finally {
@@ -384,7 +384,7 @@ integrationTest("PUT /api/functions/:id returns 409 on duplicate name", async ()
   const app = createTestApp(ctx);
 
   try {
-    const secondFunc = await ctx.routesService.getByName("second");
+    const secondFunc = await ctx.functionsService.getByName("second");
 
     const res = await app.request(`/api/functions/${recordIdToString(secondFunc!.id)}`, {
       method: "PUT",
@@ -433,7 +433,7 @@ integrationTest("PUT /api/functions/:id returns 400 for missing fields", async (
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     const res = await app.request(`/api/functions/${recordIdToString(func!.id)}`, {
       method: "PUT",
@@ -460,7 +460,7 @@ integrationTest("DELETE /api/functions/:id removes function and returns 204", as
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     const res = await app.request(`/api/functions/${recordIdToString(func!.id)}`, {
       method: "DELETE",
@@ -469,7 +469,7 @@ integrationTest("DELETE /api/functions/:id removes function and returns 204", as
     expect(res.status).toBe(204);
     expect(await res.text()).toBe("");
 
-    const deleted = await ctx.routesService.getById(recordIdToString(func!.id));
+    const deleted = await ctx.functionsService.getById(recordIdToString(func!.id));
     expect(deleted).toBe(null);
   } finally {
     await ctx.cleanup();
@@ -516,9 +516,9 @@ integrationTest("PUT /api/functions/:id/enable enables function and returns it",
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
     // First disable it
-    await ctx.routesService.setRouteEnabled(recordIdToString(func!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(func!.id), false);
 
     const res = await app.request(`/api/functions/${recordIdToString(func!.id)}/enable`, {
       method: "PUT",
@@ -531,7 +531,7 @@ integrationTest("PUT /api/functions/:id/enable enables function and returns it",
     expect(json.function.enabled).toBe(true);
 
     // Verify in database
-    const updated = await ctx.routesService.getById(recordIdToString(func!.id));
+    const updated = await ctx.functionsService.getById(recordIdToString(func!.id));
     expect(updated!.enabled).toBe(true);
   } finally {
     await ctx.cleanup();
@@ -546,7 +546,7 @@ integrationTest("PUT /api/functions/:id/enable is idempotent", async () => {
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     // Enable multiple times (already enabled by default)
     for (let i = 0; i < 3; i++) {
@@ -603,7 +603,7 @@ integrationTest("PUT /api/functions/:id/disable disables function and returns it
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     const res = await app.request(`/api/functions/${recordIdToString(func!.id)}/disable`, {
       method: "PUT",
@@ -616,7 +616,7 @@ integrationTest("PUT /api/functions/:id/disable disables function and returns it
     expect(json.function.enabled).toBe(false);
 
     // Verify in database
-    const updated = await ctx.routesService.getById(recordIdToString(func!.id));
+    const updated = await ctx.functionsService.getById(recordIdToString(func!.id));
     expect(updated!.enabled).toBe(false);
   } finally {
     await ctx.cleanup();
@@ -631,7 +631,7 @@ integrationTest("PUT /api/functions/:id/disable is idempotent", async () => {
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     // Disable multiple times
     for (let i = 0; i < 3; i++) {
@@ -688,26 +688,26 @@ integrationTest("enable and disable toggle function state correctly", async () =
   const app = createTestApp(ctx);
 
   try {
-    const func = await ctx.routesService.getByName("test");
+    const func = await ctx.functionsService.getByName("test");
 
     const funcId = recordIdToString(func!.id);
 
     // Initially enabled
-    expect((await ctx.routesService.getById(funcId))!.enabled).toBe(true);
+    expect((await ctx.functionsService.getById(funcId))!.enabled).toBe(true);
 
     // Disable
     let res = await app.request(`/api/functions/${funcId}/disable`, {
       method: "PUT",
     });
     expect(res.status).toBe(200);
-    expect((await ctx.routesService.getById(funcId))!.enabled).toBe(false);
+    expect((await ctx.functionsService.getById(funcId))!.enabled).toBe(false);
 
     // Re-enable
     res = await app.request(`/api/functions/${funcId}/enable`, {
       method: "PUT",
     });
     expect(res.status).toBe(200);
-    expect((await ctx.routesService.getById(funcId))!.enabled).toBe(true);
+    expect((await ctx.functionsService.getById(funcId))!.enabled).toBe(true);
   } finally {
     await ctx.cleanup();
   }

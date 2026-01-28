@@ -10,12 +10,12 @@ import type { ExecutionMetric } from "./types.ts";
 integrationTest("ExecutionMetricsService stores metric entry", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
     // Create a function to get a valid functionId
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -45,11 +45,11 @@ integrationTest("ExecutionMetricsService stores metric entry", async () => {
 integrationTest("ExecutionMetricsService stores metric with custom timestamp", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -77,17 +77,17 @@ integrationTest("ExecutionMetricsService stores metric with custom timestamp", a
 integrationTest("ExecutionMetricsService retrieves metrics by functionId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func1 = await ctx.routesService.addRoute({
+    const func1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    const func2 = await ctx.routesService.addRoute({
+    const func2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "test2.ts",
       routePath: "/test2",
@@ -134,11 +134,11 @@ integrationTest("ExecutionMetricsService retrieves metrics by functionId", async
 integrationTest("ExecutionMetricsService retrieves metrics by functionId with type filter", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -160,11 +160,11 @@ integrationTest("ExecutionMetricsService retrieves metrics by functionId with ty
 integrationTest("ExecutionMetricsService retrieves metrics by functionId with limit", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -197,11 +197,11 @@ integrationTest("ExecutionMetricsService retrieves metrics by functionId with li
 integrationTest("ExecutionMetricsService getRecent returns most recent metrics", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -234,11 +234,11 @@ integrationTest("ExecutionMetricsService getRecent returns most recent metrics",
 integrationTest("ExecutionMetricsService deletes metrics older than date", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -263,17 +263,17 @@ integrationTest("ExecutionMetricsService deletes metrics older than date", async
 integrationTest("ExecutionMetricsService deletes metrics by functionId", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func1 = await ctx.routesService.addRoute({
+    const func1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    const func2 = await ctx.routesService.addRoute({
+    const func2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "test2.ts",
       routePath: "/test2",
@@ -299,11 +299,11 @@ integrationTest("ExecutionMetricsService deletes metrics by functionId", async (
 integrationTest("ExecutionMetricsService stores all metric types", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -341,23 +341,23 @@ integrationTest("ExecutionMetricsService stores all metric types", async () => {
 integrationTest("ExecutionMetricsService getDistinctFunctionIds returns all unique function IDs", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func1 = await ctx.routesService.addRoute({
+    const func1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    const func2 = await ctx.routesService.addRoute({
+    const func2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "test2.ts",
       routePath: "/test2",
       methods: ["GET"],
     });
-    const func3 = await ctx.routesService.addRoute({
+    const func3 = await ctx.functionsService.addFunction({
       name: "func3",
       handler: "test3.ts",
       routePath: "/test3",
@@ -383,23 +383,23 @@ integrationTest("ExecutionMetricsService getDistinctFunctionIds returns all uniq
 integrationTest("ExecutionMetricsService getDistinctFunctionIdsByType returns function IDs for specific type", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func1 = await ctx.routesService.addRoute({
+    const func1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    const func2 = await ctx.routesService.addRoute({
+    const func2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "test2.ts",
       routePath: "/test2",
       methods: ["GET"],
     });
-    const func3 = await ctx.routesService.addRoute({
+    const func3 = await ctx.functionsService.addFunction({
       name: "func3",
       handler: "test3.ts",
       routePath: "/test3",
@@ -430,11 +430,11 @@ integrationTest("ExecutionMetricsService getDistinctFunctionIdsByType returns fu
 integrationTest("ExecutionMetricsService getByFunctionIdTypeAndTimeRange returns metrics in range", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -485,11 +485,11 @@ integrationTest("ExecutionMetricsService getByFunctionIdTypeAndTimeRange returns
 integrationTest("ExecutionMetricsService deleteByFunctionIdTypeAndTimeRange deletes metrics in range", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",
@@ -541,17 +541,17 @@ integrationTest("ExecutionMetricsService deleteByFunctionIdTypeAndTimeRange dele
 integrationTest("ExecutionMetricsService getMostRecentByType returns most recent metric", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func1 = await ctx.routesService.addRoute({
+    const func1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    const func2 = await ctx.routesService.addRoute({
+    const func2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "test2.ts",
       routePath: "/test2",
@@ -610,17 +610,17 @@ integrationTest("ExecutionMetricsService getMostRecentByType returns null when n
 integrationTest("ExecutionMetricsService getOldestByType returns oldest metric", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func1 = await ctx.routesService.addRoute({
+    const func1 = await ctx.functionsService.addFunction({
       name: "func1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    const func2 = await ctx.routesService.addRoute({
+    const func2 = await ctx.functionsService.addFunction({
       name: "func2",
       handler: "test2.ts",
       routePath: "/test2",
@@ -658,11 +658,11 @@ integrationTest("ExecutionMetricsService getOldestByType returns oldest metric",
 integrationTest("ExecutionMetricsService deleteByTypeOlderThan deletes old metrics of type", async () => {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .build();
 
   try {
-    const func = await ctx.routesService.addRoute({
+    const func = await ctx.functionsService.addFunction({
       name: "test-func",
       handler: "test.ts",
       routePath: "/test",

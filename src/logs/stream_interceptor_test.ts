@@ -21,10 +21,10 @@ interface StreamTestContext {
 async function createStreamTestContext(): Promise<StreamTestContext> {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
-    .withRoute("/test-route", "test.ts", { name: "test-route" })
+    .withFunction("/test-route", "test.ts", { name: "test-route" })
     .build();
 
-  const route = await ctx.routesService.getByName("test-route");
+  const route = await ctx.functionsService.getByName("test-route");
   const functionId = recordIdToString(route!.id);
 
   const interceptor = new StreamInterceptor({ logService: ctx.consoleLogService });

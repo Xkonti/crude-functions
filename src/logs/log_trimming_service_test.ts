@@ -2,10 +2,10 @@ import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { LogTrimmingService } from "./log_trimming_service.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
-import type { BaseTestContext, LogsContext, RoutesContext } from "../test/types.ts";
+import type { BaseTestContext, LogsContext, FunctionsContext } from "../test/types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 
-type LogTrimmingTestContext = BaseTestContext & LogsContext & RoutesContext;
+type LogTrimmingTestContext = BaseTestContext & LogsContext & FunctionsContext;
 
 /**
  * Creates a test context with logs and routes services,
@@ -26,8 +26,8 @@ async function createTestSetup(
 }> {
   const ctx = await TestSetupBuilder.create()
     .withLogs()
-    .withRoute("/test-route-1", "test1.ts", { name: "test-route-1" })
-    .withRoute("/test-route-2", "test2.ts", { name: "test-route-2" })
+    .withFunction("/test-route-1", "test1.ts", { name: "test-route-1" })
+    .withFunction("/test-route-2", "test2.ts", { name: "test-route-2" })
     .build();
 
   const trimmingService = new LogTrimmingService({
@@ -40,8 +40,8 @@ async function createTestSetup(
   });
 
   // Get the function IDs for use in tests
-  const route1 = await ctx.routesService.getByName("test-route-1");
-  const route2 = await ctx.routesService.getByName("test-route-2");
+  const route1 = await ctx.functionsService.getByName("test-route-1");
+  const route2 = await ctx.functionsService.getByName("test-route-2");
 
   return {
     ctx,

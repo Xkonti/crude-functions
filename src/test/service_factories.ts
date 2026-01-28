@@ -18,7 +18,7 @@ import { VersionedEncryptionService } from "../encryption/versioned_encryption_s
 import { HashService } from "../encryption/hash_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
-import { RoutesService } from "../routes/routes_service.ts";
+import { FunctionsService } from "../routes/functions_service.ts";
 import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
@@ -218,14 +218,14 @@ export function createConsoleLogService(
 // =============================================================================
 
 /**
- * Creates the RoutesService.
+ * Creates the FunctionsService.
  * Requires SurrealDB connection factory, optionally accepts SecretsService for cascade delete.
  */
-export function createRoutesService(
+export function createFunctionsService(
   surrealFactory: SurrealConnectionFactory,
   secretsService?: SecretsService
-): RoutesService {
-  return new RoutesService({ surrealFactory, secretsService });
+): FunctionsService {
+  return new FunctionsService({ surrealFactory, secretsService });
 }
 
 // =============================================================================

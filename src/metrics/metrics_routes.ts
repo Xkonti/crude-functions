@@ -1,7 +1,7 @@
 import { Hono } from "@hono/hono";
 import { RecordId } from "surrealdb";
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
-import type { RoutesService } from "../routes/routes_service.ts";
+import type { FunctionsService } from "../routes/functions_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { validateSurrealId } from "../validation/common.ts";
 import type { ExecutionMetric, MetricType } from "./types.ts";
@@ -9,7 +9,7 @@ import { SettingNames } from "../settings/types.ts";
 
 export interface MetricsRoutesOptions {
   executionMetricsService: ExecutionMetricsService;
-  routesService: RoutesService;
+  functionsService: FunctionsService;
   settingsService: SettingsService;
 }
 
@@ -29,7 +29,7 @@ const RESOLUTION_TO_TYPE: Record<string, MetricType> = {
 const VALID_RESOLUTIONS = Object.keys(RESOLUTION_TO_TYPE);
 
 export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
-  const { executionMetricsService, routesService, settingsService } = options;
+  const { executionMetricsService, functionsService, settingsService } = options;
   const routes = new Hono();
 
   // GET /api/metrics - Query metrics with optional functionId and required resolution
@@ -69,12 +69,12 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
       }
 
       // Verify route exists
-      const route = await routesService.getById(parsed);
-      if (!route) {
+      const func = await functionsService.getById(parsed);
+      if (!func) {
         return c.json({ error: `Function with id ${parsed} not found` }, 404);
       }
 
-      functionId = route.id;
+      functionId = func.id;
       functionIdStr = parsed;
     }
 

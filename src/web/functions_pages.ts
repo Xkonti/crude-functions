@@ -1,8 +1,8 @@
 import { Hono } from "@hono/hono";
-import type { RoutesService, FunctionRoute, NewFunctionRoute } from "../routes/routes_service.ts";
+import type { FunctionsService, FunctionDefinition, NewFunctionDefinition } from "../routes/functions_service.ts";
 import {
-  validateRouteName,
-  validateRoutePath,
+  validateFunctionName,
+  validateFunctionPath,
   validateMethods,
 } from "../validation/routes.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
@@ -765,7 +765,7 @@ function renderMetricsPage(
   dataPoints: ChartDataPoint[],
   summary: MetricsSummary,
   retentionDays: number,
-  allFunctions: FunctionRoute[]
+  allFunctions: FunctionDefinition[]
 ): string {
   const isGlobal = routeId === null;
   const metricsBaseUrl = isGlobal ? "/web/functions/metrics/global" : `/web/functions/metrics/${routeId}`;
@@ -1113,7 +1113,7 @@ function renderMetricsPage(
 
 function renderFunctionForm(
   action: string,
-  route: Partial<FunctionRoute> = {},
+  route: Partial<FunctionDefinition> = {},
   availableGroups: ApiKeyGroup[] = [],
   error?: string,
   csrfToken: string = ""
@@ -1254,7 +1254,7 @@ function renderFunctionForm(
 }
 
 function parseFormData(formData: FormData): {
-  route: NewFunctionRoute;
+  route: NewFunctionDefinition;
   errors: string[];
 } {
   const errors: string[] = [];
@@ -1273,7 +1273,7 @@ function parseFormData(formData: FormData): {
     .filter((id) => id.length > 0);
 
   // Validation
-  if (!validateRouteName(name)) {
+  if (!validateFunctionName(name)) {
     errors.push("Name is required");
   }
 
@@ -1281,7 +1281,7 @@ function parseFormData(formData: FormData): {
     errors.push("Handler path is required");
   }
 
-  if (!validateRoutePath(routePath)) {
+  if (!validateFunctionPath(routePath)) {
     errors.push("Route path must start with / and not contain //");
   }
 
@@ -1292,7 +1292,7 @@ function parseFormData(formData: FormData): {
   // Keys are optional - only include if any selected
   const keys = keysArray.length > 0 ? keysArray : undefined;
 
-  const route: NewFunctionRoute = {
+  const route: NewFunctionDefinition = {
     name,
     description,
     handler,
@@ -1450,7 +1450,7 @@ function renderFunctionSecretEditForm(
 }
 
 export function createFunctionsPages(
-  routesService: RoutesService,
+  functionsService: FunctionsService,
   consoleLogService: ConsoleLogService,
   executionMetricsService: ExecutionMetricsService,
   apiKeyService: ApiKeyService,
@@ -1479,7 +1479,7 @@ export function createFunctionsPages(
   routes.get("/", async (c) => {
     const success = c.req.query("success");
     const error = c.req.query("error");
-    const allRoutes = await routesService.getAll();
+    const allRoutes = await functionsService.getAll();
 
     // Pre-render key group names for all routes
     const routesWithGroupNames = await Promise.all(
@@ -1644,7 +1644,7 @@ export function createFunctionsPages(
     }
 
     try {
-      await routesService.addRoute(route);
+      await functionsService.addFunction(route);
       return c.redirect("/web/functions?success=" + encodeURIComponent(`Function created: ${route.name}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create function";
@@ -1666,7 +1666,7 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
-    const route = await routesService.getById(id);
+    const route = await functionsService.getById(id);
     if (!route) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
@@ -1690,7 +1690,7 @@ export function createFunctionsPages(
     }
 
     // Verify route exists
-    const existingRoute = await routesService.getById(id);
+    const existingRoute = await functionsService.getById(id);
     if (!existingRoute) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
@@ -1723,7 +1723,7 @@ export function createFunctionsPages(
 
     try {
       // Update route in place - preserves ID and associated logs/metrics
-      await routesService.updateRoute(id, route);
+      await functionsService.updateFunction(id, route);
       return c.redirect("/web/functions?success=" + encodeURIComponent(`Function updated: ${route.name}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to update function";
@@ -1748,7 +1748,7 @@ export function createFunctionsPages(
     }
 
     // Get the function route to determine accepted groups
-    const route = await routesService.getById(id);
+    const route = await functionsService.getById(id);
     if (!route) {
       return c.text("Function not found", 404);
     }
@@ -1769,7 +1769,7 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
-    const route = await routesService.getById(id);
+    const route = await functionsService.getById(id);
     if (!route) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
@@ -1796,11 +1796,11 @@ export function createFunctionsPages(
     }
 
     // Get the route name for the success message before deletion
-    const route = await routesService.getById(id);
+    const route = await functionsService.getById(id);
     const routeName = route?.name ?? `ID ${id}`;
 
     try {
-      await routesService.removeRouteById(id);
+      await functionsService.removeFunctionById(id);
       return c.redirect("/web/functions?success=" + encodeURIComponent(`Function deleted: ${routeName}`));
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to delete function";
@@ -1816,7 +1816,7 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
-    const route = await routesService.getById(id);
+    const route = await functionsService.getById(id);
     if (!route) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
@@ -1871,7 +1871,7 @@ export function createFunctionsPages(
     const summary = calculateSummary(dataPoints);
 
     // Get all functions for source selector
-    const allFunctions = await routesService.getAll();
+    const allFunctions = await functionsService.getAll();
 
     const content = renderMetricsPage(
       "Global metrics",
@@ -1901,7 +1901,7 @@ export function createFunctionsPages(
       return c.redirect("/web/functions?error=" + encodeURIComponent("Invalid function ID"));
     }
 
-    const route = await routesService.getById(id);
+    const route = await functionsService.getById(id);
     if (!route) {
       return c.redirect("/web/functions?error=" + encodeURIComponent("Function not found"));
     }
@@ -1922,7 +1922,7 @@ export function createFunctionsPages(
     const summary = calculateSummary(dataPoints);
 
     // Get all functions for source selector
-    const allFunctions = await routesService.getAll();
+    const allFunctions = await functionsService.getAll();
 
     const content = renderMetricsPage(
       route.name,
@@ -1950,7 +1950,7 @@ export function createFunctionsPages(
     }
 
     // Verify function exists
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")
@@ -1999,7 +1999,7 @@ export function createFunctionsPages(
       );
     }
 
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")
@@ -2034,7 +2034,7 @@ export function createFunctionsPages(
       );
     }
 
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")
@@ -2113,7 +2113,7 @@ export function createFunctionsPages(
       );
     }
 
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")
@@ -2159,7 +2159,7 @@ export function createFunctionsPages(
       );
     }
 
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")
@@ -2257,7 +2257,7 @@ export function createFunctionsPages(
       );
     }
 
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")
@@ -2298,7 +2298,7 @@ export function createFunctionsPages(
       );
     }
 
-    const route = await routesService.getById(functionId);
+    const route = await functionsService.getById(functionId);
     if (!route) {
       return c.redirect(
         "/web/functions?error=" + encodeURIComponent("Function not found")

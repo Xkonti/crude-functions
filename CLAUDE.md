@@ -21,7 +21,7 @@ This is a Deno-based serverless function router called Crude Functions. It a bar
 Request → /run/* → FunctionRouter → HandlerLoader → Execute handler → Response
 ```
 
-Function router handles API key verification (if route requires keys) and handles capturing console and metrics.
+Function router handles API key verification (if function requires keys) and handles capturing console and metrics.
 
 ### Core Services (src/)
 
@@ -32,7 +32,7 @@ Function router handles API key verification (if route requires keys) and handle
 | `FunctionRouter` | `functions/` | Dynamic routing, handler execution, context injection |
 | `HandlerLoader` | `functions/` | Hot-reload handlers (tracks file mtime) |
 | `ApiKeyService` | `keys/` | Key group management, no caching |
-| `RoutesService` | `routes/` | Route CRUD, dirty-flag pattern for rebuilds |
+| `FunctionsService` | `routes/` | Function definition CRUD, dirty-flag pattern for rebuilds |
 | `FileService` | `files/` | Code file management, path traversal prevention |
 | `ConsoleLogService` | `logs/` | Capture console.* calls per request |
 | `ExecutionMetricsService` | `metrics/` | Timing and count tracking |
@@ -41,7 +41,7 @@ Function router handles API key verification (if route requires keys) and handle
 
 - **Web UI**: Better Auth with session cookies only - no API keys accepted for the UI endpoints.
 - **API**: Better Auth session OR API key via `X-API-Key` header (groups configured in `api.access-groups` setting)
-- **Function execution**: Optional per-route API key requirements
+- **Function execution**: Optional per-function API key requirements
 - Sign-up disabled after first user is created - existing users can add new ones on dedicated user management page
 
 ### Key Patterns
@@ -61,7 +61,7 @@ Function router handles API key verification (if route requires keys) and handle
 **Examples:**
 
 - Routes need API keys? → Use `ApiKeyService`, not direct DB queries
-- Need to create a function route? → Use `RoutesService.addRoute()`, not `db.execute()`
+- Need to create a function? → Use `FunctionsService.addFunction()`, not `db.execute()`
 - File management? → Use `FileService`, which handles both DB and filesystem
 
 **Service architecture**:
