@@ -239,7 +239,7 @@ integrationTest("KeyRotationService - does not rotate when interval not reached"
     // Secret should still be version A
     const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[{ value: string }[]]>(
-        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        "SELECT `value` FROM secret WHERE name = $name LIMIT 1",
         { name: "test-secret" }
       );
       return rows?.[0] ?? null;
@@ -279,7 +279,7 @@ integrationTest("KeyRotationService - triggers rotation when interval exceeded",
     // Secret should now be version B
     const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[{ value: string }[]]>(
-        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        "SELECT `value` FROM secret WHERE name = $name LIMIT 1",
         { name: "test-secret" }
       );
       return rows?.[0] ?? null;
@@ -353,7 +353,7 @@ integrationTest("KeyRotationService - resumes incomplete rotation", async () => 
     // Secret should now be version B
     const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[{ value: string }[]]>(
-        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        "SELECT `value` FROM secret WHERE name = $name LIMIT 1",
         { name: "old-secret" }
       );
       return rows?.[0] ?? null;
@@ -402,7 +402,7 @@ integrationTest("KeyRotationService - processes multiple secrets in batches", as
     // All secrets should be version B
     const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
       const [results] = await db.query<[{ name: string; value: string }[]]>(
-        `SELECT name, value FROM secret`
+        "SELECT name, `value` FROM secret"
       );
       return results ?? [];
     });
@@ -457,7 +457,7 @@ integrationTest("KeyRotationService - rotates apiKeys table", async () => {
     // All API keys should be version B
     const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
       const [results] = await db.query<[{ value: string }[]]>(
-        `SELECT value FROM apiKey`
+        "SELECT `value` FROM apiKey"
       );
       return results ?? [];
     });
@@ -512,7 +512,7 @@ integrationTest("KeyRotationService - preserves data integrity after rotation", 
     for (let i = 0; i < originalValues.length; i++) {
       const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
         const [rows] = await db.query<[{ value: string }[]]>(
-          "SELECT value FROM secret WHERE name = $name LIMIT 1",
+          "SELECT `value` FROM secret WHERE name = $name LIMIT 1",
           { name: `secret-${i}` }
         );
         return rows?.[0] ?? null;
@@ -571,7 +571,7 @@ integrationTest("KeyRotationService - triggerManualRotation forces rotation", as
     // Secret should now be version B
     const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
       const [rows] = await db.query<[{ value: string }[]]>(
-        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        "SELECT `value` FROM secret WHERE name = $name LIMIT 1",
         { name: "test-secret" }
       );
       return rows?.[0] ?? null;
