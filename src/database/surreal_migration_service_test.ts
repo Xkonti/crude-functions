@@ -25,7 +25,6 @@ integrationTest("getAvailableMigrations returns empty array for empty directory"
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
     .withoutSurrealMigrations()
     .withBaseOnly()
     .build();
@@ -55,8 +54,7 @@ integrationTest("getAvailableMigrations parses migration files correctly", async
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
+        .withoutSurrealMigrations()
       .withBaseOnly()
       .build();
 
@@ -97,8 +95,7 @@ integrationTest("getAvailableMigrations ignores non-matching files", async () =>
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
+        .withoutSurrealMigrations()
       .withBaseOnly()
       .build();
 
@@ -132,8 +129,7 @@ integrationTest("getAvailableMigrations returns migrations sorted by version", a
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
+        .withoutSurrealMigrations()
       .withBaseOnly()
       .build();
 
@@ -186,8 +182,7 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
+        .withoutSurrealMigrations()
       .withBaseOnly()
       .build();
 
@@ -221,7 +216,6 @@ integrationTest("migrate only applies new migrations on partially migrated datab
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
     .withoutSurrealMigrations()
     .withBaseOnly()
     .build();
@@ -286,7 +280,6 @@ integrationTest("migrate returns zero applied when no pending migrations", async
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
     .withoutSurrealMigrations()
     .withBaseOnly()
     .build();
@@ -352,8 +345,7 @@ integrationTest("migrate handles version gaps correctly", async () => {
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
+        .withoutSurrealMigrations()
       .withBaseOnly()
       .build();
 
@@ -399,8 +391,7 @@ integrationTest("migrate throws SurrealMigrationExecutionError on SurrealQL fail
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()
-      .withoutSurrealMigrations()
+        .withoutSurrealMigrations()
       .withBaseOnly()
       .build();
 
@@ -428,7 +419,6 @@ integrationTest("migrate returns correct result when no migrations exist", async
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
     .withoutSurrealMigrations()
     .withBaseOnly()
     .build();
@@ -485,7 +475,6 @@ integrationTest("getAvailableMigrations throws SurrealMigrationError when direct
 
   const ctx = await TestSetupBuilder.create()
     .withMigrationsDir(tempMigrationsDir)
-    .withoutSQLiteMigrations()
     .withoutSurrealMigrations()
     .withBaseOnly()
     .build();

@@ -14,7 +14,6 @@ integrationTest("TestSetupBuilder creates basic context with all services", asyn
 
   try {
     // Verify all services are initialized
-    expect(ctx.db).toBeDefined();
     expect(ctx.encryptionService).toBeDefined();
     expect(ctx.hashService).toBeDefined();
     expect(ctx.settingsService).toBeDefined();
@@ -35,12 +34,11 @@ integrationTest("TestSetupBuilder creates basic context with all services", asyn
     expect(ctx.encryptionKeys.hash_key).toBeDefined();
     expect(ctx.encryptionKeys.better_auth_secret).toBeDefined();
 
-    // Verify database is open and migrations ran (check for a table)
-    const result = await ctx.db.queryOne<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='schemaVersion'"
-    );
-    expect(result).toBeDefined();
-    expect(result?.name).toBe("schemaVersion");
+    // Verify SurrealDB connection is working
+    expect(ctx.surrealDb).toBeDefined();
+    expect(ctx.surrealFactory).toBeDefined();
+    expect(ctx.surrealNamespace).toBeDefined();
+    expect(ctx.surrealDatabase).toBeDefined();
   } finally {
     await ctx.cleanup();
   }

@@ -28,7 +28,6 @@
  */
 
 import type { Surreal, RecordId } from "surrealdb";
-import type { DatabaseService } from "../database/database_service.ts";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import type { HashService } from "../encryption/hash_service.ts";
@@ -63,14 +62,10 @@ import type { SettingName } from "../settings/types.ts";
  * running for the duration of the test suite.
  */
 export interface BaseTestContext {
-  /** Temp directory for test isolation (contains db, keys, code) */
+  /** Temp directory for test isolation (contains keys, code) */
   tempDir: string;
   /** Directory for code files (${tempDir}/code) */
   codeDir: string;
-  /** Database path */
-  databasePath: string;
-  /** SQLite database service instance */
-  db: DatabaseService;
   /** Raw Surreal SDK connection (connected to isolated namespace) */
   surrealDb: Surreal;
   /** SurrealDB connection factory for this test's namespace */

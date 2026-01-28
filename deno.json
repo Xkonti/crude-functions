@@ -12,8 +12,6 @@
     "@std/expect": "jsr:@std/expect",
     "@std/path": "jsr:@std/path@^1.1.4",
     "@std/testing": "jsr:@std/testing",
-    "@db/sqlite": "jsr:@db/sqlite",
-    "@soapbox/kysely-deno-sqlite": "jsr:@soapbox/kysely-deno-sqlite",
     "@core/asyncutil": "jsr:@core/asyncutil",
     "@da/bcrypt": "jsr:@da/bcrypt@1.0.1",
     "better-auth": "npm:better-auth@^1.4.10",

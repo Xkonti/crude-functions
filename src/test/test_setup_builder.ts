@@ -160,7 +160,6 @@ import {
  */
 export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext> {
   private migrationsDir = "./migrations";
-  private runSQLiteMigrations = true;
   private runSurrealMigrations = true;
   private baseOnly = false; // When true, skip all services (just base context)
 
@@ -213,27 +212,6 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
    */
   withoutSurrealMigrations(): this {
     this.runSurrealMigrations = false;
-    return this;
-  }
-
-  /**
-   * Skip SQLite migrations during setup.
-   *
-   * Use this when testing with a custom migrations directory that has files
-   * SQLite might try to run (e.g., when testing that SurrealQL ignores .sql files).
-   *
-   * @example
-   * ```typescript
-   * const ctx = await TestSetupBuilder.create()
-   *   .withMigrationsDir(tempMigrationsDir)
-   *   .withoutSQLiteMigrations()
-   *   .withoutSurrealMigrations()
-   *   .withBaseOnly()
-   *   .build();
-   * ```
-   */
-  withoutSQLiteMigrations(): this {
-    this.runSQLiteMigrations = false;
     return this;
   }
 
@@ -713,17 +691,14 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 1: Create core infrastructure (always needed)
-    // This includes SQLite database, shared SurrealDB connection, and migrations
+    // This includes shared SurrealDB connection and migrations
     const {
       tempDir,
       codeDir,
-      databasePath,
-      db,
       surrealTestContext,
       surrealDb,
       surrealFactory,
     } = await createCoreInfrastructure(this.migrationsDir, {
-      runSQLiteMigrations: this.runSQLiteMigrations,
       runSurrealMigrations: this.runSurrealMigrations,
     });
 
@@ -732,8 +707,6 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     const context: any = {
       tempDir,
       codeDir,
-      databasePath,
-      db,
       surrealDb,
       surrealFactory,
       surrealNamespace: surrealTestContext.namespace,
@@ -991,7 +964,6 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 15: Create cleanup function
     context.cleanup = createCleanupFunction(
-      db,
       tempDir,
       surrealTestContext,
       this.flags.consoleLogService ? context.consoleLogService : undefined

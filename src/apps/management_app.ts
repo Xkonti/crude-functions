@@ -1,7 +1,6 @@
 import { Hono } from "@hono/hono";
 
 import type { Auth } from "../auth/auth.ts";
-import type { DatabaseService } from "../database/database_service.ts";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
@@ -38,7 +37,6 @@ import { createWebRoutes } from "../web/web_routes.ts";
  */
 export interface ManagementAppDeps {
   auth: Auth;
-  db: DatabaseService;
   surrealFactory: SurrealConnectionFactory;
   apiKeyService: ApiKeyService;
   routesService: RoutesService;
@@ -199,7 +197,6 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
 
   app.route("/web", createWebRoutes({
     auth: deps.auth,
-    db: deps.db,
     surrealFactory: deps.surrealFactory,
     userService: deps.userService,
     routesService: deps.routesService,

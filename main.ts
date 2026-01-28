@@ -13,8 +13,6 @@ import { ProcessIsolator } from "./src/process/process_isolator.ts";
 const processIsolator = new ProcessIsolator();
 processIsolator.install();
 
-import { DatabaseService } from "./src/database/database_service.ts";
-import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
 import { RoutesService } from "./src/routes/routes_service.ts";
@@ -124,29 +122,8 @@ const csrfService = new CsrfService({
 });
 console.log("✓ CSRF service initialized");
 
-// Initialize database
-// The database connection remains open for the application's lifetime and is
-// only closed during graceful shutdown (SIGTERM/SIGINT signals).
-// Services assume the database is always open after this initialization.
-const db = new DatabaseService({
-  databasePath: "./data/database.db",
-});
-await db.open();
-
-// Run migrations
-const migrationService = new MigrationService({
-  db,
-  migrationsDir: "./migrations",
-});
-const migrationResult = await migrationService.migrate();
-if (migrationResult.appliedCount > 0) {
-  console.log(
-    `Applied ${migrationResult.appliedCount} migration(s): version ${migrationResult.fromVersion ?? "none"} → ${migrationResult.toVersion}`
-  );
-}
-
 // ============================================================================
-// SurrealDB Initialization (Experimental)
+// SurrealDB Initialization
 // ============================================================================
 
 // Initialize SurrealDB with supervisor for process lifecycle management
@@ -524,7 +501,6 @@ const functionApp = createFunctionApp(functionRouter);
 // Management app (runs on MANAGEMENT_PORT)
 const managementApp = createManagementApp({
   auth,
-  db,
   surrealFactory,
   apiKeyService,
   routesService,
@@ -583,10 +559,6 @@ async function gracefulShutdown(signal: string) {
       await surrealSupervisor.stop();
       console.log("SurrealDB supervisor stopped");
     }
-
-    // 8. Close SQLite database last
-    await db.close();
-    console.log("Database connection closed successfully");
   } catch (error) {
     console.error("Error during shutdown:", error);
     Deno.exit(1);

@@ -11,7 +11,6 @@ import { createSettingsPages } from "./settings_pages.ts";
 import { layout, getLayoutUser } from "./templates.ts";
 import { createSessionAuthMiddleware } from "../auth/auth_middleware.ts";
 import type { Auth } from "../auth/auth.ts";
-import type { DatabaseService } from "../database/database_service.ts";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
@@ -26,7 +25,6 @@ import type { SourceFileService } from "../files/source_file_service.ts";
 
 export interface WebRoutesOptions {
   auth: Auth;
-  db: DatabaseService;
   surrealFactory: SurrealConnectionFactory;
   userService: UserService;
   routesService: RoutesService;
