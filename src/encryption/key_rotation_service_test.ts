@@ -1,12 +1,14 @@
 import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
+import { RecordId } from "surrealdb";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { KeyRotationService } from "./key_rotation_service.ts";
 import { KeyStorageService } from "./key_storage_service.ts";
 import { VersionedEncryptionService } from "./versioned_encryption_service.ts";
+import type { HashService } from "./hash_service.ts";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
 import type { KeyRotationConfig } from "./key_rotation_types.ts";
-import type { DatabaseService } from "../database/database_service.ts";
 
 // Test keys (32 bytes base64-encoded)
 const TEST_KEY_A = "YTJhNGY2ZDhiMWU3YzNhOGYyZDZiNGU4YzFhN2YzZDk=";
@@ -31,9 +33,10 @@ function createMockKeyGenerator() {
  */
 interface TestContext {
   tempDir: string;
-  db: DatabaseService;
+  surrealFactory: SurrealConnectionFactory;
   keyStorage: KeyStorageService;
   encryptionService: VersionedEncryptionService;
+  hashService: HashService;
   config: KeyRotationConfig;
   cleanup: () => Promise<void>;
 }
@@ -50,7 +53,6 @@ async function createTestContext(
   keysOverride?: Partial<EncryptionKeyFile>
 ): Promise<TestContext> {
   // Build base context with database and migrations
-  // Only need encryption for better_auth_secret and hash_key
   const baseCtx = await TestSetupBuilder.create()
     .withEncryption()
     .build();
@@ -85,16 +87,17 @@ async function createTestContext(
 
   // Fast config for testing
   const config: KeyRotationConfig = {
-    rotationIntervalDays: 0, // Immediate rotation for testing
+    rotationIntervalDays: 0,
     batchSize: 10,
     batchSleepMs: 1,
   };
 
   return {
     tempDir: baseCtx.tempDir,
-    db: baseCtx.db,
+    surrealFactory: baseCtx.surrealFactory,
     keyStorage,
     encryptionService,
+    hashService: baseCtx.hashService,
     config,
     cleanup: baseCtx.cleanup,
   };
@@ -105,29 +108,50 @@ async function insertSecret(
   ctx: TestContext,
   name: string,
   plaintext: string
-): Promise<number> {
+): Promise<RecordId> {
   const encrypted = await ctx.encryptionService.encrypt(plaintext);
-  const result = await ctx.db.execute(
-    "INSERT INTO secrets (name, value, scope) VALUES (?, ?, 0)",
-    [name, encrypted]
-  );
-  return result.lastInsertRowId;
+
+  return await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+    const [rows] = await db.query<[{ id: RecordId }[]]>(
+      `CREATE secret SET
+        name = $name,
+        value = $value,
+        scopeType = "global",
+        scopeRef = NONE`,
+      { name, value: encrypted }
+    );
+    return rows[0].id;
+  });
 }
 
 // Helper to insert encrypted api key
 async function insertApiKey(
   ctx: TestContext,
-  groupId: number,
+  groupId: RecordId,
   plaintext: string,
   name?: string
-): Promise<number> {
+): Promise<RecordId> {
   const encrypted = await ctx.encryptionService.encrypt(plaintext);
   const keyName = name ?? `test-key-${Date.now()}-${Math.random()}`;
-  const result = await ctx.db.execute(
-    "INSERT INTO apiKeys (groupId, name, value, description) VALUES (?, ?, ?, 'test')",
-    [groupId, keyName, encrypted]
-  );
-  return result.lastInsertRowId;
+  const hash = await ctx.hashService.computeHash(plaintext);
+
+  return await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+    const [rows] = await db.query<[{ id: RecordId }[]]>(
+      `CREATE apiKey SET
+        groupId = $groupId,
+        name = $name,
+        value = $value,
+        valueHash = $hash,
+        description = "test"`,
+      {
+        groupId: groupId,
+        name: keyName,
+        value: encrypted,
+        hash: hash
+      }
+    );
+    return rows[0].id;
+  });
 }
 
 // =====================
@@ -139,7 +163,7 @@ integrationTest("KeyRotationService - performRotationCheck completes successfull
 
   try {
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, rotationIntervalDays: 365 }, // Don't trigger rotation
@@ -164,7 +188,7 @@ integrationTest("KeyRotationService - concurrent performRotationCheck calls are 
 
   try {
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, rotationIntervalDays: 365 },
@@ -201,7 +225,7 @@ integrationTest("KeyRotationService - does not rotate when interval not reached"
     await insertSecret(ctx, "test-secret", "secret-value");
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, rotationIntervalDays: 365 }, // Far in future
@@ -213,10 +237,13 @@ integrationTest("KeyRotationService - does not rotate when interval not reached"
     expect(result.rotationPerformed).toBe(false);
 
     // Secret should still be version A
-    const row = await ctx.db.queryOne<{ value: string }>(
-      "SELECT value FROM secrets WHERE name = ?",
-      ["test-secret"]
-    );
+    const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ value: string }[]]>(
+        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        { name: "test-secret" }
+      );
+      return rows?.[0] ?? null;
+    });
     expect(row!.value.charAt(0)).toBe("A");
   } finally {
     await ctx.cleanup();
@@ -237,7 +264,7 @@ integrationTest("KeyRotationService - triggers rotation when interval exceeded",
     await insertSecret(ctx, "test-secret", "secret-value");
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, rotationIntervalDays: 90 }, // 90 days < 100 days ago
@@ -250,10 +277,13 @@ integrationTest("KeyRotationService - triggers rotation when interval exceeded",
     expect(result.resumedIncomplete).toBe(false);
 
     // Secret should now be version B
-    const row = await ctx.db.queryOne<{ value: string }>(
-      "SELECT value FROM secrets WHERE name = ?",
-      ["test-secret"]
-    );
+    const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ value: string }[]]>(
+        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        { name: "test-secret" }
+      );
+      return rows?.[0] ?? null;
+    });
     expect(row!.value.charAt(0)).toBe("B");
 
     // Keys file should be updated
@@ -296,13 +326,19 @@ integrationTest("KeyRotationService - resumes incomplete rotation", async () => 
         currentVersion: "A",
       }).encrypt("secret-value")).slice(1);
 
-    await ctx.db.execute(
-      "INSERT INTO secrets (name, value, scope) VALUES (?, ?, 0)",
-      ["old-secret", encryptedA]
-    );
+    await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(
+        `CREATE secret SET
+          name = $name,
+          value = $value,
+          scopeType = "global",
+          scopeRef = NONE`,
+        { name: "old-secret", value: encryptedA }
+      );
+    });
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: ctx.config,
@@ -315,10 +351,13 @@ integrationTest("KeyRotationService - resumes incomplete rotation", async () => 
     expect(result.resumedIncomplete).toBe(true);
 
     // Secret should now be version B
-    const row = await ctx.db.queryOne<{ value: string }>(
-      "SELECT value FROM secrets WHERE name = ?",
-      ["old-secret"]
-    );
+    const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ value: string }[]]>(
+        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        { name: "old-secret" }
+      );
+      return rows?.[0] ?? null;
+    });
     expect(row!.value.charAt(0)).toBe("B");
 
     // Keys file should have phased_out cleared
@@ -349,7 +388,7 @@ integrationTest("KeyRotationService - processes multiple secrets in batches", as
     }
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, batchSize: 10, rotationIntervalDays: 1 }, // 10 per batch = 3 batches
@@ -361,9 +400,12 @@ integrationTest("KeyRotationService - processes multiple secrets in batches", as
     expect(result.rotationPerformed).toBe(true);
 
     // All secrets should be version B
-    const rows = await ctx.db.queryAll<{ name: string; value: string }>(
-      "SELECT name, value FROM secrets"
-    );
+    const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [results] = await db.query<[{ name: string; value: string }[]]>(
+        `SELECT name, value FROM secret`
+      );
+      return results ?? [];
+    });
 
     expect(rows.length).toBe(25);
     for (const row of rows) {
@@ -388,16 +430,20 @@ integrationTest("KeyRotationService - rotates apiKeys table", async () => {
 
   try {
     // Create a group and add API keys
-    const groupResult = await ctx.db.execute(
-      "INSERT INTO apiKeyGroups (name, description) VALUES (?, ?)",
-      ["test-group", "Test"]
-    );
-    const groupId = groupResult.lastInsertRowId;
+    const groupId = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ id: RecordId }[]]>(
+        `CREATE apiKeyGroup SET
+          name = $name,
+          description = $description`,
+        { name: "test-group", description: "Test" }
+      );
+      return rows[0].id;
+    });
     await insertApiKey(ctx, groupId, "api-key-value-1");
     await insertApiKey(ctx, groupId, "api-key-value-2");
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: ctx.config,
@@ -409,9 +455,12 @@ integrationTest("KeyRotationService - rotates apiKeys table", async () => {
     expect(result.rotationPerformed).toBe(true);
 
     // All API keys should be version B
-    const rows = await ctx.db.queryAll<{ value: string }>(
-      "SELECT value FROM apiKeys"
-    );
+    const rows = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [results] = await db.query<[{ value: string }[]]>(
+        `SELECT value FROM apiKey`
+      );
+      return results ?? [];
+    });
 
     expect(rows.length).toBe(2);
     for (const row of rows) {
@@ -448,7 +497,7 @@ integrationTest("KeyRotationService - preserves data integrity after rotation", 
     }
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: ctx.config,
@@ -461,10 +510,13 @@ integrationTest("KeyRotationService - preserves data integrity after rotation", 
 
     // Verify all values are preserved
     for (let i = 0; i < originalValues.length; i++) {
-      const row = await ctx.db.queryOne<{ value: string }>(
-        "SELECT value FROM secrets WHERE name = ?",
-        [`secret-${i}`]
-      );
+      const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+        const [rows] = await db.query<[{ value: string }[]]>(
+          "SELECT value FROM secret WHERE name = $name LIMIT 1",
+          { name: `secret-${i}` }
+        );
+        return rows?.[0] ?? null;
+      });
 
       const decrypted = await ctx.encryptionService.decrypt(row!.value);
       expect(decrypted).toBe(originalValues[i]);
@@ -507,7 +559,7 @@ integrationTest("KeyRotationService - triggerManualRotation forces rotation", as
     await insertSecret(ctx, "test-secret", "secret-value");
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, rotationIntervalDays: 365 }, // Would not trigger scheduled rotation
@@ -517,10 +569,13 @@ integrationTest("KeyRotationService - triggerManualRotation forces rotation", as
     await service.triggerManualRotation();
 
     // Secret should now be version B
-    const row = await ctx.db.queryOne<{ value: string }>(
-      "SELECT value FROM secrets WHERE name = ?",
-      ["test-secret"]
-    );
+    const row = await ctx.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[{ value: string }[]]>(
+        "SELECT value FROM secret WHERE name = $name LIMIT 1",
+        { name: "test-secret" }
+      );
+      return rows?.[0] ?? null;
+    });
     expect(row!.value.charAt(0)).toBe("B");
   } finally {
     await ctx.cleanup();
@@ -537,7 +592,7 @@ integrationTest("KeyRotationService - triggerManualRotation rejects when rotatio
     }
 
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: { ...ctx.config, batchSize: 5, batchSleepMs: 50 }, // Small batches with sleep
@@ -570,7 +625,7 @@ integrationTest("KeyRotationService - getRotationStatus returns current state", 
 
   try {
     const service = new KeyRotationService({
-      db: ctx.db,
+      surrealFactory: ctx.surrealFactory,
       encryptionService: ctx.encryptionService,
       keyStorage: ctx.keyStorage,
       config: ctx.config,
