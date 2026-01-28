@@ -295,11 +295,11 @@ const consoleLogService = new ConsoleLogService({ surrealFactory, settingsServic
 const streamInterceptor = new StreamInterceptor({ logService: consoleLogService });
 streamInterceptor.install();
 
-// Initialize execution metrics service
-const executionMetricsService = new ExecutionMetricsService({ db });
+// Initialize execution metrics service (SurrealDB)
+const executionMetricsService = new ExecutionMetricsService({ surrealFactory });
 
-// Initialize metrics state service (for aggregation watermarks)
-const metricsStateService = new MetricsStateService({ db });
+// Initialize metrics state service for aggregation watermarks (SurrealDB)
+const metricsStateService = new MetricsStateService({ surrealFactory });
 
 // Initialize and start metrics aggregation service
 const metricsAggregationConfig: MetricsAggregationConfig = {

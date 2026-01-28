@@ -1,20 +1,14 @@
-import type { DatabaseService } from "../database/database_service.ts";
-import type { MetricsStateKey } from "./types.ts";
-
-/** Database row shape for metricsState queries */
-interface MetricsStateRow {
-  id: number;
-  key: string;
-  value: string;
-  updatedAt: string;
-  [key: string]: unknown;
-}
+import { Mutex } from "@core/asyncutil/mutex";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { toDate } from "../database/surreal_helpers.ts";
+import type { MetricsStateKey, MetricsStateRow } from "./types.ts";
 
 /**
  * Options for constructing a MetricsStateService.
  */
 export interface MetricsStateServiceOptions {
-  db: DatabaseService;
+  surrealFactory: SurrealConnectionFactory;
 }
 
 /**
@@ -24,43 +18,57 @@ export interface MetricsStateServiceOptions {
  * - lastProcessedMinute: last minute that was aggregated
  * - lastProcessedHour: last hour that was aggregated
  * - lastProcessedDay: last day that was aggregated
+ *
+ * Uses fixed RecordIds for O(1) lookups: metricsState:lastProcessedMinute, etc.
+ * Write operations are mutex-protected to prevent transaction conflicts.
  */
 export class MetricsStateService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
+  private readonly writeMutex = new Mutex();
 
   constructor(options: MetricsStateServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
   }
 
   /**
    * Get a marker value by key.
+   * Uses fixed RecordId for O(1) lookup.
+   *
    * @param key - The marker key
    * @returns The marker timestamp, or null if not found
    */
   async getMarker(key: MetricsStateKey): Promise<Date | null> {
-    const row = await this.db.queryOne<MetricsStateRow>(
-      `SELECT * FROM metricsState WHERE key = ?`,
-      [key]
+    const recordId = new RecordId("metricsState", key);
+    const result = await this.surrealFactory.withSystemConnection(
+      {},
+      async (db) => {
+        const [row] = await db.query<[MetricsStateRow | undefined]>(
+          `RETURN $recordId.*`,
+          { recordId }
+        );
+        return row;
+      }
     );
-
-    if (!row) return null;
-
-    return new Date(row.value);
+    return result?.value ? toDate(result.value) : null;
   }
 
   /**
    * Set a marker value (upsert - insert or update if exists).
+   * Uses fixed RecordId for direct access.
+   *
    * @param key - The marker key
    * @param value - The timestamp to store
    */
   async setMarker(key: MetricsStateKey, value: Date): Promise<void> {
-    await this.db.execute(
-      `INSERT INTO metricsState (key, value, updatedAt)
-       VALUES (?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT (key)
-       DO UPDATE SET value = ?, updatedAt = CURRENT_TIMESTAMP`,
-      [key, value.toISOString(), value.toISOString()]
-    );
+    using _lock = await this.writeMutex.acquire();
+    const recordId = new RecordId("metricsState", key);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      await db.query(`UPSERT $recordId SET key = $key, value = $value`, {
+        recordId,
+        key,
+        value,
+      });
+    });
   }
 
   /**
@@ -76,8 +84,9 @@ export class MetricsStateService {
     defaultValue: Date
   ): Promise<Date> {
     const existing = await this.getMarker(key);
-    if (existing) return existing;
-
+    if (existing !== null) {
+      return existing;
+    }
     await this.setMarker(key, defaultValue);
     return defaultValue;
   }

@@ -2,6 +2,7 @@ import { Mutex } from "@core/asyncutil/mutex";
 import { join } from "@std/path";
 import { RecordId } from "surrealdb";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { toDate } from "../database/surreal_helpers.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { JobQueueService } from "../jobs/job_queue_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
@@ -1045,20 +1046,6 @@ export class CodeSourceService {
     }
   }
 
-  /**
-   * Convert a value to Date, handling SurrealDB's datetime type.
-   */
-  private toDate(value: Date | unknown): Date {
-    if (value instanceof Date) {
-      return value;
-    }
-    // SurrealDB's DateTime has a toDate() method
-    if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
-      return value.toDate() as Date;
-    }
-    // Try to construct from string/number
-    return new Date(value as string | number);
-  }
 
   /**
    * Convert an optional value to Date or null.
@@ -1067,7 +1054,7 @@ export class CodeSourceService {
     if (value === null || value === undefined) {
       return null;
     }
-    return this.toDate(value);
+    return toDate(value);
   }
 
   /**
@@ -1104,8 +1091,8 @@ export class CodeSourceService {
       lastSyncAt: this.toOptionalDate(row.lastSyncAt),
       lastSyncError: row.lastSyncError ?? null,
       enabled: row.enabled,
-      createdAt: this.toDate(row.createdAt),
-      updatedAt: this.toDate(row.updatedAt),
+      createdAt: toDate(row.createdAt),
+      updatedAt: toDate(row.updatedAt),
     };
   }
 }

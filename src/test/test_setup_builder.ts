@@ -893,12 +893,12 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 10: Create metrics services if needed (after routes exist for FK constraint)
     if (this.flags.executionMetricsService) {
-      context.executionMetricsService = createExecutionMetricsService(db);
+      context.executionMetricsService = createExecutionMetricsService(surrealFactory);
 
       // Seed deferred metrics
       for (const metric of this.deferredMetrics) {
         await context.executionMetricsService.store({
-          routeId: metric.routeId,
+          functionId: metric.functionId,
           type: metric.type,
           avgTimeMs: metric.avgTimeMs,
           maxTimeMs: metric.maxTimeMs,
@@ -909,7 +909,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     if (this.flags.metricsStateService) {
-      context.metricsStateService = createMetricsStateService(db);
+      context.metricsStateService = createMetricsStateService(surrealFactory);
     }
 
     // STEP 11: Create instance ID service if needed

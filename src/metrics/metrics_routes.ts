@@ -1,9 +1,10 @@
 import { Hono } from "@hono/hono";
+import { RecordId } from "surrealdb";
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { validateSurrealId } from "../validation/common.ts";
-import type { MetricType } from "./types.ts";
+import type { ExecutionMetric, MetricType } from "./types.ts";
 import { SettingNames } from "../settings/types.ts";
 
 export interface MetricsRoutesOptions {
@@ -58,7 +59,8 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
 
     // 2. Parse and validate functionId (optional)
     const functionIdParam = c.req.query("functionId");
-    let routeId: string | null = null;
+    let functionId: RecordId | null = null;
+    let functionIdStr: string | null = null;
 
     if (functionIdParam) {
       const parsed = validateSurrealId(functionIdParam);
@@ -72,7 +74,8 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
         return c.json({ error: `Function with id ${parsed} not found` }, 404);
       }
 
-      routeId = parsed;
+      functionId = route.id;
+      functionIdStr = parsed;
     }
 
     // 3. Calculate time range based on resolution
@@ -107,14 +110,14 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
     }
 
     // 4. Query metrics
-    const metrics = routeId === null
+    const metrics: ExecutionMetric[] = functionId === null
       ? await executionMetricsService.getGlobalMetricsByTypeAndTimeRange(
         metricType,
         startTime,
         now,
       )
-      : await executionMetricsService.getByRouteIdTypeAndTimeRange(
-        routeId,
+      : await executionMetricsService.getByFunctionIdTypeAndTimeRange(
+        functionId,
         metricType,
         startTime,
         now,
@@ -133,32 +136,33 @@ export function createMetricsRoutes(options: MetricsRoutesOptions): Hono {
         (sum, m) => sum + m.executionCount,
         0,
       );
+      // maxExecutionTime is in microseconds, convert to milliseconds for API
       summary.maxExecutionTime = Math.max(
-        ...metrics.map((m) => m.maxTimeMs),
+        ...metrics.map((m) => m.maxTimeUs / 1000),
       );
 
-      // Weighted average
+      // Weighted average (in microseconds, convert to milliseconds for API)
       if (summary.totalExecutions > 0) {
         const weightedSum = metrics.reduce(
-          (sum, m) => sum + m.avgTimeMs * m.executionCount,
+          (sum, m) => sum + m.avgTimeUs * m.executionCount,
           0,
         );
-        summary.avgExecutionTime = weightedSum / summary.totalExecutions;
+        summary.avgExecutionTime = (weightedSum / summary.totalExecutions) / 1000;
       }
     }
 
-    // 6. Format response
+    // 6. Format response (convert microseconds to milliseconds for API backward compatibility)
     const formattedMetrics = metrics.map((m) => ({
       timestamp: m.timestamp.toISOString(),
-      avgTimeMs: m.avgTimeMs,
-      maxTimeMs: m.maxTimeMs,
+      avgTimeMs: m.avgTimeUs / 1000,
+      maxTimeMs: m.maxTimeUs / 1000,
       executionCount: m.executionCount,
     }));
 
     return c.json({
       data: {
         metrics: formattedMetrics,
-        functionId: routeId,
+        functionId: functionIdStr,
         resolution,
         summary,
       },

@@ -246,13 +246,13 @@ export class FunctionRouter {
           message: `${durationMs}ms`,
         });
 
-        // Store execution metric
-        // NOTE: Metrics still use routeId - will be migrated to SurrealDB separately
+        // Store execution metric with microseconds precision
+        const durationUs = Math.round((performance.now() - startTime) * 1000);
         this.executionMetricsService.store({
-          routeId: functionIdString,
+          functionId: route.id,
           type: "execution",
-          avgTimeMs: durationMs,
-          maxTimeMs: durationMs,
+          avgTimeUs: durationUs,
+          maxTimeUs: durationUs,
           executionCount: 1,
         }).catch((error) => {
           globalThis.console.error("[FunctionRouter] Failed to store metric:", error);
@@ -288,13 +288,13 @@ export class FunctionRouter {
           message: `${durationMs}ms (error)`,
         });
 
-        // Store metric for failed executions
-        // NOTE: Metrics still use routeId - will be migrated to SurrealDB separately
+        // Store metric for failed executions with microseconds precision
+        const failedDurationUs = Math.round((performance.now() - startTime) * 1000);
         this.executionMetricsService.store({
-          routeId: functionIdString,
+          functionId: route.id,
           type: "execution",
-          avgTimeMs: durationMs,
-          maxTimeMs: durationMs,
+          avgTimeUs: failedDurationUs,
+          maxTimeUs: failedDurationUs,
           executionCount: 1,
         }).catch((metricError) => {
           globalThis.console.error("[FunctionRouter] Failed to store metric:", metricError);
