@@ -95,7 +95,7 @@ Deno.test("validateSettingValue - accepts multiple IDs for checkboxGroup", () =>
 });
 
 Deno.test("validateSettingValue - accepts alphanumeric IDs for checkboxGroup", () => {
-  // SurrealDB uses string IDs, so letters are now valid
+  // SurrealDB uses string-based RecordIds supporting alphanumeric characters
   const result = validateSettingValue(SettingNames.API_ACCESS_GROUPS, "abc,def,xyz123");
   expect(result.valid).toBe(true);
 });

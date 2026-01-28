@@ -15,7 +15,7 @@ import { recordIdToString } from "../database/surreal_helpers.ts";
 /**
  * Normalize a FunctionRoute for API responses.
  * - Converts RecordId to string
- * - Maps internal 'routePath' to API 'route' for backward compatibility
+ * - Maps internal 'routePath' to API field name 'route'
  */
 function normalizeRoute(route: FunctionRoute): Record<string, unknown> {
   return {
@@ -56,7 +56,7 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
 
   // POST /api/functions - Create new function (returns created resource)
   routes.post("/", async (c) => {
-    // API body type - uses 'route' for backward compatibility
+    // API body type - uses 'route' as the external field name
     let body: {
       name?: string;
       handler?: string;
@@ -124,7 +124,7 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       return c.json({ error: "Invalid function ID" }, 400);
     }
 
-    // API body type - uses 'route' for backward compatibility
+    // API body type - uses 'route' as the external field name
     let body: {
       name?: string;
       handler?: string;

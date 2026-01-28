@@ -645,7 +645,7 @@ export class ApiKeyService {
     return decryptedKeys;
   }
 
-  // ============== Legacy Name-Based Key Operations ==============
+  // ============== Name-Based Key Operations ==============
 
   /**
    * Add a new API key to a group.

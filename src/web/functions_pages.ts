@@ -1911,7 +1911,6 @@ export function createFunctionsPages(
     const retentionDays = retentionDaysStr ? parseInt(retentionDaysStr, 10) : 90;
 
     // Fetch metrics data
-    // NOTE: Metrics still expect routeId - will be migrated separately
     const dataPoints = await fetchMetricsData(
       executionMetricsService,
       id,
