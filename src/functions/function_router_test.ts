@@ -775,17 +775,17 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
 
     // Add execution metrics for this route
     await ctx.executionMetricsService.store({
-      routeId,
+      functionId: route!.id,
       type: "execution",
-      avgTimeMs: 100,
-      maxTimeMs: 150,
+      avgTimeUs: 100 * 1000,
+      maxTimeUs: 150 * 1000,
       executionCount: 1,
     });
     await ctx.executionMetricsService.store({
-      routeId,
+      functionId: route!.id,
       type: "minute",
-      avgTimeMs: 120,
-      maxTimeMs: 180,
+      avgTimeUs: 120 * 1000,
+      maxTimeUs: 180 * 1000,
       executionCount: 5,
     });
 
@@ -796,7 +796,7 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     const secretsBefore = await secretsService.getFunctionSecrets(routeId);
     expect(secretsBefore.length).toBe(2);
 
-    const metricsBefore = await ctx.executionMetricsService.getByRouteId(routeId);
+    const metricsBefore = await ctx.executionMetricsService.getByFunctionId(route!.id);
     expect(metricsBefore.length).toBe(2);
 
     // Delete the route
@@ -811,10 +811,10 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     expect(secretsAfter.length).toBe(0);
 
     // Verify execution metrics are ORPHANED (not deleted, kept for global metrics aggregation)
-    const metricsAfter = await ctx.executionMetricsService.getByRouteId(routeId);
+    const metricsAfter = await ctx.executionMetricsService.getByFunctionId(route!.id);
     expect(metricsAfter.length).toBe(2);
-    expect(metricsAfter[0].routeId).toBe(routeId);
-    expect(metricsAfter[1].routeId).toBe(routeId);
+    expect(recordIdToString(metricsAfter[0].functionId!)).toBe(routeId);
+    expect(recordIdToString(metricsAfter[1].functionId!)).toBe(routeId);
   } finally {
     await ctx.cleanup();
   }

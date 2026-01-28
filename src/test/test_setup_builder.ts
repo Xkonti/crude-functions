@@ -895,13 +895,13 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     if (this.flags.executionMetricsService) {
       context.executionMetricsService = createExecutionMetricsService(surrealFactory);
 
-      // Seed deferred metrics
+      // Seed deferred metrics (convert ms to us for storage)
       for (const metric of this.deferredMetrics) {
         await context.executionMetricsService.store({
           functionId: metric.functionId,
           type: metric.type,
-          avgTimeMs: metric.avgTimeMs,
-          maxTimeMs: metric.maxTimeMs,
+          avgTimeUs: metric.avgTimeMs * 1000,
+          maxTimeUs: metric.maxTimeMs * 1000,
           executionCount: metric.executionCount,
           timestamp: metric.timestamp,
         });

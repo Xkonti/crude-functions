@@ -267,7 +267,7 @@ async function createTestApp(
   const settingsService = new SettingsService({ surrealFactory: surrealTestContext.factory, encryptionService });
   await settingsService.bootstrapGlobalSettings();
   const consoleLogService = new ConsoleLogService({ surrealFactory: surrealTestContext.factory, settingsService });
-  const executionMetricsService = new ExecutionMetricsService({ db });
+  const executionMetricsService = new ExecutionMetricsService({ surrealFactory: surrealTestContext.factory });
 
   // Create mock code source service (returns empty sources by default)
   const codeSourceService = createMockCodeSourceService();
@@ -857,10 +857,10 @@ Deno.test({ name: "GET /web/functions/metrics/:id with data shows charts", sanit
       const timestamp = new Date(now.getTime() - i * 60 * 1000);
       timestamp.setUTCSeconds(0, 0);
       await executionMetricsService.store({
-        routeId,
+        functionId: route!.id,
         type: "minute",
-        avgTimeMs: 100 + i * 10,
-        maxTimeMs: 150 + i * 10,
+        avgTimeUs: (100 + i * 10) * 1000,
+        maxTimeUs: (150 + i * 10) * 1000,
         executionCount: 5 + i,
         timestamp,
       });
@@ -926,18 +926,18 @@ Deno.test({ name: "GET /web/functions/metrics/:id shows current period from raw 
     // Add raw execution records (not yet aggregated into minute records)
     const now = new Date();
     await executionMetricsService.store({
-      routeId,
+      functionId: route!.id,
       type: "execution",
-      avgTimeMs: 50,
-      maxTimeMs: 50,
+      avgTimeUs: 50 * 1000,
+      maxTimeUs: 50 * 1000,
       executionCount: 1,
       timestamp: now,
     });
     await executionMetricsService.store({
-      routeId,
+      functionId: route!.id,
       type: "execution",
-      avgTimeMs: 100,
-      maxTimeMs: 100,
+      avgTimeUs: 100 * 1000,
+      maxTimeUs: 100 * 1000,
       executionCount: 1,
       timestamp: now,
     });

@@ -172,7 +172,7 @@ integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts")
     .withMetric({
-      routeId: 1,
+      functionId: null, // Global metric
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 150,
@@ -181,12 +181,14 @@ integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
     .build();
 
   try {
-    // Query directly since service may not have a direct getter for raw metrics
-    const metrics = await ctx.db.queryAll<{ avgTimeMs: number; executionCount: number }>(
-      "SELECT avgTimeMs, executionCount FROM executionMetrics WHERE routeId = 1"
+    // Use service to fetch metrics (stored in microseconds, converted from milliseconds)
+    const metrics = await ctx.executionMetricsService.getGlobalMetricsByTypeAndTimeRange(
+      "execution",
+      new Date(0),
+      new Date()
     );
     expect(metrics.length).toBe(1);
-    expect(metrics[0].avgTimeMs).toBe(100);
+    expect(metrics[0].avgTimeUs).toBe(100000); // 100ms = 100000us
     expect(metrics[0].executionCount).toBe(10);
   } finally {
     await ctx.cleanup();

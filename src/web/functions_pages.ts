@@ -13,6 +13,7 @@ import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret, SecretPreview } from "../secrets/types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
+import { RecordId } from "surrealdb";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import { formatForDisplay } from "../utils/datetime.ts";
@@ -249,14 +250,15 @@ function formatMetricsTimeLabel(date: Date, mode: MetricsDisplayMode): string {
 
 /**
  * Aggregate a list of metrics into a single summary.
+ * Returns times in microseconds (matching database storage).
  */
 function aggregateMetrics(metrics: ExecutionMetric[]): {
-  avgTimeMs: number;
-  maxTimeMs: number;
+  avgTimeUs: number;
+  maxTimeUs: number;
   executionCount: number;
 } {
   if (metrics.length === 0) {
-    return { avgTimeMs: 0, maxTimeMs: 0, executionCount: 0 };
+    return { avgTimeUs: 0, maxTimeUs: 0, executionCount: 0 };
   }
 
   let totalWeightedSum = 0;
@@ -264,14 +266,14 @@ function aggregateMetrics(metrics: ExecutionMetric[]): {
   let maxTime = 0;
 
   for (const record of metrics) {
-    totalWeightedSum += record.avgTimeMs * record.executionCount;
+    totalWeightedSum += record.avgTimeUs * record.executionCount;
     totalCount += record.executionCount;
-    maxTime = Math.max(maxTime, record.maxTimeMs);
+    maxTime = Math.max(maxTime, record.maxTimeUs);
   }
 
   return {
-    avgTimeMs: totalCount > 0 ? totalWeightedSum / totalCount : 0,
-    maxTimeMs: maxTime,
+    avgTimeUs: totalCount > 0 ? totalWeightedSum / totalCount : 0,
+    maxTimeUs: maxTime,
     executionCount: totalCount,
   };
 }
@@ -294,17 +296,18 @@ async function calculateCurrentPeriodMetric(
   const allMetrics: ExecutionMetric[] = [];
 
   // Use end time slightly in the future to include records at exactly 'now'
-  // (getByRouteIdTypeAndTimeRange uses exclusive end: timestamp < end)
+  // (getByFunctionIdTypeAndTimeRange uses exclusive end: timestamp < end)
   const endTime = new Date(now.getTime() + 1000);
 
-  // Helper to fetch records based on whether this is global or per-route
+  // Helper to fetch records based on whether this is global or per-function
   const fetchRecords = (type: MetricType, start: Date, end: Date) => {
     if (routeId === null) {
-      // Global: aggregate all per-route records
-      return metricsService.getAllPerRouteMetricsByTypeAndTimeRange(type, start, end);
+      // Global: aggregate all per-function records
+      return metricsService.getAllPerFunctionMetricsByTypeAndTimeRange(type, start, end);
     } else {
-      // Per-route: fetch for specific route
-      return metricsService.getByRouteIdTypeAndTimeRange(routeId, type, start, end);
+      // Per-function: fetch for specific function
+      const functionRecordId = new RecordId("functionDef", routeId);
+      return metricsService.getByFunctionIdTypeAndTimeRange(functionRecordId, type, start, end);
     }
   };
 
@@ -346,11 +349,11 @@ async function calculateCurrentPeriodMetric(
   }
 
   return {
-    id: 0, // Not a real record
-    routeId,
+    id: new RecordId("metrics", "synthetic"), // Synthetic metric for current period
+    functionId: routeId ? new RecordId("functionDef", routeId) : null,
     type: "execution", // Doesn't matter for display purposes
-    avgTimeMs: aggregated.avgTimeMs,
-    maxTimeMs: aggregated.maxTimeMs,
+    avgTimeUs: aggregated.avgTimeUs,
+    maxTimeUs: aggregated.maxTimeUs,
     executionCount: aggregated.executionCount,
     timestamp: periodStart,
   };
@@ -457,7 +460,12 @@ async function fetchMetricsData(
   const metrics =
     routeId === null
       ? await metricsService.getGlobalMetricsByTypeAndTimeRange(sourceType, startTime, now)
-      : await metricsService.getByRouteIdTypeAndTimeRange(routeId, sourceType, startTime, now);
+      : await metricsService.getByFunctionIdTypeAndTimeRange(
+          new RecordId("functionDef", routeId),
+          sourceType,
+          startTime,
+          now
+        );
 
   // Build data points map for easy lookup
   const dataMap = new Map<string, ExecutionMetric>();
@@ -486,8 +494,8 @@ async function fetchMetricsData(
       rawDataPoints.push({
         label: formatMetricsTimeLabel(slotTime, mode),
         timestamp: slotTime,
-        avgTimeMs: currentMetric.avgTimeMs,
-        maxTimeMs: currentMetric.maxTimeMs,
+        avgTimeMs: currentMetric.avgTimeUs / 1000,
+        maxTimeMs: currentMetric.maxTimeUs / 1000,
         executionCount: currentMetric.executionCount,
         isCurrent: true,
         isInterpolated: false,
@@ -496,8 +504,8 @@ async function fetchMetricsData(
       rawDataPoints.push({
         label: formatMetricsTimeLabel(slotTime, mode),
         timestamp: slotTime,
-        avgTimeMs: metric.avgTimeMs,
-        maxTimeMs: metric.maxTimeMs,
+        avgTimeMs: metric.avgTimeUs / 1000,
+        maxTimeMs: metric.maxTimeUs / 1000,
         executionCount: metric.executionCount,
         isCurrent: false,
         isInterpolated: false,
