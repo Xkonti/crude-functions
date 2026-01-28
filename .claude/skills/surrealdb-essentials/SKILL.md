@@ -1236,3 +1236,10 @@ There's even more:
 - USE
 
 <https://surrealdb.com/docs/surrealql/statements>
+
+Important notes in regards of this project:
+
+- SurrealDB returns IDs always as RecordId - that's how they're supposed to be stored in models internally in the app. Only on the REST API / Web UI boundary the `id` part of RecordId should be used instead (as a string). There's a helper function for extracting those.
+- SurrealDB returns dates in their own DateTime format. Use the `toDate` helper.
+- SurrealDB returns durations as strings - queries should turn it into numerical values during querying so that the application doesn't have to be concerned with parsing logic of SurrealDB's format.
+- Something like "SELECT value FROM ..." won't work. `value` is a special name and when querying fields with such name one needs to backtick-quote them: "SELECT `value` FROM ..."

@@ -136,3 +136,14 @@ When dealing with testing, fixing tests, adding new tests, etc. please use the `
 - Examples: `env_isolator_test.ts`, `key_storage_service_test.ts`
 
 See `test_setup_builder.ts` header for detailed guidelines on when to use each approach.
+
+## SurrealDB
+
+Whenever touching SurrealDB (reading/writing queries, understanding errors, etc) use the `surrealdb-essentials` skill.
+
+Important notes in regards of this project:
+
+- SurrealDB returns IDs always as RecordId - that's how they're supposed to be stored in models internally in the app. Only on the REST API / Web UI boundary the `id` part of RecordId should be used instead (as a string). There's a helper function for extracting those: `recordIdToString`
+- SurrealDB returns dates in their own DateTime format. Use the `toDate` helper.
+- SurrealDB returns durations as strings - queries should turn it into numerical values during querying so that the application doesn't have to be concerned with parsing logic of SurrealDB's format. Examples in metrics service.
+- Something like "SELECT value FROM ..." won't work. `value` is a special name and when querying fields with such name one needs to backtick-quote them: "SELECT `value` FROM ..."
