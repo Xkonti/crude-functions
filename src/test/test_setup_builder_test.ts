@@ -14,12 +14,11 @@ integrationTest("TestSetupBuilder creates basic context with all services", asyn
 
   try {
     // Verify all services are initialized
-    expect(ctx.db).toBeDefined();
     expect(ctx.encryptionService).toBeDefined();
     expect(ctx.hashService).toBeDefined();
     expect(ctx.settingsService).toBeDefined();
     expect(ctx.apiKeyService).toBeDefined();
-    expect(ctx.routesService).toBeDefined();
+    expect(ctx.functionsService).toBeDefined();
     expect(ctx.fileService).toBeDefined();
     expect(ctx.consoleLogService).toBeDefined();
     expect(ctx.executionMetricsService).toBeDefined();
@@ -35,12 +34,11 @@ integrationTest("TestSetupBuilder creates basic context with all services", asyn
     expect(ctx.encryptionKeys.hash_key).toBeDefined();
     expect(ctx.encryptionKeys.better_auth_secret).toBeDefined();
 
-    // Verify database is open and migrations ran (check for a table)
-    const result = await ctx.db.queryOne<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='jobQueue'"
-    );
-    expect(result).toBeDefined();
-    expect(result?.name).toBe("jobQueue");
+    // Verify SurrealDB connection is working
+    expect(ctx.surrealDb).toBeDefined();
+    expect(ctx.surrealFactory).toBeDefined();
+    expect(ctx.surrealNamespace).toBeDefined();
+    expect(ctx.surrealDatabase).toBeDefined();
   } finally {
     await ctx.cleanup();
   }
@@ -76,18 +74,18 @@ integrationTest("TestSetupBuilder.withApiKey creates key in group", async () => 
   }
 });
 
-integrationTest("TestSetupBuilder.withRoute creates route", async () => {
+integrationTest("TestSetupBuilder.withFunction creates function", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoute("/test", "test.ts", { methods: ["GET", "POST"] })
+    .withFunction("/test", "test.ts", { methods: ["GET", "POST"] })
     .build();
 
   try {
-    const routes = await ctx.routesService.getAll();
-    expect(routes.length).toBe(1);
-    expect(routes[0].routePath).toBe("/test");
-    expect(routes[0].handler).toBe("test.ts");
-    expect(routes[0].methods).toContain("GET");
-    expect(routes[0].methods).toContain("POST");
+    const functions = await ctx.functionsService.getAll();
+    expect(functions.length).toBe(1);
+    expect(functions[0].routePath).toBe("/test");
+    expect(functions[0].handler).toBe("test.ts");
+    expect(functions[0].methods).toContain("GET");
+    expect(functions[0].methods).toContain("POST");
   } finally {
     await ctx.cleanup();
   }
@@ -138,17 +136,17 @@ integrationTest("TestSetupBuilder.withAdminUser creates user", async () => {
 });
 
 integrationTest("TestSetupBuilder.withConsoleLog seeds log data", async () => {
-  // First create a route to have a valid functionId
+  // First create a function to have a valid functionId
   const ctx = await TestSetupBuilder.create()
-    .withRoute("/test", "test.ts")
+    .withFunction("/test", "test.ts")
     .withLogs()
     .build();
 
   try {
-    // Get the functionId from the created route
-    const route = await ctx.routesService.getByName("test");
+    // Get the functionId from the created function
+    const func = await ctx.functionsService.getByName("test");
     const { recordIdToString } = await import("../database/surreal_helpers.ts");
-    const functionId = recordIdToString(route!.id);
+    const functionId = recordIdToString(func!.id);
 
     // Now seed the log with the actual functionId
     ctx.consoleLogService.store({
@@ -170,7 +168,7 @@ integrationTest("TestSetupBuilder.withConsoleLog seeds log data", async () => {
 
 integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoute("/test", "test.ts")
+    .withFunction("/test", "test.ts")
     .withMetric({
       functionId: null, // Global metric
       type: "execution",
@@ -182,10 +180,12 @@ integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
 
   try {
     // Use service to fetch metrics (stored in microseconds, converted from milliseconds)
+    // Add 1 second to end time to ensure the metric is captured (timestamps might be identical)
+    const endTime = new Date(Date.now() + 1000);
     const metrics = await ctx.executionMetricsService.getGlobalMetricsByTypeAndTimeRange(
       "execution",
       new Date(0),
-      new Date()
+      endTime
     );
     expect(metrics.length).toBe(1);
     expect(metrics[0].avgTimeUs).toBe(100000); // 100ms = 100000us
@@ -200,7 +200,7 @@ integrationTest("TestSetupBuilder full integration", async () => {
     .withAdminUser("admin@example.com", "securepassword", ["userMgmt", "permanent"])
     .withApiKeyGroup("management", "Management keys")
     .withApiKey("management", "mgmt-key-123", "admin-key")
-    .withRoute("/hello", "hello.ts", {
+    .withFunction("/hello", "hello.ts", {
       methods: ["GET"],
       name: "Hello World",
       description: "A simple hello endpoint",
@@ -221,9 +221,9 @@ integrationTest("TestSetupBuilder full integration", async () => {
     // Verify API key
     expect(await ctx.apiKeyService.hasKey("management", "mgmt-key-123")).toBe(true);
 
-    // Verify route
-    const routes = await ctx.routesService.getAll();
-    expect(routes.some((r) => r.routePath === "/hello")).toBe(true);
+    // Verify function
+    const functions = await ctx.functionsService.getAll();
+    expect(functions.some((f) => f.routePath === "/hello")).toBe(true);
 
     // Verify file
     expect(await ctx.fileService.fileExists("hello.ts")).toBe(true);
@@ -293,7 +293,7 @@ integrationTest("TestSetupBuilder.create().build() enables all services by defau
 
   try {
     // All services should be available at runtime
-    expect(ctx.routesService).toBeDefined();
+    expect(ctx.functionsService).toBeDefined();
     expect(ctx.fileService).toBeDefined();
     expect(ctx.apiKeyService).toBeDefined();
     expect(ctx.secretsService).toBeDefined();

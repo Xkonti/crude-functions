@@ -7,8 +7,6 @@
  */
 
 import type { Surreal } from "surrealdb";
-import { DatabaseService } from "../database/database_service.ts";
-import { MigrationService } from "../database/migration_service.ts";
 import { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import { SurrealMigrationService } from "../database/surreal_migration_service.ts";
 import {
@@ -20,7 +18,7 @@ import { VersionedEncryptionService } from "../encryption/versioned_encryption_s
 import { HashService } from "../encryption/hash_service.ts";
 import { SettingsService } from "../settings/settings_service.ts";
 import { ApiKeyService } from "../keys/api_key_service.ts";
-import { RoutesService } from "../routes/routes_service.ts";
+import { FunctionsService } from "../routes/functions_service.ts";
 import { FileService } from "../files/file_service.ts";
 import { ConsoleLogService } from "../logs/console_log_service.ts";
 import { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
@@ -44,8 +42,6 @@ import type { betterAuth } from "better-auth";
 export interface FactoryContext {
   tempDir: string;
   codeDir: string;
-  databasePath: string;
-  db: DatabaseService;
   encryptionKeys?: EncryptionKeyFile;
   encryptionService?: VersionedEncryptionService;
   hashService?: HashService;
@@ -61,14 +57,12 @@ export interface FactoryContext {
  * Options for creating core infrastructure.
  */
 export interface CoreInfrastructureOptions {
-  /** Whether to run SQLite migrations (default: true) */
-  runSQLiteMigrations?: boolean;
   /** Whether to run SurrealDB migrations (default: true) */
   runSurrealMigrations?: boolean;
 }
 
 /**
- * Creates the base infrastructure: temp directory, code directory, SQLite database,
+ * Creates the base infrastructure: temp directory, code directory,
  * and shared SurrealDB connection with isolated namespace.
  *
  * SurrealDB is shared across all tests - each test gets a unique namespace for isolation.
@@ -84,32 +78,16 @@ export async function createCoreInfrastructure(
 ): Promise<{
   tempDir: string;
   codeDir: string;
-  databasePath: string;
-  db: DatabaseService;
   surrealTestContext: SharedSurrealTestContext;
   surrealDb: Surreal;
   surrealFactory: SurrealConnectionFactory;
 }> {
-  const { runSQLiteMigrations = true, runSurrealMigrations = true } = options;
+  const { runSurrealMigrations = true } = options;
 
   // Create temp directory for test isolation
   const tempDir = await Deno.makeTempDir();
   const codeDir = `${tempDir}/code`;
   await Deno.mkdir(codeDir, { recursive: true });
-
-  // Open SQLite database
-  const databasePath = `${tempDir}/database.db`;
-  const db = new DatabaseService({ databasePath });
-  await db.open();
-
-  // Run SQLite migrations if requested
-  if (runSQLiteMigrations) {
-    const migrationService = new MigrationService({
-      db,
-      migrationsDir,
-    });
-    await migrationService.migrate();
-  }
 
   // Get shared SurrealDB context with unique namespace
   const manager = SharedSurrealManager.getInstance();
@@ -132,8 +110,6 @@ export async function createCoreInfrastructure(
   return {
     tempDir,
     codeDir,
-    databasePath,
-    db,
     surrealTestContext,
     surrealDb: surrealTestContext.db,
     surrealFactory: surrealTestContext.factory,
@@ -242,14 +218,14 @@ export function createConsoleLogService(
 // =============================================================================
 
 /**
- * Creates the RoutesService.
+ * Creates the FunctionsService.
  * Requires SurrealDB connection factory, optionally accepts SecretsService for cascade delete.
  */
-export function createRoutesService(
+export function createFunctionsService(
   surrealFactory: SurrealConnectionFactory,
   secretsService?: SecretsService
-): RoutesService {
-  return new RoutesService({ surrealFactory, secretsService });
+): FunctionsService {
+  return new FunctionsService({ surrealFactory, secretsService });
 }
 
 // =============================================================================
@@ -418,15 +394,15 @@ export function createInstanceIdService(): InstanceIdService {
 
 /**
  * Creates the JobQueueService.
- * Requires database and instance ID service. Encryption is optional.
+ * Requires SurrealDB connection factory and instance ID service. Encryption is optional.
  */
 export function createJobQueueService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   instanceIdService: InstanceIdService,
   encryptionService?: VersionedEncryptionService,
 ): JobQueueService {
   return new JobQueueService({
-    db,
+    surrealFactory,
     instanceIdService,
     encryptionService,
   });
@@ -438,14 +414,14 @@ export function createJobQueueService(
 
 /**
  * Creates the SchedulingService.
- * Requires database and job queue service.
+ * Requires SurrealDB connection factory and job queue service.
  */
 export function createSchedulingService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   jobQueueService: JobQueueService,
 ): SchedulingService {
   return new SchedulingService({
-    db,
+    surrealFactory,
     jobQueueService,
   });
 }
@@ -496,14 +472,12 @@ export function createCodeSourceService(
 
 /**
  * Creates a cleanup function for the test context.
- * Handles proper teardown order: namespace deletion before SQLite closes,
- * both before temp dir removal.
+ * Handles proper teardown order: namespace deletion before temp dir removal.
  *
  * Note: SurrealDB process is shared and managed by SharedSurrealManager.
  * We only clean up the namespace here, not the process.
  */
 export function createCleanupFunction(
-  db: DatabaseService,
   tempDir: string,
   surrealTestContext: SharedSurrealTestContext,
   consoleLogService?: ConsoleLogService
@@ -524,10 +498,7 @@ export function createCleanupFunction(
       surrealTestContext.db
     );
 
-    // 4. Close SQLite database
-    await db.close();
-
-    // 5. Remove temp directory
+    // 4. Remove temp directory
     try {
       await Deno.remove(tempDir, { recursive: true });
     } catch {

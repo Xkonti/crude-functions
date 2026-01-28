@@ -28,14 +28,13 @@
  */
 
 import type { Surreal, RecordId } from "surrealdb";
-import type { DatabaseService } from "../database/database_service.ts";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import type { HashService } from "../encryption/hash_service.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
-import type { RoutesService } from "../routes/routes_service.ts";
+import type { FunctionsService } from "../routes/functions_service.ts";
 import type { FileService } from "../files/file_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
@@ -63,14 +62,10 @@ import type { SettingName } from "../settings/types.ts";
  * running for the duration of the test suite.
  */
 export interface BaseTestContext {
-  /** Temp directory for test isolation (contains db, keys, code) */
+  /** Temp directory for test isolation (contains keys, code) */
   tempDir: string;
   /** Directory for code files (${tempDir}/code) */
   codeDir: string;
-  /** Database path */
-  databasePath: string;
-  /** SQLite database service instance */
-  db: DatabaseService;
   /** Raw Surreal SDK connection (connected to isolated namespace) */
   surrealDb: Surreal;
   /** SurrealDB connection factory for this test's namespace */
@@ -134,12 +129,12 @@ export interface MetricsContext {
 }
 
 /**
- * Context with routes service.
+ * Context with functions service.
  * No dependencies beyond base context.
  */
-export interface RoutesContext {
-  /** Routes service instance */
-  routesService: RoutesService;
+export interface FunctionsContext {
+  /** Functions service instance */
+  functionsService: FunctionsService;
 }
 
 /**
@@ -238,7 +233,7 @@ export type FullTestContext = BaseTestContext &
   SettingsContext &
   LogsContext &
   MetricsContext &
-  RoutesContext &
+  FunctionsContext &
   FilesContext &
   ApiKeysContext &
   SecretsContext &
@@ -256,19 +251,19 @@ export type FullTestContext = BaseTestContext &
 export type TestContext = FullTestContext;
 
 /**
- * Options for route configuration in withRoute().
+ * Options for function configuration in withFunction().
  */
-export interface RouteOptions {
-  /** Route display name (defaults to filename without extension) */
+export interface FunctionOptions {
+  /** Function display name (defaults to filename without extension) */
   name?: string;
-  /** Route description */
+  /** Function description */
   description?: string;
   /** Allowed HTTP methods (defaults to ["GET"]) */
   methods?: string[];
   /**
-   * API key groups required to access this route.
+   * API key groups required to access this function.
    * Specified as group names (strings) - resolved to IDs at build time.
-   * Group must be created with withApiKeyGroup before the route.
+   * Group must be created with withApiKeyGroup before the function.
    */
   keys?: string[];
 }
@@ -301,12 +296,12 @@ export interface DeferredApiKey {
 }
 
 /**
- * Data for creating a route via withRoute().
+ * Data for creating a function via withFunction().
  */
-export interface DeferredRoute {
+export interface DeferredFunction {
   path: string;
   fileName: string;
-  options?: RouteOptions;
+  options?: FunctionOptions;
 }
 
 /**

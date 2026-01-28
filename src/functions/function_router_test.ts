@@ -9,7 +9,7 @@ import { recordIdToString } from "../database/surreal_helpers.ts";
 /** Creates a FunctionRouter with all required services from TestSetupBuilder context */
 function createFunctionRouterWithContext(ctx: TestContext) {
   return new FunctionRouter({
-    routesService: ctx.routesService,
+    functionsService: ctx.functionsService,
     apiKeyService: ctx.apiKeyService,
     consoleLogService: ctx.consoleLogService,
     executionMetricsService: ctx.executionMetricsService,
@@ -90,7 +90,7 @@ integrationTest("FunctionRouter returns 404 for empty routes", async () => {
 integrationTest("FunctionRouter executes handler for matching route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
 
@@ -110,7 +110,7 @@ integrationTest("FunctionRouter executes handler for matching route", async () =
 integrationTest("FunctionRouter handles POST request with body", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/echo", "echo.ts", { methods: ["POST"] })
+    .withFunction("/echo", "echo.ts", { methods: ["POST"] })
     .withFile("echo.ts", echoHandler)
     .build();
 
@@ -134,7 +134,7 @@ integrationTest("FunctionRouter handles POST request with body", async () => {
 integrationTest("FunctionRouter handles multiple methods per route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/multi", "multi.ts", { methods: ["GET", "POST", "PUT"] })
+    .withFunction("/multi", "multi.ts", { methods: ["GET", "POST", "PUT"] })
     .withFile("multi.ts", simpleHandler)
     .build();
 
@@ -164,7 +164,7 @@ integrationTest("FunctionRouter handles multiple methods per route", async () =>
 integrationTest("FunctionRouter returns 404 for wrong method", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
 
@@ -184,7 +184,7 @@ integrationTest("FunctionRouter returns 404 for wrong method", async () => {
 integrationTest("FunctionRouter handles path parameters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/users/:id", "user.ts", { name: "get-user", methods: ["GET"] })
+    .withFunction("/users/:id", "user.ts", { name: "get-user", methods: ["GET"] })
     .withFile("user.ts", simpleHandler)
     .build();
 
@@ -204,7 +204,7 @@ integrationTest("FunctionRouter handles path parameters", async () => {
 integrationTest("FunctionRouter handles nested path parameters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/users/:userId/posts/:postId", "post.ts", { name: "get-post", methods: ["GET"] })
+    .withFunction("/users/:userId/posts/:postId", "post.ts", { name: "get-post", methods: ["GET"] })
     .withFile("post.ts", simpleHandler)
     .build();
 
@@ -224,7 +224,7 @@ integrationTest("FunctionRouter handles nested path parameters", async () => {
 integrationTest("FunctionRouter handles query parameters", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/search", "search.ts", { methods: ["GET"] })
+    .withFunction("/search", "search.ts", { methods: ["GET"] })
     .withFile("search.ts", simpleHandler)
     .build();
 
@@ -244,7 +244,7 @@ integrationTest("FunctionRouter handles query parameters", async () => {
 integrationTest("FunctionRouter handles root route", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/", "root.ts", { name: "root", methods: ["GET"] })
+    .withFunction("/", "root.ts", { name: "root", methods: ["GET"] })
     .withFile("root.ts", simpleHandler)
     .build();
 
@@ -267,7 +267,7 @@ integrationTest("FunctionRouter handles root route", async () => {
 integrationTest("FunctionRouter allows request without key when route has no keys", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/public", "public.ts", { methods: ["GET"] })
+    .withFunction("/public", "public.ts", { methods: ["GET"] })
     .withFile("public.ts", simpleHandler)
     .build();
 
@@ -285,7 +285,7 @@ integrationTest("FunctionRouter returns 401 when key is required but missing", a
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -307,7 +307,7 @@ integrationTest("FunctionRouter returns 401 when key is invalid", async () => {
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -331,7 +331,7 @@ integrationTest("FunctionRouter allows request with valid key", async () => {
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -356,7 +356,7 @@ integrationTest("FunctionRouter accepts key from any allowed key name", async ()
     .withApiKeyGroup("user", "User keys")
     .withApiKey("admin", "admin123")
     .withApiKey("user", "user456")
-    .withRoute("/multi", "multi.ts", { name: "multi-key", methods: ["GET"], keys: ["admin", "user"] })
+    .withFunction("/multi", "multi.ts", { name: "multi-key", methods: ["GET"], keys: ["admin", "user"] })
     .withFile("multi.ts", simpleHandler)
     .build();
 
@@ -384,7 +384,7 @@ integrationTest("FunctionRouter accepts Authorization Bearer token", async () =>
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -404,7 +404,7 @@ integrationTest("FunctionRouter accepts Authorization plain value", async () => 
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -424,7 +424,7 @@ integrationTest("FunctionRouter accepts Authorization Basic (key as password)", 
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -446,7 +446,7 @@ integrationTest("FunctionRouter accepts X-Auth-Token header", async () => {
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -466,7 +466,7 @@ integrationTest("FunctionRouter accepts api_key query parameter", async () => {
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -484,7 +484,7 @@ integrationTest("FunctionRouter accepts apiKey query parameter", async () => {
     .withAll()
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "secret123")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -503,7 +503,7 @@ integrationTest("FunctionRouter prioritizes Authorization over X-API-Key", async
     .withApiKeyGroup("api", "Test API group")
     .withApiKey("api", "bearer-key", "bearer-key-name")
     .withApiKey("api", "header-key", "header-key-name")
-    .withRoute("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
+    .withFunction("/protected", "protected.ts", { methods: ["GET"], keys: ["api"] })
     .withFile("protected.ts", simpleHandler)
     .build();
 
@@ -540,7 +540,7 @@ integrationTest("FunctionRouter prioritizes Authorization over X-API-Key", async
 integrationTest("FunctionRouter returns 404 when handler file not found", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/missing", "nonexistent.ts", { name: "missing", methods: ["GET"] })
+    .withFunction("/missing", "nonexistent.ts", { name: "missing", methods: ["GET"] })
     // Note: intentionally NOT creating the file
     .build();
 
@@ -560,7 +560,7 @@ integrationTest("FunctionRouter returns 404 when handler file not found", async 
 integrationTest("FunctionRouter returns 500 when handler has no default export", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/noexport", "noexport.ts", { name: "no-export", methods: ["GET"] })
+    .withFunction("/noexport", "noexport.ts", { name: "no-export", methods: ["GET"] })
     .withFile("noexport.ts", noExportHandler)
     .build();
 
@@ -580,7 +580,7 @@ integrationTest("FunctionRouter returns 500 when handler has no default export",
 integrationTest("FunctionRouter returns 500 when default export is not a function", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/notfunc", "notfunc.ts", { name: "not-func", methods: ["GET"] })
+    .withFunction("/notfunc", "notfunc.ts", { name: "not-func", methods: ["GET"] })
     .withFile("notfunc.ts", notFunctionHandler)
     .build();
 
@@ -600,7 +600,7 @@ integrationTest("FunctionRouter returns 500 when default export is not a functio
 integrationTest("FunctionRouter returns 500 when handler throws error", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/error", "error.ts", { name: "error", methods: ["GET"] })
+    .withFunction("/error", "error.ts", { name: "error", methods: ["GET"] })
     .withFile("error.ts", errorHandler)
     .build();
 
@@ -624,7 +624,7 @@ integrationTest("FunctionRouter returns 500 when handler throws error", async ()
 integrationTest("FunctionRouter rebuilds router when routes are added", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .withFile("goodbye.ts", simpleHandler) // Pre-create file for later
     .build();
@@ -641,7 +641,7 @@ integrationTest("FunctionRouter rebuilds router when routes are added", async ()
     expect(res2.status).toBe(404);
 
     // Add new route via service
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "goodbye",
       handler: "goodbye.ts",
       routePath: "/goodbye",
@@ -662,8 +662,8 @@ integrationTest("FunctionRouter rebuilds router when routes are added", async ()
 integrationTest("FunctionRouter handles route removal", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
-    .withRoute("/goodbye", "goodbye.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/goodbye", "goodbye.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .withFile("goodbye.ts", simpleHandler)
     .build();
@@ -676,7 +676,7 @@ integrationTest("FunctionRouter handles route removal", async () => {
     expect((await app.request("/run/goodbye")).status).toBe(200);
 
     // Remove goodbye route via service
-    await ctx.routesService.removeRoute("goodbye");
+    await ctx.functionsService.removeFunction("goodbye");
 
     // Hello still works
     expect((await app.request("/run/hello")).status).toBe(200);
@@ -695,10 +695,10 @@ integrationTest("FunctionRouter handles route removal", async () => {
 integrationTest("FunctionRouter handles multiple routes", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
-    .withRoute("/users", "users.ts", { name: "users-list", methods: ["GET"] })
-    .withRoute("/users", "users.ts", { name: "users-create", methods: ["POST"] })
-    .withRoute("/users/:id", "user.ts", { name: "user-detail", methods: ["GET", "PUT", "DELETE"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/users", "users.ts", { name: "users-list", methods: ["GET"] })
+    .withFunction("/users", "users.ts", { name: "users-create", methods: ["POST"] })
+    .withFunction("/users/:id", "user.ts", { name: "user-detail", methods: ["GET", "PUT", "DELETE"] })
     .withFile("hello.ts", simpleHandler)
     .withFile("users.ts", simpleHandler)
     .withFile("user.ts", simpleHandler)
@@ -739,13 +739,13 @@ integrationTest("FunctionRouter handles multiple routes", async () => {
 integrationTest("FunctionRouter - route deletion cascades to logs and secrets but orphans metrics", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/test", "test.ts", { name: "test-route", methods: ["GET"] })
+    .withFunction("/test", "test.ts", { name: "test-route", methods: ["GET"] })
     .withFile("test.ts", simpleHandler)
     .build();
 
   try {
     // Get the route ID
-    const route = await ctx.routesService.getByName("test-route");
+    const route = await ctx.functionsService.getByName("test-route");
     expect(route).not.toBeNull();
     const routeId = recordIdToString(route!.id);
 
@@ -800,7 +800,7 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     expect(metricsBefore.length).toBe(2);
 
     // Delete the route
-    await ctx.routesService.removeRoute("test-route");
+    await ctx.functionsService.removeFunction("test-route");
 
     // Verify console logs are CASCADE deleted
     const logsAfter = await ctx.consoleLogService.getByFunctionId(routeId);

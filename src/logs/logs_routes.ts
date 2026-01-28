@@ -1,16 +1,16 @@
 import { Hono } from "@hono/hono";
 import type { ConsoleLogService } from "./console_log_service.ts";
-import type { RoutesService } from "../routes/routes_service.ts";
+import type { FunctionsService } from "../routes/functions_service.ts";
 import { validateSurrealId } from "../validation/common.ts";
 import type { ConsoleLogLevel } from "./types.ts";
 
 export interface LogsRoutesOptions {
   consoleLogService: ConsoleLogService;
-  routesService: RoutesService;
+  functionsService: FunctionsService;
 }
 
 export function createLogsRoutes(options: LogsRoutesOptions): Hono {
-  const { consoleLogService, routesService } = options;
+  const { consoleLogService, functionsService } = options;
   const routes = new Hono();
 
   // GET /api/logs - Query logs with optional filtering
@@ -26,8 +26,8 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       }
 
       // Verify function exists
-      const route = await routesService.getById(parsed);
-      if (!route) {
+      const func = await functionsService.getById(parsed);
+      if (!func) {
         return c.json({ error: `Function with id ${parsed} not found` }, 404);
       }
 
@@ -141,8 +141,8 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
     }
 
     // Verify function exists
-    const route = await routesService.getById(functionId);
-    if (!route) {
+    const func = await functionsService.getById(functionId);
+    if (!func) {
       return c.json(
         { error: `Function with id ${functionId} not found` },
         404,

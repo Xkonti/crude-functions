@@ -14,7 +14,7 @@
 export type ServiceKey =
   | "executionMetricsService"
   | "metricsStateService"
-  | "routesService"
+  | "functionsService"
   | "fileService"
   | "encryptionService"
   | "hashService"
@@ -38,7 +38,7 @@ export type ServiceKey =
 export interface ServiceFlags {
   executionMetricsService: boolean;
   metricsStateService: boolean;
-  routesService: boolean;
+  functionsService: boolean;
   fileService: boolean;
   encryptionService: boolean;
   hashService: boolean;
@@ -61,7 +61,7 @@ export function createDefaultFlags(): ServiceFlags {
   return {
     executionMetricsService: false,
     metricsStateService: false,
-    routesService: false,
+    functionsService: false,
     fileService: false,
     encryptionService: false,
     hashService: false,
@@ -93,7 +93,7 @@ export const DEPENDENCIES: Record<ServiceKey, ServiceKey[]> = {
   // Standalone services (no dependencies)
   executionMetricsService: [],
   metricsStateService: [],
-  routesService: [],
+  functionsService: [],
   fileService: [],
   instanceIdService: [],
 

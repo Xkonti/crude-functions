@@ -4,9 +4,9 @@ import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { createMetricsRoutes } from "./metrics_routes.ts";
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
-import type { RoutesService } from "../routes/routes_service.ts";
+import type { FunctionsService } from "../routes/functions_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
-import type { FunctionRoute } from "../routes/routes_service.ts";
+import type { FunctionDefinition } from "../routes/functions_service.ts";
 import type { MetricType } from "./types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 import { RecordId } from "surrealdb";
@@ -14,36 +14,36 @@ import { RecordId } from "surrealdb";
 interface MetricsTestContext {
   app: Hono;
   executionMetricsService: ExecutionMetricsService;
-  routesService: RoutesService;
+  functionsService: FunctionsService;
   settingsService: SettingsService;
-  routes: { route1: FunctionRoute; route2: FunctionRoute };
+  routes: { route1: FunctionDefinition; route2: FunctionDefinition };
   cleanup: () => Promise<void>;
 }
 
 async function createTestContext(): Promise<MetricsTestContext> {
   const ctx = await TestSetupBuilder.create()
     .withMetrics()
-    .withRoutes()
+    .withFunctions()
     .withSettings()
     .build();
 
   // Create test routes
-  await ctx.routesService.addRoute({
+  await ctx.functionsService.addFunction({
     name: "test-function-1",
     routePath: "/test1",
     handler: "code/test1.ts",
     methods: ["GET"],
   });
 
-  await ctx.routesService.addRoute({
+  await ctx.functionsService.addFunction({
     name: "test-function-2",
     routePath: "/test2",
     handler: "code/test2.ts",
     methods: ["GET"],
   });
 
-  const route1 = await ctx.routesService.getByName("test-function-1");
-  const route2 = await ctx.routesService.getByName("test-function-2");
+  const route1 = await ctx.functionsService.getByName("test-function-1");
+  const route2 = await ctx.functionsService.getByName("test-function-2");
 
   if (!route1 || !route2) {
     throw new Error("Failed to create test routes");
@@ -53,14 +53,14 @@ async function createTestContext(): Promise<MetricsTestContext> {
   const app = new Hono();
   app.route("/", createMetricsRoutes({
     executionMetricsService: ctx.executionMetricsService,
-    routesService: ctx.routesService,
+    functionsService: ctx.functionsService,
     settingsService: ctx.settingsService,
   }));
 
   return {
     app,
     executionMetricsService: ctx.executionMetricsService,
-    routesService: ctx.routesService,
+    functionsService: ctx.functionsService,
     settingsService: ctx.settingsService,
     routes: { route1, route2 },
     cleanup: ctx.cleanup,

@@ -24,7 +24,7 @@ export default async function (c, ctx) {
 /** Helper to create a FunctionRouter with all required services */
 function createFunctionRouterWithContext(ctx: TestContext) {
   return new FunctionRouter({
-    routesService: ctx.routesService,
+    functionsService: ctx.functionsService,
     apiKeyService: ctx.apiKeyService,
     consoleLogService: ctx.consoleLogService,
     executionMetricsService: ctx.executionMetricsService,
@@ -36,7 +36,7 @@ function createFunctionRouterWithContext(ctx: TestContext) {
 integrationTest("Disabled route returns 404 from /run/*", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
 
@@ -51,9 +51,9 @@ integrationTest("Disabled route returns 404 from /run/*", async () => {
     expect(res.status).toBe(200);
 
     // Disable the route
-    const routes = await ctx.routesService.getAll();
+    const routes = await ctx.functionsService.getAll();
     const route = routes.find((r) => r.routePath === "/hello");
-    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(route!.id), false);
 
     // Route returns 404 when disabled
     res = await app.request("/run/hello");
@@ -68,7 +68,7 @@ integrationTest("Disabled route returns 404 from /run/*", async () => {
 integrationTest("Enabled route works normally", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
 
@@ -93,7 +93,7 @@ integrationTest("Enabled route works normally", async () => {
 integrationTest("Re-enabling disabled route makes it work again", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .build();
 
@@ -103,16 +103,16 @@ integrationTest("Re-enabling disabled route makes it work again", async () => {
     const app = new Hono();
     app.all("/run/*", (c) => functionRouter.handle(c));
 
-    const routes = await ctx.routesService.getAll();
+    const routes = await ctx.functionsService.getAll();
     const route = routes.find((r) => r.routePath === "/hello");
 
     // Disable
-    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(route!.id), false);
     let res = await app.request("/run/hello");
     expect(res.status).toBe(404);
 
     // Re-enable
-    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), true);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(route!.id), true);
     res = await app.request("/run/hello");
     expect(res.status).toBe(200);
   } finally {
@@ -130,7 +130,7 @@ export default async function (c, ctx) {
 
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/fail", "fail.ts", { methods: ["GET"] })
+    .withFunction("/fail", "fail.ts", { methods: ["GET"] })
     .withFile("fail.ts", failingHandler)
     .build();
 
@@ -140,11 +140,11 @@ export default async function (c, ctx) {
     const app = new Hono();
     app.all("/run/*", (c) => functionRouter.handle(c));
 
-    const routes = await ctx.routesService.getAll();
+    const routes = await ctx.functionsService.getAll();
     const route = routes.find((r) => r.routePath === "/fail");
 
     // Disable the route
-    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(route!.id), false);
 
     // Should get 404, not handler error
     const res = await app.request("/run/fail");
@@ -159,8 +159,8 @@ export default async function (c, ctx) {
 integrationTest("Multiple routes can be independently toggled", async () => {
   const ctx = await TestSetupBuilder.create()
     .withAll()
-    .withRoute("/hello", "hello.ts", { methods: ["GET"] })
-    .withRoute("/goodbye", "goodbye.ts", { methods: ["GET"] })
+    .withFunction("/hello", "hello.ts", { methods: ["GET"] })
+    .withFunction("/goodbye", "goodbye.ts", { methods: ["GET"] })
     .withFile("hello.ts", simpleHandler)
     .withFile("goodbye.ts", simpleHandler)
     .build();
@@ -171,7 +171,7 @@ integrationTest("Multiple routes can be independently toggled", async () => {
     const app = new Hono();
     app.all("/run/*", (c) => functionRouter.handle(c));
 
-    const routes = await ctx.routesService.getAll();
+    const routes = await ctx.functionsService.getAll();
     const helloRoute = routes.find((r) => r.routePath === "/hello");
     const goodbyeRoute = routes.find((r) => r.routePath === "/goodbye");
 
@@ -180,13 +180,13 @@ integrationTest("Multiple routes can be independently toggled", async () => {
     expect((await app.request("/run/goodbye")).status).toBe(200);
 
     // Disable hello only
-    await ctx.routesService.setRouteEnabled(recordIdToString(helloRoute!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(helloRoute!.id), false);
     expect((await app.request("/run/hello")).status).toBe(404);
     expect((await app.request("/run/goodbye")).status).toBe(200);
 
     // Disable goodbye only (re-enable hello)
-    await ctx.routesService.setRouteEnabled(recordIdToString(helloRoute!.id), true);
-    await ctx.routesService.setRouteEnabled(recordIdToString(goodbyeRoute!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(helloRoute!.id), true);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(goodbyeRoute!.id), false);
     expect((await app.request("/run/hello")).status).toBe(200);
     expect((await app.request("/run/goodbye")).status).toBe(404);
   } finally {
@@ -199,7 +199,7 @@ integrationTest("Disabled route with API key protection returns 404, not 401", a
     .withAll()
     .withApiKeyGroup("test-group", "Test group")
     .withApiKey("test-group", "test-key-123")
-    .withRoute("/protected", "protected.ts", {
+    .withFunction("/protected", "protected.ts", {
       methods: ["GET"],
       keys: ["test-group"],
     })
@@ -212,11 +212,11 @@ integrationTest("Disabled route with API key protection returns 404, not 401", a
     const app = new Hono();
     app.all("/run/*", (c) => functionRouter.handle(c));
 
-    const routes = await ctx.routesService.getAll();
+    const routes = await ctx.functionsService.getAll();
     const route = routes.find((r) => r.routePath === "/protected");
 
     // Disable the route
-    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
+    await ctx.functionsService.setFunctionEnabled(recordIdToString(route!.id), false);
 
     // Should get 404 even with valid API key
     const res = await app.request("/run/protected", {
@@ -235,7 +235,7 @@ integrationTest("New routes are enabled by default", async () => {
 
   try {
     // Add a route programmatically
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "new-route",
       handler: "new.ts",
       routePath: "/new",
@@ -243,7 +243,7 @@ integrationTest("New routes are enabled by default", async () => {
     });
 
     // Verify it's enabled
-    const route = await ctx.routesService.getByName("new-route");
+    const route = await ctx.functionsService.getByName("new-route");
     expect(route!.enabled).toBe(true);
   } finally {
     await ctx.cleanup();

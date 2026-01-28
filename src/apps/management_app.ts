@@ -1,10 +1,9 @@
 import { Hono } from "@hono/hono";
 
 import type { Auth } from "../auth/auth.ts";
-import type { DatabaseService } from "../database/database_service.ts";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
-import type { RoutesService } from "../routes/routes_service.ts";
+import type { FunctionsService } from "../routes/functions_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
 import type { ExecutionMetricsService } from "../metrics/execution_metrics_service.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
@@ -38,10 +37,9 @@ import { createWebRoutes } from "../web/web_routes.ts";
  */
 export interface ManagementAppDeps {
   auth: Auth;
-  db: DatabaseService;
   surrealFactory: SurrealConnectionFactory;
   apiKeyService: ApiKeyService;
-  routesService: RoutesService;
+  functionsService: FunctionsService;
   consoleLogService: ConsoleLogService;
   executionMetricsService: ExecutionMetricsService;
   encryptionService: VersionedEncryptionService;
@@ -115,7 +113,7 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
   api.route("/keys", createApiKeyRoutes(deps.apiKeyService));
 
   // Function route management
-  api.route("/functions", createFunctionsRoutes(deps.routesService));
+  api.route("/functions", createFunctionsRoutes(deps.functionsService));
 
   // Code source management (webhook already registered above)
   api.route("/sources", createSourceRoutes({
@@ -150,13 +148,13 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
   // Logs API
   api.route("/logs", createLogsRoutes({
     consoleLogService: deps.consoleLogService,
-    routesService: deps.routesService,
+    functionsService: deps.functionsService,
   }));
 
   // Metrics API
   api.route("/metrics", createMetricsRoutes({
     executionMetricsService: deps.executionMetricsService,
-    routesService: deps.routesService,
+    functionsService: deps.functionsService,
     settingsService: deps.settingsService,
   }));
 
@@ -199,10 +197,9 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
 
   app.route("/web", createWebRoutes({
     auth: deps.auth,
-    db: deps.db,
     surrealFactory: deps.surrealFactory,
     userService: deps.userService,
-    routesService: deps.routesService,
+    functionsService: deps.functionsService,
     apiKeyService: deps.apiKeyService,
     consoleLogService: deps.consoleLogService,
     executionMetricsService: deps.executionMetricsService,

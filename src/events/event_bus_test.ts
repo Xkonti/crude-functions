@@ -1,4 +1,5 @@
 import { expect } from "@std/expect";
+import { RecordId } from "surrealdb";
 import { EventBus } from "./event_bus.ts";
 import { EventType } from "./event_types.ts";
 
@@ -26,18 +27,19 @@ Deno.test("EventBus.subscribe allows multiple subscribers for same event type", 
 
 Deno.test("EventBus.publish notifies all subscribers", () => {
   const eventBus = new EventBus();
-  const received: number[] = [];
+  const received: RecordId[] = [];
+  const jobId = new RecordId("job", "test5");
 
   eventBus.subscribe(EventType.JOB_ENQUEUED, (event) => {
     received.push(event.payload.jobId);
   });
   eventBus.subscribe(EventType.JOB_ENQUEUED, (event) => {
-    received.push(event.payload.jobId * 10);
+    received.push(event.payload.jobId);
   });
 
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 5, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId, type: "test" });
 
-  expect(received).toEqual([5, 50]);
+  expect(received).toEqual([jobId, jobId]);
 });
 
 Deno.test("EventBus.publish includes timestamp in event", () => {
@@ -49,7 +51,7 @@ Deno.test("EventBus.publish includes timestamp in event", () => {
   });
 
   const before = new Date();
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 1, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: new RecordId("job", "test1"), type: "test" });
   const after = new Date();
 
   expect(receivedTimestamp).not.toBeNull();
@@ -61,12 +63,13 @@ Deno.test("EventBus.publish does nothing when no subscribers", () => {
   const eventBus = new EventBus();
 
   // Should not throw
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 1, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: new RecordId("job", "test1"), type: "test" });
 });
 
 Deno.test("EventBus.publish continues notifying after sync subscriber error", () => {
   const eventBus = new EventBus();
-  const received: number[] = [];
+  const received: RecordId[] = [];
+  const jobId = new RecordId("job", "test42");
 
   eventBus.subscribe(EventType.JOB_ENQUEUED, () => {
     throw new Error("Subscriber error");
@@ -75,9 +78,9 @@ Deno.test("EventBus.publish continues notifying after sync subscriber error", ()
     received.push(event.payload.jobId);
   });
 
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 42, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId, type: "test" });
 
-  expect(received).toEqual([42]);
+  expect(received).toEqual([jobId]);
 });
 
 Deno.test("EventBus.publish handles async subscribers", async () => {
@@ -89,7 +92,7 @@ Deno.test("EventBus.publish handles async subscribers", async () => {
     called = true;
   });
 
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 1, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: new RecordId("job", "test1"), type: "test" });
 
   // Publish is fire-and-forget, so subscriber runs async
   expect(called).toBe(false);
@@ -101,7 +104,8 @@ Deno.test("EventBus.publish handles async subscribers", async () => {
 
 Deno.test("EventBus.publish continues after async subscriber rejection", async () => {
   const eventBus = new EventBus();
-  const received: number[] = [];
+  const received: RecordId[] = [];
+  const jobId = new RecordId("job", "test99");
 
   eventBus.subscribe(EventType.JOB_ENQUEUED, () => {
     return Promise.reject(new Error("Async error"));
@@ -110,10 +114,10 @@ Deno.test("EventBus.publish continues after async subscriber rejection", async (
     received.push(event.payload.jobId);
   });
 
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 99, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId, type: "test" });
 
   // Sync subscriber should have been called immediately
-  expect(received).toEqual([99]);
+  expect(received).toEqual([jobId]);
 
   // Wait for async error to be caught and logged (not thrown)
   await new Promise((resolve) => setTimeout(resolve, 10));
@@ -132,7 +136,7 @@ Deno.test("EventBus.unsubscribe only removes the specific subscriber", () => {
 
   unsub1();
 
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 1, type: "test" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: new RecordId("job", "test1"), type: "test" });
 
   expect(received).toEqual(["second"]);
 });
@@ -161,8 +165,8 @@ Deno.test("EventBus subscribers receive correct event type", () => {
     completedEvents.push(event.type);
   });
 
-  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: 1, type: "test" });
-  eventBus.publish(EventType.JOB_COMPLETED, { jobId: 2, type: "test", status: "completed" });
+  eventBus.publish(EventType.JOB_ENQUEUED, { jobId: new RecordId("job", "test1"), type: "test" });
+  eventBus.publish(EventType.JOB_COMPLETED, { jobId: new RecordId("job", "test2"), type: "test", status: "completed" });
 
   expect(enqueuedEvents).toEqual(["job.enqueued"]);
   expect(completedEvents).toEqual(["job.completed"]);

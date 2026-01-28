@@ -1,42 +1,42 @@
 import { Hono } from "@hono/hono";
 import {
-  RoutesService,
-  type FunctionRoute,
-  type NewFunctionRoute,
-} from "./routes_service.ts";
+  FunctionsService,
+  type FunctionDefinition,
+  type NewFunctionDefinition,
+} from "./functions_service.ts";
 import {
-  validateRouteName,
-  validateRoutePath,
+  validateFunctionName,
+  validateFunctionPath,
   validateMethods,
 } from "../validation/routes.ts";
 import { validateSurrealId } from "../validation/common.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
- * Normalize a FunctionRoute for API responses.
+ * Normalize a FunctionDefinition for API responses.
  * - Converts RecordId to string
- * - Maps internal 'routePath' to API 'route' for backward compatibility
+ * - Maps internal 'routePath' to API field name 'route'
  */
-function normalizeRoute(route: FunctionRoute): Record<string, unknown> {
+function normalizeFunctionDef(func: FunctionDefinition): Record<string, unknown> {
   return {
-    id: recordIdToString(route.id),
-    name: route.name,
-    description: route.description ?? null,
-    handler: route.handler,
-    route: route.routePath, // API uses 'route', internal uses 'routePath'
-    methods: route.methods,
-    keys: route.keys ?? null,
-    enabled: route.enabled,
+    id: recordIdToString(func.id),
+    name: func.name,
+    description: func.description ?? null,
+    handler: func.handler,
+    route: func.routePath, // API uses 'route', internal uses 'routePath'
+    methods: func.methods,
+    keys: func.keys ?? null,
+    enabled: func.enabled,
   };
 }
 
-export function createFunctionsRoutes(service: RoutesService): Hono {
+export function createFunctionsRoutes(service: FunctionsService): Hono {
   const routes = new Hono();
 
   // GET /api/functions - List all functions
   routes.get("/", async (c) => {
     const allFunctions = await service.getAll();
-    return c.json({ functions: allFunctions.map(normalizeRoute) });
+    return c.json({ functions: allFunctions.map(normalizeFunctionDef) });
   });
 
   // GET /api/functions/:id - Get function by ID
@@ -51,12 +51,12 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       return c.json({ error: `Function with id '${id}' not found` }, 404);
     }
 
-    return c.json({ function: normalizeRoute(func) });
+    return c.json({ function: normalizeFunctionDef(func) });
   });
 
   // POST /api/functions - Create new function (returns created resource)
   routes.post("/", async (c) => {
-    // API body type - uses 'route' for backward compatibility
+    // API body type - uses 'route' as the external field name
     let body: {
       name?: string;
       handler?: string;
@@ -72,13 +72,13 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
     }
 
     // Validate required fields
-    if (!body.name || !validateRouteName(body.name)) {
+    if (!body.name || !validateFunctionName(body.name)) {
       return c.json({ error: "Invalid or missing name" }, 400);
     }
     if (!body.handler || body.handler.trim() === "") {
       return c.json({ error: "Invalid or missing handler" }, 400);
     }
-    if (!body.route || !validateRoutePath(body.route)) {
+    if (!body.route || !validateFunctionPath(body.route)) {
       return c.json({ error: "Invalid or missing route path" }, 400);
     }
     if (!body.methods || !validateMethods(body.methods)) {
@@ -97,7 +97,7 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       }
     }
 
-    const newFunction: NewFunctionRoute = {
+    const newFunction: NewFunctionDefinition = {
       name: body.name,
       handler: body.handler,
       routePath: body.route, // Map API 'route' to internal 'routePath'
@@ -107,8 +107,8 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
     };
 
     try {
-      const created = await service.addRoute(newFunction);
-      return c.json({ function: normalizeRoute(created) }, 201);
+      const created = await service.addFunction(newFunction);
+      return c.json({ function: normalizeFunctionDef(created) }, 201);
     } catch (error) {
       if (error instanceof Error && error.message.includes("already exists")) {
         return c.json({ error: error.message }, 409);
@@ -124,7 +124,7 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       return c.json({ error: "Invalid function ID" }, 400);
     }
 
-    // API body type - uses 'route' for backward compatibility
+    // API body type - uses 'route' as the external field name
     let body: {
       name?: string;
       handler?: string;
@@ -140,13 +140,13 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
     }
 
     // Validate required fields
-    if (!body.name || !validateRouteName(body.name)) {
+    if (!body.name || !validateFunctionName(body.name)) {
       return c.json({ error: "Invalid or missing name" }, 400);
     }
     if (!body.handler || body.handler.trim() === "") {
       return c.json({ error: "Invalid or missing handler" }, 400);
     }
-    if (!body.route || !validateRoutePath(body.route)) {
+    if (!body.route || !validateFunctionPath(body.route)) {
       return c.json({ error: "Invalid or missing route path" }, 400);
     }
     if (!body.methods || !validateMethods(body.methods)) {
@@ -165,7 +165,7 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       }
     }
 
-    const updatedFunction: NewFunctionRoute = {
+    const updatedFunction: NewFunctionDefinition = {
       name: body.name,
       handler: body.handler,
       routePath: body.route, // Map API 'route' to internal 'routePath'
@@ -175,8 +175,8 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
     };
 
     try {
-      const updated = await service.updateRoute(id, updatedFunction);
-      return c.json({ function: normalizeRoute(updated) });
+      const updated = await service.updateFunction(id, updatedFunction);
+      return c.json({ function: normalizeFunctionDef(updated) });
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes("not found")) {
@@ -202,7 +202,7 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
       return c.json({ error: `Function with id '${id}' not found` }, 404);
     }
 
-    await service.removeRouteById(id);
+    await service.removeFunctionById(id);
     return c.body(null, 204);
   });
 
@@ -214,8 +214,8 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
     }
 
     try {
-      const updated = await service.setRouteEnabled(id, true);
-      return c.json({ function: normalizeRoute(updated) });
+      const updated = await service.setFunctionEnabled(id, true);
+      return c.json({ function: normalizeFunctionDef(updated) });
     } catch (error) {
       if (error instanceof Error && error.message.includes("not found")) {
         return c.json({ error: error.message }, 404);
@@ -232,8 +232,8 @@ export function createFunctionsRoutes(service: RoutesService): Hono {
     }
 
     try {
-      const updated = await service.setRouteEnabled(id, false);
-      return c.json({ function: normalizeRoute(updated) });
+      const updated = await service.setFunctionEnabled(id, false);
+      return c.json({ function: normalizeFunctionDef(updated) });
     } catch (error) {
       if (error instanceof Error && error.message.includes("not found")) {
         return c.json({ error: error.message }, 404);

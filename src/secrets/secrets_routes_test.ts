@@ -82,7 +82,7 @@ integrationTest("GET /api/secrets?includeValues=true returns secrets with values
 
 integrationTest("GET /api/secrets?scope=global filters by scope", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withSecrets()
     .build();
 
@@ -90,13 +90,13 @@ integrationTest("GET /api/secrets?scope=global filters by scope", async () => {
     await ctx.secretsService.createGlobalSecret("GLOBAL", "value1");
 
     // Create a route and function-scoped secret
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "test",
       handler: "test.ts",
       routePath: "/test",
       methods: ["GET"],
     });
-    const route = await ctx.routesService.getByName("test");
+    const route = await ctx.functionsService.getByName("test");
     await ctx.secretsService.createFunctionSecret(recordIdToString(route!.id), "FUNCTION", "value2");
 
     const app = createTestApp(ctx);
@@ -114,27 +114,27 @@ integrationTest("GET /api/secrets?scope=global filters by scope", async () => {
 
 integrationTest("GET /api/secrets?scope=function&functionId=1 filters by function", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withSecrets()
     .build();
 
   try {
     // Create routes
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "test1",
       handler: "test1.ts",
       routePath: "/test1",
       methods: ["GET"],
     });
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "test2",
       handler: "test2.ts",
       routePath: "/test2",
       methods: ["GET"],
     });
 
-    const route1 = await ctx.routesService.getByName("test1");
-    const route2 = await ctx.routesService.getByName("test2");
+    const route1 = await ctx.functionsService.getByName("test1");
+    const route2 = await ctx.functionsService.getByName("test2");
     const route1Id = recordIdToString(route1!.id);
     const route2Id = recordIdToString(route2!.id);
 
@@ -294,7 +294,7 @@ integrationTest("GET /api/secrets/by-name/:name returns 404 when not found", asy
 
 integrationTest("GET /api/secrets/by-name/:name?scope=global filters by scope", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withSecrets()
     .build();
 
@@ -302,13 +302,13 @@ integrationTest("GET /api/secrets/by-name/:name?scope=global filters by scope", 
     await ctx.secretsService.createGlobalSecret("MY_SECRET", "global_value");
 
     // Create function-scoped secret with same name
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "test",
       handler: "test.ts",
       routePath: "/test",
       methods: ["GET"],
     });
-    const route = await ctx.routesService.getByName("test");
+    const route = await ctx.functionsService.getByName("test");
     await ctx.secretsService.createFunctionSecret(recordIdToString(route!.id), "MY_SECRET", "function_value");
 
     const app = createTestApp(ctx);
@@ -379,18 +379,18 @@ integrationTest("POST /api/secrets creates global secret", async () => {
 
 integrationTest("POST /api/secrets creates function-scoped secret", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withRoutes()
+    .withFunctions()
     .withSecrets()
     .build();
 
   try {
-    await ctx.routesService.addRoute({
+    await ctx.functionsService.addFunction({
       name: "test",
       handler: "test.ts",
       routePath: "/test",
       methods: ["GET"],
     });
-    const route = await ctx.routesService.getByName("test");
+    const route = await ctx.functionsService.getByName("test");
     const routeId = recordIdToString(route!.id);
 
     const app = createTestApp(ctx);

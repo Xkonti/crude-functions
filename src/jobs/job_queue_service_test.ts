@@ -1,5 +1,6 @@
 import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
+import { RecordId } from "surrealdb";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import {
   DuplicateActiveJobError,
@@ -21,7 +22,7 @@ integrationTest("JobQueueService.enqueue creates a pending job", async () => {
       payload: { message: "hello" },
     });
 
-    expect(job.id).toBeGreaterThan(0);
+    expect(job.id).toBeInstanceOf(RecordId);
     expect(job.type).toBe("test-job");
     expect(job.status).toBe("pending");
     expect(job.payload).toEqual({ message: "hello" });
@@ -65,7 +66,7 @@ integrationTest("JobQueueService.getJob retrieves job by ID", async () => {
 
     const retrieved = await ctx.jobQueueService.getJob(created.id);
     expect(retrieved).not.toBeNull();
-    expect(retrieved!.id).toBe(created.id);
+    expect(retrieved!.id).toEqual(created.id);
     expect(retrieved!.type).toBe("test-job");
     expect(retrieved!.payload).toEqual({ key: "value" });
   } finally {
@@ -77,7 +78,7 @@ integrationTest("JobQueueService.getJob returns null for non-existent job", asyn
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
-    const job = await ctx.jobQueueService.getJob(99999);
+    const job = await ctx.jobQueueService.getJob(new RecordId("job", "non-existent"));
     expect(job).toBeNull();
   } finally {
     await ctx.cleanup();
@@ -95,11 +96,11 @@ integrationTest("JobQueueService.enqueue with reference stores referenceType and
     const job = await ctx.jobQueueService.enqueue({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 42,
+      referenceId: "42",
     });
 
     expect(job.referenceType).toBe("code_source");
-    expect(job.referenceId).toBe(42);
+    expect(job.referenceId).toBe("42");
   } finally {
     await ctx.cleanup();
   }
@@ -113,7 +114,7 @@ integrationTest("JobQueueService.enqueue throws DuplicateActiveJobError for same
     await ctx.jobQueueService.enqueue({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     // Second job with same reference should throw
@@ -121,7 +122,7 @@ integrationTest("JobQueueService.enqueue throws DuplicateActiveJobError for same
       ctx.jobQueueService.enqueue({
         type: "sync-source",
         referenceType: "code_source",
-        referenceId: 123,
+        referenceId: "123",
       }),
     ).rejects.toThrow(DuplicateActiveJobError);
   } finally {
@@ -136,18 +137,18 @@ integrationTest("JobQueueService.enqueue allows different references", async () 
     const job1 = await ctx.jobQueueService.enqueue({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 1,
+      referenceId: "1",
     });
 
     const job2 = await ctx.jobQueueService.enqueue({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 2,
+      referenceId: "2",
     });
 
     expect(job1.id).not.toBe(job2.id);
-    expect(job1.referenceId).toBe(1);
-    expect(job2.referenceId).toBe(2);
+    expect(job1.referenceId).toBe("1");
+    expect(job2.referenceId).toBe("2");
   } finally {
     await ctx.cleanup();
   }
@@ -161,7 +162,7 @@ integrationTest("JobQueueService.enqueue allows same reference after job complet
     const job1 = await ctx.jobQueueService.enqueue({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 123,
+      referenceId: "123",
     });
     const job1Id = job1.id;
 
@@ -173,7 +174,7 @@ integrationTest("JobQueueService.enqueue allows same reference after job complet
     const job2 = await ctx.jobQueueService.enqueue({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     expect(job2.id).not.toBe(job1Id);
@@ -190,7 +191,7 @@ integrationTest("JobQueueService.enqueueIfNotExists returns null on duplicate", 
     const job1 = await ctx.jobQueueService.enqueueIfNotExists({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 123,
+      referenceId: "123",
     });
     expect(job1).not.toBeNull();
 
@@ -198,7 +199,7 @@ integrationTest("JobQueueService.enqueueIfNotExists returns null on duplicate", 
     const job2 = await ctx.jobQueueService.enqueueIfNotExists({
       type: "sync-source",
       referenceType: "code_source",
-      referenceId: 123,
+      referenceId: "123",
     });
     expect(job2).toBeNull();
   } finally {
@@ -280,20 +281,20 @@ integrationTest("JobQueueService.getActiveJobForReference returns active job", a
     await ctx.jobQueueService.enqueue({
       type: "sync",
       referenceType: "source",
-      referenceId: 1,
+      referenceId: "1",
     });
 
     const activeJob = await ctx.jobQueueService.getActiveJobForReference(
       "source",
-      1,
+      "1",
     );
     expect(activeJob).not.toBeNull();
     expect(activeJob!.referenceType).toBe("source");
-    expect(activeJob!.referenceId).toBe(1);
+    expect(activeJob!.referenceId).toBe("1");
 
     const noJob = await ctx.jobQueueService.getActiveJobForReference(
       "source",
-      999,
+      "999",
     );
     expect(noJob).toBeNull();
   } finally {
@@ -383,7 +384,7 @@ integrationTest("JobQueueService.claimJob throws JobNotFoundError for non-existe
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
-    await expect(ctx.jobQueueService.claimJob(99999)).rejects.toThrow(
+    await expect(ctx.jobQueueService.claimJob(new RecordId("job", "non-existent"))).rejects.toThrow(
       JobNotFoundError,
     );
   } finally {
@@ -456,7 +457,7 @@ integrationTest("JobQueueService.completeJob throws JobNotFoundError for non-exi
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
-    await expect(ctx.jobQueueService.completeJob(99999)).rejects.toThrow(
+    await expect(ctx.jobQueueService.completeJob(new RecordId("job", "non-existent"))).rejects.toThrow(
       JobNotFoundError,
     );
   } finally {
@@ -496,7 +497,7 @@ integrationTest("JobQueueService.failJob throws JobNotFoundError for non-existen
 
   try {
     await expect(
-      ctx.jobQueueService.failJob(99999, { error: "test" }),
+      ctx.jobQueueService.failJob(new RecordId("job", "non-existent"), { error: "test" }),
     ).rejects.toThrow(JobNotFoundError);
   } finally {
     await ctx.cleanup();
@@ -512,11 +513,35 @@ integrationTest("JobQueueService.getOrphanedJobs finds jobs with different insta
 
   try {
     // Insert a job with a different instance ID directly (simulating crash)
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, createdAt)
-       VALUES (?, 'running', 'old-crashed-instance', datetime('now'), datetime('now'))`,
-      ["orphaned-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "orphaned-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "old-crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 0,
+      maxRetries: 1,
+      priority: 0,
+    });
 
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
     expect(orphaned.length).toBe(1);
@@ -547,11 +572,35 @@ integrationTest("JobQueueService.resetOrphanedJob resets job to pending", async 
 
   try {
     // Insert an orphaned job
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'crashed-instance', datetime('now'), 0, 2, datetime('now'))`,
-      ["orphaned-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "orphaned-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 0,
+      maxRetries: 2,
+      priority: 0,
+    });
 
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
     expect(orphaned.length).toBe(1);
@@ -572,11 +621,35 @@ integrationTest("JobQueueService.resetOrphanedJob throws MaxRetriesExceededError
 
   try {
     // Insert an orphaned job that has already reached max retries
-    await ctx.db.execute(
-      `INSERT INTO jobQueue (type, status, processInstanceId, startedAt, retryCount, maxRetries, createdAt)
-       VALUES (?, 'running', 'crashed-instance', datetime('now'), 1, 1, datetime('now'))`,
-      ["exhausted-job"],
-    );
+    await ctx.surrealDb.query(`
+      CREATE job SET
+        type = $type,
+        status = $status,
+        executionMode = $executionMode,
+        processInstanceId = $processInstanceId,
+        startedAt = $startedAt,
+        createdAt = $createdAt,
+        payload = NONE,
+        result = NONE,
+        retryCount = $retryCount,
+        maxRetries = $maxRetries,
+        priority = $priority,
+        referenceType = NONE,
+        referenceId = NONE,
+        completedAt = NONE,
+        cancelledAt = NONE,
+        cancelReason = NONE
+    `, {
+      type: "exhausted-job",
+      status: "running",
+      executionMode: "sequential",
+      processInstanceId: "crashed-instance",
+      startedAt: new Date(),
+      createdAt: new Date(),
+      retryCount: 1,
+      maxRetries: 1,
+      priority: 0,
+    });
 
     const orphaned = await ctx.jobQueueService.getOrphanedJobs();
     expect(orphaned.length).toBe(1);
@@ -593,7 +666,7 @@ integrationTest("JobQueueService.resetOrphanedJob throws JobNotFoundError for no
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
-    await expect(ctx.jobQueueService.resetOrphanedJob(99999)).rejects.toThrow(
+    await expect(ctx.jobQueueService.resetOrphanedJob(new RecordId("job", "non-existent"))).rejects.toThrow(
       JobNotFoundError,
     );
   } finally {
@@ -796,7 +869,7 @@ integrationTest("JobQueueService.cancelJob throws JobNotFoundError for non-exist
   const ctx = await TestSetupBuilder.create().withJobQueue().build();
 
   try {
-    await expect(ctx.jobQueueService.cancelJob(99999)).rejects.toThrow(
+    await expect(ctx.jobQueueService.cancelJob(new RecordId("job", "non-existent"))).rejects.toThrow(
       JobNotFoundError,
     );
   } finally {
@@ -858,17 +931,17 @@ integrationTest("JobQueueService.cancelJobs cancels jobs by reference", async ()
     await ctx.jobQueueService.enqueue({
       type: "ref-cancel",
       referenceType: "entity",
-      referenceId: 1,
+      referenceId: "1",
     });
     await ctx.jobQueueService.enqueue({
       type: "ref-cancel",
       referenceType: "entity",
-      referenceId: 2,
+      referenceId: "2",
     });
 
     const count = await ctx.jobQueueService.cancelJobs({
       referenceType: "entity",
-      referenceId: 1,
+      referenceId: "1",
       reason: "Entity deleted",
     });
 
@@ -1006,19 +1079,19 @@ integrationTest("JobQueueService.enqueue allows concurrent jobs with same refere
       type: "concurrent-test",
       executionMode: "concurrent",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     const job2 = await ctx.jobQueueService.enqueue({
       type: "concurrent-test",
       executionMode: "concurrent",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     expect(job1.id).not.toBe(job2.id);
-    expect(job1.referenceId).toBe(123);
-    expect(job2.referenceId).toBe(123);
+    expect(job1.referenceId).toBe("123");
+    expect(job2.referenceId).toBe("123");
   } finally {
     await ctx.cleanup();
   }
@@ -1032,7 +1105,7 @@ integrationTest("JobQueueService.enqueue throws DuplicateActiveJobError for sequ
       type: "sequential-test",
       executionMode: "sequential",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     await expect(
@@ -1040,7 +1113,7 @@ integrationTest("JobQueueService.enqueue throws DuplicateActiveJobError for sequ
         type: "sequential-test",
         executionMode: "sequential",
         referenceType: "entity",
-        referenceId: 123,
+        referenceId: "123",
       }),
     ).rejects.toThrow(DuplicateActiveJobError);
   } finally {
@@ -1057,7 +1130,7 @@ integrationTest("JobQueueService.enqueue allows sequential job when concurrent e
       type: "mixed-mode",
       executionMode: "concurrent",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     // Second job is sequential - should succeed since concurrent doesn't block
@@ -1065,7 +1138,7 @@ integrationTest("JobQueueService.enqueue allows sequential job when concurrent e
       type: "mixed-mode",
       executionMode: "sequential",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     expect(job2.executionMode).toBe("sequential");
@@ -1083,7 +1156,7 @@ integrationTest("JobQueueService.enqueue allows concurrent job when sequential e
       type: "mixed-mode",
       executionMode: "sequential",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     // Second job is concurrent - should succeed
@@ -1091,7 +1164,7 @@ integrationTest("JobQueueService.enqueue allows concurrent job when sequential e
       type: "mixed-mode",
       executionMode: "concurrent",
       referenceType: "entity",
-      referenceId: 123,
+      referenceId: "123",
     });
 
     expect(job2.executionMode).toBe("concurrent");
@@ -1130,7 +1203,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job completio
     const job = await ctx.jobQueueService.enqueue({ type: "sub-test" });
     await ctx.jobQueueService.claimJob(job.id);
 
-    let receivedEvent: { type: string; job: { id: number } } | null = null;
+    let receivedEvent: { type: string; job: { id: RecordId } } | null = null;
 
     ctx.jobQueueService.subscribeToCompletion(job.id, (event) => {
       receivedEvent = event;
@@ -1140,7 +1213,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job completio
 
     expect(receivedEvent).not.toBeNull();
     expect(receivedEvent!.type).toBe("completed");
-    expect(receivedEvent!.job.id).toBe(job.id);
+    expect(receivedEvent!.job.id).toEqual(job.id);
   } finally {
     await ctx.cleanup();
   }
@@ -1153,7 +1226,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job failure",
     const job = await ctx.jobQueueService.enqueue({ type: "sub-test" });
     await ctx.jobQueueService.claimJob(job.id);
 
-    let receivedEvent: { type: string; job: { id: number } } | null = null;
+    let receivedEvent: { type: string; job: { id: RecordId } } | null = null;
 
     ctx.jobQueueService.subscribeToCompletion(job.id, (event) => {
       receivedEvent = event;
@@ -1163,7 +1236,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job failure",
 
     expect(receivedEvent).not.toBeNull();
     expect(receivedEvent!.type).toBe("failed");
-    expect(receivedEvent!.job.id).toBe(job.id);
+    expect(receivedEvent!.job.id).toEqual(job.id);
   } finally {
     await ctx.cleanup();
   }
@@ -1175,7 +1248,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job cancellat
   try {
     const job = await ctx.jobQueueService.enqueue({ type: "sub-test" });
 
-    let receivedEvent: { type: string; job: { id: number } } | null = null;
+    let receivedEvent: { type: string; job: { id: RecordId } } | null = null;
 
     ctx.jobQueueService.subscribeToCompletion(job.id, (event) => {
       receivedEvent = event;
@@ -1186,7 +1259,7 @@ integrationTest("JobQueueService.subscribeToCompletion notifies on job cancellat
 
     expect(receivedEvent).not.toBeNull();
     expect(receivedEvent!.type).toBe("cancelled");
-    expect(receivedEvent!.job.id).toBe(job.id);
+    expect(receivedEvent!.job.id).toEqual(job.id);
   } finally {
     await ctx.cleanup();
   }
@@ -1224,7 +1297,7 @@ integrationTest("JobQueueService.subscribeToCancellation notifies on cancellatio
     const job = await ctx.jobQueueService.enqueue({ type: "sub-test" });
     await ctx.jobQueueService.claimJob(job.id);
 
-    let receivedEvent: { jobId: number; reason?: string } | null = null;
+    let receivedEvent: { jobId: RecordId; reason?: string } | null = null;
 
     ctx.jobQueueService.subscribeToCancellation(job.id, (event) => {
       receivedEvent = event;

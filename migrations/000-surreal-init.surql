@@ -184,7 +184,7 @@ DEFINE FIELD IF NOT EXISTS scopeType ON TABLE secret TYPE "global" | "function" 
 
 -- Scope reference as record:
 -- - global: NONE (null)
--- - function: record (e.g., function:123 - synthetic record for SQLite route ID)
+-- - function: record<functionDef> (e.g., functionDef:abc123)
 -- - group: record<apiKeyGroup>
 -- - key: record<apiKey>
 DEFINE FIELD IF NOT EXISTS scopeRef ON TABLE secret TYPE option<record>;
@@ -325,6 +325,201 @@ DEFINE INDEX IF NOT EXISTS idx_log_timestamp ON executionLog FIELDS timestamp;
 DEFINE INDEX IF NOT EXISTS idx_log_function_level ON executionLog FIELDS functionId, level;
 
 --------------------------------------------------------------------------------
+-- Job Queue
+--------------------------------------------------------------------------------
+
+-- Job queue table - generic queue for background processing with orphan detection.
+-- Used by code source sync, cleanup tasks, and other async operations.
+-- Features:
+--   - Priority-based processing (higher priority processed first)
+--   - Orphan detection via processInstanceId (detects jobs from crashed containers)
+--   - Unique constraint on active sequential jobs per reference (prevents duplicate work)
+--   - Flexible payload/result for job data (may be encrypted by service)
+DEFINE TABLE IF NOT EXISTS job SCHEMAFULL TYPE NORMAL;
+
+-- Job type identifier. Used to dispatch to correct handler.
+-- Examples: 'source_sync', 'log_cleanup', 'metrics_aggregate'
+DEFINE FIELD IF NOT EXISTS type ON TABLE job TYPE string;
+
+-- Job lifecycle state. Transitions: pending -> running -> completed/failed/cancelled
+-- Running jobs can be reset to pending on orphan recovery (increments retryCount)
+DEFINE FIELD IF NOT EXISTS status ON TABLE job TYPE "pending" | "running" | "completed" | "failed" | "cancelled"
+    DEFAULT "pending";
+
+-- Execution mode:
+-- - sequential (default): Enforces unique constraint on active jobs per reference
+-- - concurrent: Allows multiple active jobs for the same reference
+DEFINE FIELD IF NOT EXISTS executionMode ON TABLE job TYPE "sequential" | "concurrent"
+    DEFAULT "sequential";
+
+-- Job parameters as JSON string. Structure depends on job type.
+-- May be encrypted if sensitive data (e.g., credentials).
+-- Stored as string because encryption produces string output.
+DEFINE FIELD IF NOT EXISTS payload ON TABLE job TYPE option<string>;
+
+-- Outcome as JSON string. On success: result data. On failure: error details.
+DEFINE FIELD IF NOT EXISTS result ON TABLE job TYPE option<string>;
+
+-- UUID of process instance handling this job. Set when status -> running.
+-- Used for orphan detection: if process crashes, jobs have mismatched ID.
+DEFINE FIELD IF NOT EXISTS processInstanceId ON TABLE job TYPE option<string>;
+
+-- How many times this job has been retried after orphaning.
+DEFINE FIELD IF NOT EXISTS retryCount ON TABLE job TYPE int DEFAULT 0;
+
+-- Maximum retry attempts. After retryCount >= maxRetries, job stays failed.
+-- Default 1 means: try once, if orphaned retry once, then give up.
+DEFINE FIELD IF NOT EXISTS maxRetries ON TABLE job TYPE int DEFAULT 1;
+
+-- Higher priority jobs processed first. Default 0. Manual syncs could use
+-- higher priority to jump ahead of scheduled syncs.
+DEFINE FIELD IF NOT EXISTS priority ON TABLE job TYPE int DEFAULT 0;
+
+-- Generic entity reference for constraint enforcement and querying.
+-- For source_sync jobs: referenceType='codeSource', referenceId=source record ID string
+-- Kept as separate fields for flexibility (can reference any entity type)
+DEFINE FIELD IF NOT EXISTS referenceType ON TABLE job TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS referenceId ON TABLE job TYPE option<string>;
+
+-- Timestamps
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE job TYPE datetime DEFAULT time::now();
+
+-- When job was picked up (status -> running). NONE until started.
+DEFINE FIELD IF NOT EXISTS startedAt ON TABLE job TYPE option<datetime>;
+
+-- When job finished (status -> completed/failed/cancelled). NONE until done.
+DEFINE FIELD IF NOT EXISTS completedAt ON TABLE job TYPE option<datetime>;
+
+-- When job was requested for cancellation. Set before completedAt.
+-- If set while running, handler should detect and stop gracefully.
+DEFINE FIELD IF NOT EXISTS cancelledAt ON TABLE job TYPE option<datetime>;
+
+-- Human-readable reason for cancellation.
+DEFINE FIELD IF NOT EXISTS cancelReason ON TABLE job TYPE option<string>;
+
+-- Indexes for job queue operations
+
+-- Finding pending jobs to process (priority ordering)
+DEFINE INDEX IF NOT EXISTS idx_job_status ON job FIELDS status;
+
+-- Finding jobs by type and status (e.g., all pending source_sync jobs)
+DEFINE INDEX IF NOT EXISTS idx_job_type_status ON job FIELDS type, status;
+
+-- Priority ordering when selecting next pending job
+-- Note: SurrealDB will use this for queries ordering by priority DESC, createdAt ASC
+DEFINE INDEX IF NOT EXISTS idx_job_priority ON job FIELDS status, priority, createdAt;
+
+-- Finding jobs by reference (for duplicate detection and querying)
+DEFINE INDEX IF NOT EXISTS idx_job_reference ON job FIELDS referenceType, referenceId, status;
+
+-- Cleanup queries (finding old completed/failed/cancelled jobs by completion time)
+DEFINE INDEX IF NOT EXISTS idx_job_completed ON job FIELDS status, completedAt;
+
+--------------------------------------------------------------------------------
+-- Scheduling
+--------------------------------------------------------------------------------
+
+-- Schedules table - stores scheduled job definitions.
+-- Schedules create jobs in the job table when their trigger time arrives.
+-- Features:
+--   - Multiple schedule types: one_off, dynamic, sequential_interval, concurrent_interval
+--   - Transient vs persistent schedules (transient cleared on startup)
+--   - Efficient timeout-based triggering via nextRunAt index
+--   - Reference tracking for completion callbacks (dynamic/sequential schedules)
+DEFINE TABLE IF NOT EXISTS schedule SCHEMAFULL TYPE NORMAL;
+
+-- Unique schedule name (used as identifier for API operations)
+DEFINE FIELD IF NOT EXISTS name ON TABLE schedule TYPE string;
+
+-- Human-readable description
+DEFINE FIELD IF NOT EXISTS description ON TABLE schedule TYPE option<string>;
+
+-- Schedule type determines execution behavior:
+--   one_off: Execute once at nextRunAt, then status -> completed
+--   dynamic: After job completes, handler returns next time via result
+--   sequential_interval: Wait for job completion, then schedule next after intervalMs
+--   concurrent_interval: Enqueue at every interval regardless of running jobs
+DEFINE FIELD IF NOT EXISTS type ON TABLE schedule TYPE "one_off" | "dynamic" | "sequential_interval" | "concurrent_interval";
+
+-- Current status:
+--   active: Schedule is enabled and will trigger
+--   paused: Schedule is disabled, will not trigger until resumed
+--   completed: One-off schedule that has executed (or cancelled)
+--   error: Schedule encountered too many failures
+DEFINE FIELD IF NOT EXISTS status ON TABLE schedule TYPE "active" | "paused" | "completed" | "error"
+    DEFAULT "active";
+
+-- Persistence flag: false = transient (cleared on startup), true = persistent
+DEFINE FIELD IF NOT EXISTS isPersistent ON TABLE schedule TYPE bool DEFAULT true;
+
+-- Next scheduled execution time. NONE if paused or completed.
+DEFINE FIELD IF NOT EXISTS nextRunAt ON TABLE schedule TYPE option<datetime>;
+
+-- Interval in milliseconds for interval-based schedules. NONE for one_off/dynamic.
+DEFINE FIELD IF NOT EXISTS intervalMs ON TABLE schedule TYPE option<int>;
+
+-- Job configuration: type to enqueue when schedule triggers
+DEFINE FIELD IF NOT EXISTS jobType ON TABLE schedule TYPE string;
+
+-- Job payload as JSON string. Passed to job when enqueued.
+-- May be encrypted if sensitive data.
+DEFINE FIELD IF NOT EXISTS jobPayload ON TABLE schedule TYPE option<string>;
+
+-- Job priority (passed to job.enqueue)
+DEFINE FIELD IF NOT EXISTS jobPriority ON TABLE schedule TYPE int DEFAULT 0;
+
+-- Job max retries (passed to job.enqueue)
+DEFINE FIELD IF NOT EXISTS jobMaxRetries ON TABLE schedule TYPE int DEFAULT 1;
+
+-- Job execution mode: sequential or concurrent
+DEFINE FIELD IF NOT EXISTS jobExecutionMode ON TABLE schedule TYPE "sequential" | "concurrent"
+    DEFAULT "sequential";
+
+-- Reference type for job (for duplicate detection in sequential mode)
+DEFINE FIELD IF NOT EXISTS jobReferenceType ON TABLE schedule TYPE option<string>;
+
+-- Reference ID for job (string representation - numbers converted to strings)
+DEFINE FIELD IF NOT EXISTS jobReferenceId ON TABLE schedule TYPE option<string>;
+
+-- Currently active job ID (for tracking completion in dynamic/sequential schedules)
+-- NONE when no job is running
+DEFINE FIELD IF NOT EXISTS activeJobId ON TABLE schedule TYPE option<record<job>>;
+
+-- Consecutive failure count (for error detection)
+DEFINE FIELD IF NOT EXISTS consecutiveFailures ON TABLE schedule TYPE int DEFAULT 0;
+
+-- Max consecutive failures before schedule enters error state
+DEFINE FIELD IF NOT EXISTS maxConsecutiveFailures ON TABLE schedule TYPE int DEFAULT 5;
+
+-- Error message if status is 'error'
+DEFINE FIELD IF NOT EXISTS lastError ON TABLE schedule TYPE option<string>;
+
+-- Timestamps
+DEFINE FIELD IF NOT EXISTS createdAt ON TABLE schedule TYPE datetime DEFAULT time::now();
+DEFINE FIELD IF NOT EXISTS updatedAt ON TABLE schedule TYPE datetime VALUE time::now();
+
+-- Last time the schedule successfully triggered
+DEFINE FIELD IF NOT EXISTS lastTriggeredAt ON TABLE schedule TYPE option<datetime>;
+
+-- Last time a job completed for this schedule
+DEFINE FIELD IF NOT EXISTS lastCompletedAt ON TABLE schedule TYPE option<datetime>;
+
+-- Indexes for scheduling operations
+
+-- Unique schedule name
+DEFINE INDEX IF NOT EXISTS unique_schedule_name ON schedule FIELDS name UNIQUE;
+
+-- Finding schedules that need to trigger (ordered by time)
+-- Used by getNextScheduledTime() to efficiently find soonest schedule
+DEFINE INDEX IF NOT EXISTS idx_schedule_nextRunAt ON schedule FIELDS status, nextRunAt;
+
+-- Finding schedules waiting for job completion
+DEFINE INDEX IF NOT EXISTS idx_schedule_activeJobId ON schedule FIELDS activeJobId;
+
+-- Cleanup of transient schedules on startup
+DEFINE INDEX IF NOT EXISTS idx_schedule_persistent ON schedule FIELDS isPersistent;
+
+--------------------------------------------------------------------------------
 -- Cascade Delete Events
 --------------------------------------------------------------------------------
 
@@ -346,4 +541,9 @@ DEFINE EVENT IF NOT EXISTS delete_functionDef_secrets ON TABLE functionDef WHEN 
 -- When functionDef is deleted, delete all associated execution logs
 DEFINE EVENT IF NOT EXISTS delete_functionDef_logs ON TABLE functionDef WHEN $event = "DELETE" THEN {
     DELETE executionLog WHERE functionId = $before.id
+};
+
+-- When a job is deleted, clear activeJobId reference in any schedule pointing to it
+DEFINE EVENT IF NOT EXISTS clear_schedule_activeJob ON TABLE job WHEN $event = "DELETE" THEN {
+    UPDATE schedule SET activeJobId = NONE WHERE activeJobId = $before.id
 };

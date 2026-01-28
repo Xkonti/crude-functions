@@ -23,7 +23,7 @@ This skill documents testing best practices specific to the Crude Functions proj
 ### What It Is
 
 TestSetupBuilder provides isolated test environments with:
-- Real SQLite database (in-memory or temp file)
+- Real SurrealDB database (isolated namespace)
 - Full migration execution
 - Multiple services with automatic dependency resolution
 - Deferred data insertion (API keys, routes, settings, users)
@@ -280,8 +280,6 @@ All test contexts include these SurrealDB-related properties:
 
 ```typescript
 interface BaseTestContext {
-  // ... SQLite properties ...
-
   // SurrealDB properties (always available)
   surrealDb: Surreal;              // Raw Surreal SDK connection to test namespace
   surrealFactory: SurrealConnectionFactory;  // Factory for creating new connections
@@ -299,9 +297,6 @@ For testing migration logic or customizing the test environment:
 ```typescript
 // Custom migrations directory (default: ./migrations)
 .withMigrationsDir("/path/to/migrations")
-
-// Skip SQLite migrations during build
-.withoutSQLiteMigrations()
 
 // Skip SurrealDB migrations during build
 .withoutSurrealMigrations()
@@ -334,7 +329,6 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
 
     const ctx = await TestSetupBuilder.create()
       .withMigrationsDir(tempMigrationsDir)
-      .withoutSQLiteMigrations()       // Don't run SQLite migrations
       .withoutSurrealMigrations()      // Don't auto-run SurrealDB migrations
       .withBaseOnly()                  // Just base context, no services
       .build();
@@ -356,7 +350,7 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
       const [users] = await ctx.surrealDb.query<[unknown[]]>("SELECT * FROM users");
       expect(Array.isArray(users)).toBe(true);
     } finally {
-      await ctx.cleanup();  // Inner cleanup - SurrealDB namespace + SQLite
+      await ctx.cleanup();  // Inner cleanup - SurrealDB namespace
     }
   } finally {
     await Deno.remove(tempMigrationsDir, { recursive: true });  // Outer cleanup - temp dir

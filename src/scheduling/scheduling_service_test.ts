@@ -642,18 +642,66 @@ integrationTest("SchedulingService clears transient schedules on startup", async
 
   try {
     // Create a transient schedule directly (bypassing service to avoid auto-cleanup)
-    await ctx.db.execute(
-      `INSERT INTO schedules (name, type, status, isPersistent, nextRunAt, jobType)
-       VALUES (?, 'one_off', 'active', 0, ?, 'test-job')`,
-      ["transient-schedule", new Date(Date.now() + 3600000).toISOString()],
-    );
+    await ctx.surrealDb.query(`
+      CREATE schedule SET
+        name = $name,
+        type = $type,
+        status = $status,
+        isPersistent = $isPersistent,
+        nextRunAt = $nextRunAt,
+        jobType = $jobType,
+        jobPayload = NONE,
+        jobPriority = 0,
+        jobMaxRetries = 1,
+        jobExecutionMode = 'sequential',
+        jobReferenceType = NONE,
+        jobReferenceId = NONE,
+        intervalMs = NONE,
+        activeJobId = NONE,
+        consecutiveFailures = 0,
+        maxConsecutiveFailures = 5,
+        lastError = NONE,
+        lastCompletedAt = NONE,
+        description = NONE
+    `, {
+      name: "transient-schedule",
+      type: "one_off",
+      status: "active",
+      isPersistent: false,
+      nextRunAt: new Date(Date.now() + 3600000),
+      jobType: "test-job",
+    });
 
     // Create a persistent schedule
-    await ctx.db.execute(
-      `INSERT INTO schedules (name, type, status, isPersistent, nextRunAt, jobType)
-       VALUES (?, 'one_off', 'active', 1, ?, 'test-job')`,
-      ["persistent-schedule", new Date(Date.now() + 3600000).toISOString()],
-    );
+    await ctx.surrealDb.query(`
+      CREATE schedule SET
+        name = $name,
+        type = $type,
+        status = $status,
+        isPersistent = $isPersistent,
+        nextRunAt = $nextRunAt,
+        jobType = $jobType,
+        jobPayload = NONE,
+        jobPriority = 0,
+        jobMaxRetries = 1,
+        jobExecutionMode = 'sequential',
+        jobReferenceType = NONE,
+        jobReferenceId = NONE,
+        intervalMs = NONE,
+        activeJobId = NONE,
+        consecutiveFailures = 0,
+        maxConsecutiveFailures = 5,
+        lastError = NONE,
+        lastCompletedAt = NONE,
+        description = NONE
+    `, {
+      name: "persistent-schedule",
+      type: "one_off",
+      status: "active",
+      isPersistent: true,
+      nextRunAt: new Date(Date.now() + 3600000),
+      jobType: "test-job",
+    });
 
     // Start service (which should clear transient schedules)
     ctx.schedulingService.start();

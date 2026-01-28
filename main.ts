@@ -13,11 +13,9 @@ import { ProcessIsolator } from "./src/process/process_isolator.ts";
 const processIsolator = new ProcessIsolator();
 processIsolator.install();
 
-import { DatabaseService } from "./src/database/database_service.ts";
-import { MigrationService } from "./src/database/migration_service.ts";
 import { createAuth } from "./src/auth/auth.ts";
 import { ApiKeyService } from "./src/keys/api_key_service.ts";
-import { RoutesService } from "./src/routes/routes_service.ts";
+import { FunctionsService } from "./src/routes/functions_service.ts";
 import { FunctionRouter } from "./src/functions/function_router.ts";
 import { FileService } from "./src/files/file_service.ts";
 import { SourceFileService } from "./src/files/source_file_service.ts";
@@ -124,33 +122,11 @@ const csrfService = new CsrfService({
 });
 console.log("✓ CSRF service initialized");
 
-// Initialize database
-// The database connection remains open for the application's lifetime and is
-// only closed during graceful shutdown (SIGTERM/SIGINT signals).
-// Services assume the database is always open after this initialization.
-const db = new DatabaseService({
-  databasePath: "./data/database.db",
-});
-await db.open();
-
-// Run migrations
-const migrationService = new MigrationService({
-  db,
-  migrationsDir: "./migrations",
-});
-const migrationResult = await migrationService.migrate();
-if (migrationResult.appliedCount > 0) {
-  console.log(
-    `Applied ${migrationResult.appliedCount} migration(s): version ${migrationResult.fromVersion ?? "none"} → ${migrationResult.toVersion}`
-  );
-}
-
 // ============================================================================
-// SurrealDB Initialization (Experimental)
+// SurrealDB Initialization
 // ============================================================================
 
 // Initialize SurrealDB with supervisor for process lifecycle management
-// Runs alongside SQLite - does not replace it
 
 const surrealPort = parseEnvInt("SURREAL_PORT", 5173, { min: 1, max: 65535 });
 const surrealUser = Deno.env.get("SURREAL_USER") || "root";
@@ -245,7 +221,7 @@ const eventBus = new EventBus();
 
 // Initialize job queue service
 const jobQueueService = new JobQueueService({
-  db,
+  surrealFactory,
   instanceIdService,
   eventBus,
 });
@@ -349,7 +325,7 @@ const jobProcessorService = new JobProcessorService({
 
 // Initialize scheduling service
 const schedulingService = new SchedulingService({
-  db,
+  surrealFactory,
   jobQueueService,
 });
 
@@ -402,14 +378,14 @@ const secretsService = new SecretsService({
 });
 
 // Initialize routes service
-const routesService = new RoutesService({
+const functionsService = new FunctionsService({
   surrealFactory,
   secretsService, // For cascade delete of function-scoped secrets
 });
 
 // Initialize function router
 const functionRouter = new FunctionRouter({
-  routesService,
+  functionsService,
   apiKeyService,
   consoleLogService,
   executionMetricsService,
@@ -524,10 +500,9 @@ const functionApp = createFunctionApp(functionRouter);
 // Management app (runs on MANAGEMENT_PORT)
 const managementApp = createManagementApp({
   auth,
-  db,
   surrealFactory,
   apiKeyService,
-  routesService,
+  functionsService,
   consoleLogService,
   executionMetricsService,
   encryptionService,
@@ -545,7 +520,7 @@ const managementApp = createManagementApp({
 console.log("✓ Hono apps created");
 
 // Export apps and services for testing
-export { functionApp, managementApp, apiKeyService, routesService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService, surrealFactory, surrealProcessManager, surrealSupervisor };
+export { functionApp, managementApp, apiKeyService, functionsService, functionRouter, fileService, sourceFileService, codeSourceService, consoleLogService, executionMetricsService, logTrimmingService, keyRotationService, secretsService, settingsService, userService, processIsolator, jobQueueService, jobProcessorService, schedulingService, surrealFactory, surrealProcessManager, surrealSupervisor };
 
 // Graceful shutdown handler
 async function gracefulShutdown(signal: string) {
@@ -583,10 +558,6 @@ async function gracefulShutdown(signal: string) {
       await surrealSupervisor.stop();
       console.log("SurrealDB supervisor stopped");
     }
-
-    // 8. Close SQLite database last
-    await db.close();
-    console.log("Database connection closed successfully");
   } catch (error) {
     console.error("Error during shutdown:", error);
     Deno.exit(1);
