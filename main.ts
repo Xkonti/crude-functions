@@ -330,7 +330,7 @@ const keyRotationConfig: KeyRotationConfig = {
   batchSleepMs: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS, 100),
 };
 const keyRotationService = new KeyRotationService({
-  db,
+  surrealFactory,
   encryptionService,
   keyStorage: keyStorageService,
   config: keyRotationConfig,
