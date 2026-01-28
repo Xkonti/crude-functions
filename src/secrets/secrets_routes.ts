@@ -6,6 +6,7 @@ import {
   validateScope,
   validateSecretValue,
 } from "../validation/secrets.ts";
+import { validateSurrealId } from "../validation/common.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /**
@@ -78,26 +79,33 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       );
     }
 
-    // Parse IDs
-    let functionId: number | undefined;
+    // Parse and validate IDs (all are now SurrealDB string IDs)
+    let functionId: string | undefined;
     let groupId: string | undefined;
     let keyId: string | undefined;
 
     if (functionIdStr) {
-      const parsed = parseInt(functionIdStr, 10);
-      if (isNaN(parsed)) {
+      const validated = validateSurrealId(functionIdStr);
+      if (!validated) {
         return c.json({ error: "Invalid functionId" }, 400);
       }
-      functionId = parsed;
+      functionId = validated;
     }
 
-    // groupId and keyId are now strings (SurrealDB IDs)
     if (groupIdStr) {
-      groupId = groupIdStr;
+      const validated = validateSurrealId(groupIdStr);
+      if (!validated) {
+        return c.json({ error: "Invalid groupId" }, 400);
+      }
+      groupId = validated;
     }
 
     if (keyIdStr) {
-      keyId = keyIdStr;
+      const validated = validateSurrealId(keyIdStr);
+      if (!validated) {
+        return c.json({ error: "Invalid keyId" }, 400);
+      }
+      keyId = validated;
     }
 
     const secrets = await service.getAllSecrets({
@@ -134,7 +142,7 @@ export function createSecretsRoutes(service: SecretsService): Hono {
       value?: string;
       comment?: string;
       scopeType?: string;
-      functionId?: number;
+      functionId?: string;
       groupId?: string;
       keyId?: string;
     };

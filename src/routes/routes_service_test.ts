@@ -7,6 +7,7 @@ import {
 } from "../validation/routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 // ============== Validation Function Tests ==============
 
@@ -81,7 +82,7 @@ integrationTest("RoutesService.addRoute creates route with required fields", asy
     await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
-      route: "/hello",
+      routePath: "/hello",
       methods: ["GET"],
     });
 
@@ -89,7 +90,7 @@ integrationTest("RoutesService.addRoute creates route with required fields", asy
     expect(routes.length).toBe(1);
     expect(routes[0].name).toBe("hello");
     expect(routes[0].handler).toBe("hello.ts");
-    expect(routes[0].route).toBe("/hello");
+    expect(routes[0].routePath).toBe("/hello");
     expect(routes[0].methods).toEqual(["GET"]);
     expect(routes[0].description).toBeUndefined();
     expect(routes[0].keys).toBeUndefined();
@@ -107,7 +108,7 @@ integrationTest("RoutesService.addRoute creates route with all fields", async ()
       name: "test",
       description: "Test route",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET", "POST"],
       keys: [testGroupId],
     });
@@ -129,7 +130,7 @@ integrationTest("RoutesService.getByName returns route or null", async () => {
     await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
-      route: "/hello",
+      routePath: "/hello",
       methods: ["GET"],
     });
 
@@ -149,7 +150,7 @@ integrationTest("RoutesService.addRoute throws on duplicate name", async () => {
     await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
-      route: "/hello",
+      routePath: "/hello",
       methods: ["GET"],
     });
 
@@ -157,7 +158,7 @@ integrationTest("RoutesService.addRoute throws on duplicate name", async () => {
       ctx.routesService.addRoute({
         name: "hello", // duplicate name
         handler: "other.ts",
-        route: "/other",
+        routePath: "/other",
         methods: ["POST"],
       })
     ).rejects.toThrow("already exists");
@@ -172,7 +173,7 @@ integrationTest("RoutesService.addRoute throws on duplicate route+method", async
     await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
-      route: "/users",
+      routePath: "/users",
       methods: ["GET", "POST"],
     });
 
@@ -180,7 +181,7 @@ integrationTest("RoutesService.addRoute throws on duplicate route+method", async
       ctx.routesService.addRoute({
         name: "different-name",
         handler: "other.ts",
-        route: "/users", // same route
+        routePath: "/users", // same route
         methods: ["GET"], // conflicting method
       })
     ).rejects.toThrow("already exists");
@@ -195,7 +196,7 @@ integrationTest("RoutesService.addRoute allows same route with different methods
     await ctx.routesService.addRoute({
       name: "users-get",
       handler: "users-get.ts",
-      route: "/users",
+      routePath: "/users",
       methods: ["GET"],
     });
 
@@ -203,7 +204,7 @@ integrationTest("RoutesService.addRoute allows same route with different methods
     await ctx.routesService.addRoute({
       name: "users-post",
       handler: "users-post.ts",
-      route: "/users",
+      routePath: "/users",
       methods: ["POST"],
     });
 
@@ -220,13 +221,13 @@ integrationTest("RoutesService.removeRoute removes by name", async () => {
     await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
-      route: "/hello",
+      routePath: "/hello",
       methods: ["GET"],
     });
     await ctx.routesService.addRoute({
       name: "users",
       handler: "users.ts",
-      route: "/users",
+      routePath: "/users",
       methods: ["GET"],
     });
 
@@ -246,7 +247,7 @@ integrationTest("RoutesService.removeRoute is no-op for non-existent name", asyn
     await ctx.routesService.addRoute({
       name: "hello",
       handler: "hello.ts",
-      route: "/hello",
+      routePath: "/hello",
       methods: ["GET"],
     });
 
@@ -267,7 +268,7 @@ integrationTest("rebuildIfNeeded triggers rebuild on first call (starts dirty)",
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
@@ -317,7 +318,7 @@ integrationTest("rebuildIfNeeded rebuilds after addRoute", async () => {
     await ctx.routesService.addRoute({
       name: "new",
       handler: "new.ts",
-      route: "/new",
+      routePath: "/new",
       methods: ["GET"],
     });
 
@@ -335,7 +336,7 @@ integrationTest("rebuildIfNeeded rebuilds after removeRoute", async () => {
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
@@ -390,7 +391,7 @@ integrationTest("concurrent rebuildIfNeeded calls share single rebuild", async (
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
@@ -420,18 +421,15 @@ integrationTest("addRoute waits for in-progress rebuild", async () => {
     const events: string[] = [];
 
     // Start a slow rebuild
-    const rebuildPromise = ctx.routesService.rebuildIfNeeded(() => {
+    const rebuildPromise = ctx.routesService.rebuildIfNeeded(async () => {
       events.push("rebuild-start");
-      // Simulate some work (synchronous for test simplicity)
-      const start = Date.now();
-      while (Date.now() - start < 50) {
-        // busy wait
-      }
+      // Simulate some work with async delay for better timing control
+      await new Promise((r) => setTimeout(r, 100));
       events.push("rebuild-end");
     });
 
-    // Small delay to ensure rebuild starts first
-    await new Promise((r) => setTimeout(r, 10));
+    // Delay to ensure rebuild starts first
+    await new Promise((r) => setTimeout(r, 30));
 
     // Try to add a route while rebuild is in progress
     const addPromise = (async () => {
@@ -439,7 +437,7 @@ integrationTest("addRoute waits for in-progress rebuild", async () => {
       await ctx.routesService.addRoute({
         name: "new",
         handler: "new.ts",
-        route: "/new",
+        routePath: "/new",
         methods: ["GET"],
       });
       events.push("add-done");
@@ -468,7 +466,7 @@ integrationTest("multiple writes are serialized", async () => {
         ctx.routesService.addRoute({
           name: `route-${i}`,
           handler: `route-${i}.ts`,
-          route: `/route-${i}`,
+          routePath: `/route-${i}`,
           methods: ["GET"],
         })
       );
@@ -491,17 +489,17 @@ integrationTest("RoutesService.updateRoute updates route in place", async () => 
     await ctx.routesService.addRoute({
       name: "original",
       handler: "original.ts",
-      route: "/original",
+      routePath: "/original",
       methods: ["GET"],
     });
 
     const originalRoute = await ctx.routesService.getByName("original");
-    const originalId = originalRoute!.id;
+    const originalId = recordIdToString(originalRoute!.id);
 
     await ctx.routesService.updateRoute(originalId, {
       name: "updated",
       handler: "updated.ts",
-      route: "/updated",
+      routePath: "/updated",
       methods: ["POST"],
       description: "Updated description",
     });
@@ -512,9 +510,9 @@ integrationTest("RoutesService.updateRoute updates route in place", async () => 
 
     // New name should exist with same ID
     const byNewName = await ctx.routesService.getByName("updated");
-    expect(byNewName?.id).toBe(originalId);
+    expect(recordIdToString(byNewName!.id)).toBe(originalId);
     expect(byNewName?.handler).toBe("updated.ts");
-    expect(byNewName?.route).toBe("/updated");
+    expect(byNewName?.routePath).toBe("/updated");
     expect(byNewName?.methods).toEqual(["POST"]);
     expect(byNewName?.description).toBe("Updated description");
   } finally {
@@ -526,10 +524,10 @@ integrationTest("RoutesService.updateRoute throws on non-existent ID", async () 
   const ctx = await TestSetupBuilder.create().withRoutes().build();
   try {
     await expect(
-      ctx.routesService.updateRoute(999, {
+      ctx.routesService.updateRoute("nonexistent-id-999", {
         name: "test",
         handler: "test.ts",
-        route: "/test",
+        routePath: "/test",
         methods: ["GET"],
       })
     ).rejects.toThrow("not found");
@@ -544,23 +542,23 @@ integrationTest("RoutesService.updateRoute throws on duplicate name", async () =
     await ctx.routesService.addRoute({
       name: "first",
       handler: "first.ts",
-      route: "/first",
+      routePath: "/first",
       methods: ["GET"],
     });
     await ctx.routesService.addRoute({
       name: "second",
       handler: "second.ts",
-      route: "/second",
+      routePath: "/second",
       methods: ["POST"],
     });
 
     const secondRoute = await ctx.routesService.getByName("second");
 
     await expect(
-      ctx.routesService.updateRoute(secondRoute!.id, {
+      ctx.routesService.updateRoute(recordIdToString(secondRoute!.id), {
         name: "first", // duplicate
         handler: "second.ts",
-        route: "/second",
+        routePath: "/second",
         methods: ["POST"],
       })
     ).rejects.toThrow("already exists");
@@ -575,17 +573,17 @@ integrationTest("RoutesService.updateRoute allows keeping same name", async () =
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
     const route = await ctx.routesService.getByName("test");
 
     // Should not throw - keeping same name
-    await ctx.routesService.updateRoute(route!.id, {
+    await ctx.routesService.updateRoute(recordIdToString(route!.id), {
       name: "test",
       handler: "updated.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET", "POST"],
     });
 
@@ -603,23 +601,23 @@ integrationTest("RoutesService.updateRoute throws on duplicate route+method", as
     await ctx.routesService.addRoute({
       name: "first",
       handler: "first.ts",
-      route: "/users",
+      routePath: "/users",
       methods: ["GET"],
     });
     await ctx.routesService.addRoute({
       name: "second",
       handler: "second.ts",
-      route: "/other",
+      routePath: "/other",
       methods: ["POST"],
     });
 
     const secondRoute = await ctx.routesService.getByName("second");
 
     await expect(
-      ctx.routesService.updateRoute(secondRoute!.id, {
+      ctx.routesService.updateRoute(recordIdToString(secondRoute!.id), {
         name: "second",
         handler: "second.ts",
-        route: "/users", // same route as first
+        routePath: "/users", // same route as first
         methods: ["GET"], // conflicting method
       })
     ).rejects.toThrow("already exists");
@@ -634,22 +632,22 @@ integrationTest("RoutesService.updateRoute allows keeping same route+method", as
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET", "POST"],
     });
 
     const route = await ctx.routesService.getByName("test");
 
     // Should not throw - same route/methods
-    await ctx.routesService.updateRoute(route!.id, {
+    await ctx.routesService.updateRoute(recordIdToString(route!.id), {
       name: "test-renamed",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET", "POST"],
     });
 
     const updated = await ctx.routesService.getByName("test-renamed");
-    expect(updated?.route).toBe("/test");
+    expect(updated?.routePath).toBe("/test");
   } finally {
     await ctx.cleanup();
   }
@@ -661,7 +659,7 @@ integrationTest("RoutesService.updateRoute marks dirty flag", async () => {
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
@@ -670,10 +668,10 @@ integrationTest("RoutesService.updateRoute marks dirty flag", async () => {
     expect(rebuildCount).toBe(1);
 
     const route = await ctx.routesService.getByName("test");
-    await ctx.routesService.updateRoute(route!.id, {
+    await ctx.routesService.updateRoute(recordIdToString(route!.id), {
       name: "test",
       handler: "updated.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
@@ -693,12 +691,12 @@ integrationTest("RoutesService.removeRouteById removes by ID", async () => {
     await ctx.routesService.addRoute({
       name: "test",
       handler: "test.ts",
-      route: "/test",
+      routePath: "/test",
       methods: ["GET"],
     });
 
     const route = await ctx.routesService.getByName("test");
-    await ctx.routesService.removeRouteById(route!.id);
+    await ctx.routesService.removeRouteById(recordIdToString(route!.id));
 
     const result = await ctx.routesService.getByName("test");
     expect(result).toBe(null);
@@ -713,7 +711,7 @@ integrationTest("RoutesService.removeRouteById is no-op for non-existent ID", as
     let rebuildCount = 0;
     await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);
 
-    await ctx.routesService.removeRouteById(999);
+    await ctx.routesService.removeRouteById("nonexistent-id-999");
 
     // Should NOT mark dirty
     await ctx.routesService.rebuildIfNeeded(() => rebuildCount++);

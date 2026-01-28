@@ -1,11 +1,13 @@
-import type { DatabaseService } from "../database/database_service.ts";
+import { Mutex } from "@core/asyncutil/mutex";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import { SettingNames } from "../settings/types.ts";
 import type { ConsoleLog, NewConsoleLog, GetPaginatedOptions, PaginatedLogsResult, PaginationCursor } from "./types.ts";
-import { formatForSqlite, parseSqliteTimestamp } from "../utils/datetime.ts";
 
 export interface ConsoleLogServiceOptions {
-  db: DatabaseService;
+  surrealFactory: SurrealConnectionFactory;
   settingsService: SettingsService;
 }
 
@@ -17,30 +19,32 @@ interface BufferedLogEntry extends NewConsoleLog {
   sequenceInBatch: number;
 }
 
-// Row type for database queries
-interface ConsoleLogRow {
-  [key: string]: unknown;
-  id: number;
+/** Database row type for execution logs */
+interface ExecutionLogRow {
+  id: RecordId;
   requestId: string;
-  routeId: number | null;
+  functionId: RecordId | null;
   level: string;
   message: string;
   args: string | null;
-  timestamp: string;
+  sequence: number;
+  timestamp: Date;
+  createdAt: Date;
 }
 
 /**
  * Service for storing and retrieving captured console logs.
  *
  * Logs are captured from function handlers during execution and stored
- * in the database for later retrieval and analysis.
+ * in SurrealDB for later retrieval and analysis.
  *
  * Uses batching to reduce database writes - logs are buffered in memory
  * and flushed either when the batch size is reached or after a delay.
  */
 export class ConsoleLogService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly settingsService: SettingsService;
+  private readonly writeMutex = new Mutex();
 
   // Buffer management
   private buffer: BufferedLogEntry[] = [];
@@ -55,7 +59,7 @@ export class ConsoleLogService {
   private readonly settingsRefreshIntervalMs = 5000;
 
   constructor(options: ConsoleLogServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.settingsService = options.settingsService;
   }
 
@@ -167,36 +171,35 @@ export class ConsoleLogService {
   }
 
   /**
-   * Execute a batch INSERT with timestamp ordering.
-   * Applies microsecond offsets to preserve ordering within the batch.
+   * Execute a batch INSERT into SurrealDB.
+   * Uses the sequence field for ordering within the batch.
    */
   private async executeBatchInsert(entries: BufferedLogEntry[]): Promise<void> {
     if (entries.length === 0) return;
 
-    // Build multi-row INSERT with explicit timestamps
-    const placeholders = entries.map(() => "(?, ?, ?, ?, ?, ?)").join(", ");
-    const sql = `INSERT INTO executionLogs (requestId, routeId, level, message, args, timestamp)
-                 VALUES ${placeholders}`;
+    using _lock = await this.writeMutex.acquire();
 
-    // Flatten parameters with timestamp offsets for ordering
-    const params: (string | number | null)[] = [];
-    for (const entry of entries) {
-      // Add microsecond offset based on sequence to preserve order
-      const timestamp = new Date(entry.capturedAt.getTime());
-      // Add sequence * 1ms offset to ensure ordering (SQLite timestamp has ms precision)
-      timestamp.setTime(timestamp.getTime() + entry.sequenceInBatch);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Insert each log individually to ensure all are inserted
+      for (const entry of entries) {
+        const log = {
+          requestId: entry.requestId,
+          functionId: entry.functionId
+            ? new RecordId("functionDef", entry.functionId)
+            : undefined, // NONE for orphaned logs
+          level: entry.level,
+          message: entry.message,
+          args: entry.args ?? undefined, // NONE instead of NULL
+          sequence: entry.sequenceInBatch,
+          timestamp: entry.capturedAt,
+        };
 
-      params.push(
-        entry.requestId,
-        entry.routeId,
-        entry.level,
-        entry.message,
-        entry.args ?? null,
-        formatForSqlite(timestamp)
-      );
-    }
-
-    await this.db.execute(sql, params);
+        await db.query(
+          `CREATE executionLog CONTENT $log`,
+          { log }
+        );
+      }
+    });
   }
 
   /**
@@ -237,96 +240,108 @@ export class ConsoleLogService {
    * Retrieve logs for a specific request.
    */
   async getByRequestId(requestId: string): Promise<ConsoleLog[]> {
-    const rows = await this.db.queryAll<ConsoleLogRow>(
-      `SELECT id, requestId, routeId, level, message, args, timestamp
-       FROM executionLogs
-       WHERE requestId = ?
-       ORDER BY id ASC`,
-      [requestId]
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ExecutionLogRow[]]>(
+        `SELECT *, timestamp as ts, sequence as seq FROM executionLog
+         WHERE requestId = $requestId
+         ORDER BY ts ASC, seq ASC`,
+        { requestId }
+      );
 
-    return rows.map((row) => this.rowToConsoleLog(row));
+      return (rows ?? []).map((row) => this.rowToConsoleLog(row));
+    });
   }
 
   /**
-   * Retrieve logs for a specific route.
+   * Retrieve logs for a specific function.
    * Results are ordered from newest to oldest.
    */
-  async getByRouteId(routeId: number, limit?: number): Promise<ConsoleLog[]> {
+  async getByFunctionId(functionId: string, limit?: number): Promise<ConsoleLog[]> {
     // Validate limit if provided
     if (limit !== undefined && limit <= 0) {
       throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
     }
 
-    const sql = limit
-      ? `SELECT id, requestId, routeId, level, message, args, timestamp
-         FROM executionLogs
-         WHERE routeId = ?
-         ORDER BY id DESC
-         LIMIT ?`
-      : `SELECT id, requestId, routeId, level, message, args, timestamp
-         FROM executionLogs
-         WHERE routeId = ?
-         ORDER BY id DESC`;
+    const funcRecordId = new RecordId("functionDef", functionId);
 
-    const params = limit ? [routeId, limit] : [routeId];
-    const rows = await this.db.queryAll<ConsoleLogRow>(sql, params);
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const query = limit
+        ? `SELECT *, timestamp as ts, sequence as seq FROM executionLog
+           WHERE functionId = $functionId
+           ORDER BY ts DESC, seq DESC
+           LIMIT $limit`
+        : `SELECT *, timestamp as ts, sequence as seq FROM executionLog
+           WHERE functionId = $functionId
+           ORDER BY ts DESC, seq DESC`;
 
-    return rows.map((row) => this.rowToConsoleLog(row));
+      const [rows] = await db.query<[ExecutionLogRow[]]>(
+        query,
+        { functionId: funcRecordId, limit }
+      );
+
+      return (rows ?? []).map((row) => this.rowToConsoleLog(row));
+    });
   }
 
   /**
-   * Retrieve logs for a specific route before a given log id.
+   * Retrieve logs for a specific function before a given cursor.
    * Used for pagination (next page).
    * Results are ordered from newest to oldest.
    */
-  async getByRouteIdBeforeId(
-    routeId: number,
-    beforeId: number,
+  async getByFunctionIdBeforeCursor(
+    functionId: string,
+    cursorTimestamp: Date,
+    cursorSequence: number,
     limit: number
   ): Promise<ConsoleLog[]> {
     if (limit <= 0) {
       throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
     }
 
-    const rows = await this.db.queryAll<ConsoleLogRow>(
-      `SELECT id, requestId, routeId, level, message, args, timestamp
-       FROM executionLogs
-       WHERE routeId = ? AND id < ?
-       ORDER BY id DESC
-       LIMIT ?`,
-      [routeId, beforeId, limit]
-    );
+    const funcRecordId = new RecordId("functionDef", functionId);
 
-    return rows.map((row) => this.rowToConsoleLog(row));
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ExecutionLogRow[]]>(
+        `SELECT *, timestamp as ts, sequence as seq FROM executionLog
+         WHERE functionId = $functionId
+           AND (timestamp < $cursorTimestamp
+                OR (timestamp = $cursorTimestamp AND sequence < $cursorSeq))
+         ORDER BY ts DESC, seq DESC
+         LIMIT $limit`,
+        { functionId: funcRecordId, cursorTimestamp, cursorSeq: cursorSequence, limit }
+      );
+
+      return (rows ?? []).map((row) => this.rowToConsoleLog(row));
+    });
   }
 
   /**
-   * Retrieve recent logs across all routes.
+   * Retrieve recent logs across all functions.
    */
   async getRecent(limit = 100): Promise<ConsoleLog[]> {
     if (limit <= 0) {
       throw new Error(`Invalid limit: ${limit}. Limit must be a positive integer.`);
     }
 
-    const rows = await this.db.queryAll<ConsoleLogRow>(
-      `SELECT id, requestId, routeId, level, message, args, timestamp
-       FROM executionLogs
-       ORDER BY id DESC
-       LIMIT ?`,
-      [limit]
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[ExecutionLogRow[]]>(
+        `SELECT *, timestamp as ts, sequence as seq FROM executionLog
+         ORDER BY ts DESC, seq DESC
+         LIMIT $limit`,
+        { limit }
+      );
 
-    return rows.map((row) => this.rowToConsoleLog(row));
+      return (rows ?? []).map((row) => this.rowToConsoleLog(row));
+    });
   }
 
   /**
    * Retrieve logs with cursor-based pagination.
    * Results are ordered from newest to oldest.
-   * Cursor combines timestamp and ID to handle same-timestamp ambiguity.
+   * Cursor combines timestamp and RecordId to handle same-timestamp ambiguity.
    */
   async getPaginated(options: GetPaginatedOptions): Promise<PaginatedLogsResult> {
-    const { routeId, levels, limit, cursor } = options;
+    const { functionId, levels, limit, cursor } = options;
 
     // Validate limit
     if (limit < 1 || limit > 1000) {
@@ -344,78 +359,77 @@ export class ConsoleLogService {
       }
     }
 
-    // Build WHERE clause dynamically
-    const whereClauses: string[] = [];
-    const params: (string | number)[] = [];
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Build WHERE clauses dynamically
+      const conditions: string[] = [];
+      const params: Record<string, unknown> = { limit: limit + 1 };
 
-    // Add routeId filter if provided
-    if (routeId !== undefined) {
-      whereClauses.push("routeId = ?");
-      params.push(routeId);
-    }
+      // Add functionId filter if provided
+      if (functionId !== undefined) {
+        conditions.push("functionId = $functionId");
+        params.functionId = new RecordId("functionDef", functionId);
+      }
 
-    // Add level filter if provided
-    if (levels && levels.length > 0) {
-      const placeholders = levels.map(() => "?").join(", ");
-      whereClauses.push(`level IN (${placeholders})`);
-      params.push(...levels);
-    }
+      // Add level filter if provided
+      if (levels && levels.length > 0) {
+        conditions.push("level IN $levels");
+        params.levels = levels;
+      }
 
-    // Add cursor filter if provided
-    if (cursorData) {
-      whereClauses.push("(timestamp < ? OR (timestamp = ? AND id < ?))");
-      params.push(cursorData.timestamp, cursorData.timestamp, cursorData.id);
-    }
+      // Add cursor filter if provided
+      if (cursorData) {
+        conditions.push(
+          "(timestamp < $cursorTimestamp OR (timestamp = $cursorTimestamp AND sequence < $cursorSeq))"
+        );
+        params.cursorTimestamp = new Date(cursorData.timestamp);
+        params.cursorSeq = cursorData.sequence;
+      }
 
-    // Build final SQL
-    const whereClause = whereClauses.length > 0
-      ? `WHERE ${whereClauses.join(" AND ")}`
-      : "";
+      const whereClause = conditions.length > 0
+        ? `WHERE ${conditions.join(" AND ")}`
+        : "";
 
-    const sql = `SELECT id, requestId, routeId, level, message, args, timestamp
-                 FROM executionLogs
-                 ${whereClause}
-                 ORDER BY timestamp DESC, id DESC
-                 LIMIT ?`;
-    params.push(limit + 1);
+      const query = `SELECT *, timestamp as ts, sequence as seq FROM executionLog
+         ${whereClause}
+         ORDER BY ts DESC, seq DESC
+         LIMIT $limit`;
 
-    const rows = await this.db.queryAll<ConsoleLogRow>(sql, params);
+      const [rows] = await db.query<[ExecutionLogRow[]]>(query, params);
 
-    // Check if there are more results
-    const hasMore = rows.length > limit;
-    const resultRows = rows.slice(0, limit);
-    const logs = resultRows.map(row => this.rowToConsoleLog(row));
+      const resultRows = rows ?? [];
+      const hasMore = resultRows.length > limit;
+      const pagedRows = resultRows.slice(0, limit);
+      const logs = pagedRows.map((row) => this.rowToConsoleLog(row));
 
-    // Generate next cursor if there are more results
-    // Use raw timestamp from database row to preserve exact format
-    let nextCursor: string | undefined;
-    if (hasMore && resultRows.length > 0) {
-      const lastRow = resultRows[resultRows.length - 1];
-      const cursorObj: PaginationCursor = {
-        timestamp: lastRow.timestamp,
-        id: lastRow.id,
+      // Generate next cursor if there are more results
+      let nextCursor: string | undefined;
+      if (hasMore && pagedRows.length > 0) {
+        const lastRow = pagedRows[pagedRows.length - 1];
+        const cursorObj: PaginationCursor = {
+          timestamp: lastRow.timestamp.toISOString(),
+          sequence: lastRow.sequence,
+        };
+        nextCursor = btoa(JSON.stringify(cursorObj));
+      }
+
+      // Generate previous cursor (first item of current page)
+      let prevCursor: string | undefined;
+      if (cursor && pagedRows.length > 0) {
+        const firstRow = pagedRows[0];
+        const cursorObj: PaginationCursor = {
+          timestamp: firstRow.timestamp.toISOString(),
+          sequence: firstRow.sequence,
+        };
+        prevCursor = btoa(JSON.stringify(cursorObj));
+      }
+
+      return {
+        logs,
+        hasMore,
+        nextCursor,
+        prevCursor,
       };
-      nextCursor = btoa(JSON.stringify(cursorObj));
-    }
-
-    // Generate previous cursor (first item of current page)
-    // Use raw timestamp from database row to preserve exact format
-    let prevCursor: string | undefined;
-    if (cursor && resultRows.length > 0) {
-      const firstRow = resultRows[0];
-      const cursorObj: PaginationCursor = {
-        timestamp: firstRow.timestamp,
-        id: firstRow.id,
-      };
-      prevCursor = btoa(JSON.stringify(cursorObj));
-    }
-
-    return {
-      logs,
-      hasMore,
-      nextCursor,
-      prevCursor,
-    };
+    });
   }
 
   /**
@@ -423,80 +437,137 @@ export class ConsoleLogService {
    * Returns the number of deleted logs.
    */
   async deleteOlderThan(date: Date): Promise<number> {
-    const result = await this.db.execute(
-      `DELETE FROM executionLogs WHERE timestamp < ?`,
-      [formatForSqlite(date)]
-    );
+    using _lock = await this.writeMutex.acquire();
 
-    return result.changes;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Get count first
+      const [countResult] = await db.query<[{ count: number }[]]>(
+        `SELECT count() as count FROM executionLog WHERE timestamp < $date GROUP ALL`,
+        { date }
+      );
+      const count = countResult?.[0]?.count ?? 0;
+
+      // Delete logs
+      await db.query(
+        `DELETE FROM executionLog WHERE timestamp < $date`,
+        { date }
+      );
+
+      return count;
+    });
   }
 
   /**
-   * Delete all logs for a specific route.
+   * Delete all logs for a specific function.
    * Returns the number of deleted logs.
    */
-  async deleteByRouteId(routeId: number): Promise<number> {
-    const result = await this.db.execute(
-      `DELETE FROM executionLogs WHERE routeId = ?`,
-      [routeId]
-    );
+  async deleteByFunctionId(functionId: string): Promise<number> {
+    using _lock = await this.writeMutex.acquire();
 
-    return result.changes;
+    const funcRecordId = new RecordId("functionDef", functionId);
+
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Get count first
+      const [countResult] = await db.query<[{ count: number }[]]>(
+        `SELECT count() as count FROM executionLog WHERE functionId = $functionId GROUP ALL`,
+        { functionId: funcRecordId }
+      );
+      const count = countResult?.[0]?.count ?? 0;
+
+      // Delete logs
+      await db.query(
+        `DELETE FROM executionLog WHERE functionId = $functionId`,
+        { functionId: funcRecordId }
+      );
+
+      return count;
+    });
   }
 
   /**
-   * Get all distinct route IDs that have logs.
+   * Get all distinct function IDs that have logs.
    */
-  async getDistinctRouteIds(): Promise<number[]> {
-    const rows = await this.db.queryAll<{ routeId: number }>(
-      `SELECT DISTINCT routeId FROM executionLogs WHERE routeId IS NOT NULL`
-    );
-    return rows.map((row) => row.routeId);
+  async getDistinctFunctionIds(): Promise<string[]> {
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Use GROUP BY to get distinct values in SurrealDB
+      const [rows] = await db.query<[{ functionId: RecordId }[]]>(
+        `SELECT functionId FROM executionLog WHERE functionId IS NOT NONE GROUP BY functionId`
+      );
+
+      return (rows ?? []).map((row) => recordIdToString(row.functionId));
+    });
   }
 
   /**
-   * Trim logs for a route to keep only the newest N logs.
+   * Trim logs for a function to keep only the newest N logs.
    * Returns the number of deleted logs.
    *
    * Uses an efficient two-step approach:
    * - Gets the id of the Nth newest log
-   * - Deletes all logs with id less than that threshold
+   * - Deletes all logs older than that threshold
    */
-  async trimToLimit(routeId: number, maxLogs: number): Promise<number> {
-    // Find the id threshold - the id of the (maxLogs)th newest log
-    // Logs older than this will be deleted
-    const thresholdRow = await this.db.queryOne<{ id: number }>(
-      `SELECT id FROM executionLogs
-       WHERE routeId = ?
-       ORDER BY id DESC
-       LIMIT 1 OFFSET ?`,
-      [routeId, maxLogs - 1]
-    );
+  async trimToLimit(functionId: string, maxLogs: number): Promise<number> {
+    using _lock = await this.writeMutex.acquire();
 
-    // If no threshold found, there are fewer than maxLogs entries
-    if (!thresholdRow) {
-      return 0;
-    }
+    const funcRecordId = new RecordId("functionDef", functionId);
 
-    // Delete all logs for this route with id less than threshold
-    const result = await this.db.execute(
-      `DELETE FROM executionLogs
-       WHERE routeId = ? AND id < ?`,
-      [routeId, thresholdRow.id]
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Get the threshold (the maxLogs-th newest log)
+      const [thresholdResult] = await db.query<[{ id: RecordId; timestamp: Date; sequence: number }[]]>(
+        `SELECT id, timestamp, sequence, timestamp as ts, sequence as seq FROM executionLog
+         WHERE functionId = $functionId
+         ORDER BY ts DESC, seq DESC
+         LIMIT 1 START $offset`,
+        { functionId: funcRecordId, offset: maxLogs - 1 }
+      );
 
-    return result.changes;
+      const threshold = thresholdResult?.[0];
+      if (!threshold) {
+        return 0; // Fewer than maxLogs entries
+      }
+
+      // Count logs to delete (older than threshold)
+      const [countResult] = await db.query<[{ count: number }[]]>(
+        `SELECT count() as count FROM executionLog
+         WHERE functionId = $functionId
+           AND (timestamp < $thresholdTime
+                OR (timestamp = $thresholdTime AND sequence < $thresholdSeq))
+         GROUP ALL`,
+        {
+          functionId: funcRecordId,
+          thresholdTime: threshold.timestamp,
+          thresholdSeq: threshold.sequence,
+        }
+      );
+      const count = countResult?.[0]?.count ?? 0;
+
+      // Delete logs older than threshold
+      await db.query(
+        `DELETE FROM executionLog
+         WHERE functionId = $functionId
+           AND (timestamp < $thresholdTime
+                OR (timestamp = $thresholdTime AND sequence < $thresholdSeq))`,
+        {
+          functionId: funcRecordId,
+          thresholdTime: threshold.timestamp,
+          thresholdSeq: threshold.sequence,
+        }
+      );
+
+      return count;
+    });
   }
 
-  private rowToConsoleLog(row: ConsoleLogRow): ConsoleLog {
+  private rowToConsoleLog(row: ExecutionLogRow): ConsoleLog {
     return {
-      id: row.id,
+      id: recordIdToString(row.id),
       requestId: row.requestId,
-      routeId: row.routeId ?? 0, // Default to 0 for orphaned logs
+      functionId: row.functionId ? recordIdToString(row.functionId) : "",
       level: row.level as ConsoleLog["level"],
       message: row.message,
       args: row.args ?? undefined,
-      timestamp: parseSqliteTimestamp(row.timestamp),
+      sequence: row.sequence,
+      timestamp: new Date(row.timestamp),
     };
   }
 }

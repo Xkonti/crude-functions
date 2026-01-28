@@ -1,7 +1,7 @@
 import { Hono } from "@hono/hono";
 import type { ConsoleLogService } from "./console_log_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
-import { validateId } from "../validation/common.ts";
+import { validateSurrealId } from "../validation/common.ts";
 import type { ConsoleLogLevel } from "./types.ts";
 
 export interface LogsRoutesOptions {
@@ -17,21 +17,21 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
   routes.get("/", async (c) => {
     // 1. Parse and validate functionId (optional)
     const functionIdParam = c.req.query("functionId");
-    let routeId: number | undefined;
+    let functionId: string | undefined;
 
     if (functionIdParam) {
-      const parsed = validateId(functionIdParam);
+      const parsed = validateSurrealId(functionIdParam);
       if (parsed === null) {
         return c.json({ error: "Invalid functionId parameter" }, 400);
       }
 
-      // Verify route exists
+      // Verify function exists
       const route = await routesService.getById(parsed);
       if (!route) {
         return c.json({ error: `Function with id ${parsed} not found` }, 404);
       }
 
-      routeId = parsed;
+      functionId = parsed;
     }
 
     // 2. Parse and validate level (optional, comma-separated)
@@ -81,7 +81,7 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
     // 5. Query logs
     try {
       const result = await consoleLogService.getPaginated({
-        routeId,
+        functionId,
         levels,
         limit,
         cursor,
@@ -91,8 +91,8 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       const baseUrl = "/api/logs";
       const queryParams = new URLSearchParams();
 
-      if (routeId !== undefined) {
-        queryParams.set("functionId", String(routeId));
+      if (functionId !== undefined) {
+        queryParams.set("functionId", functionId);
       }
       if (levels !== undefined) {
         queryParams.set("level", levels.join(","));
@@ -134,13 +134,13 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
 
   // DELETE /api/logs/:functionId - Delete logs for specific function
   routes.delete("/:functionId", async (c) => {
-    const functionId = validateId(c.req.param("functionId"));
+    const functionId = validateSurrealId(c.req.param("functionId"));
 
     if (functionId === null) {
       return c.json({ error: "Invalid functionId parameter" }, 400);
     }
 
-    // Verify route exists
+    // Verify function exists
     const route = await routesService.getById(functionId);
     if (!route) {
       return c.json(
@@ -149,7 +149,7 @@ export function createLogsRoutes(options: LogsRoutesOptions): Hono {
       );
     }
 
-    const deleted = await consoleLogService.deleteByRouteId(functionId);
+    const deleted = await consoleLogService.deleteByFunctionId(functionId);
 
     return c.json({
       data: {

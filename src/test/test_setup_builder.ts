@@ -833,7 +833,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     // STEP 7: Create routes service if needed (after API keys for key resolution, after secrets for cascade delete)
     if (this.flags.routesService) {
       // Pass secretsService for cascade delete of function-scoped secrets
-      context.routesService = createRoutesService(db, context.secretsService);
+      context.routesService = createRoutesService(surrealFactory, context.secretsService);
 
       // Create deferred routes
       for (const { path, fileName, options } of this.deferredRoutes) {
@@ -857,7 +857,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
           name: options?.name ?? fileName.replace(/\.ts$/, ""),
           description: options?.description,
           handler: fileName,
-          route: path,
+          routePath: path,
           methods: options?.methods ?? ["GET"],
           keys: resolvedKeys,
         });
@@ -876,13 +876,13 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 9: Create console log service if needed (after routes exist for FK constraint)
     if (this.flags.consoleLogService) {
-      context.consoleLogService = createConsoleLogService(db, context.settingsService);
+      context.consoleLogService = createConsoleLogService(surrealFactory, context.settingsService);
 
       // Seed deferred logs
       for (const log of this.deferredLogs) {
         context.consoleLogService.store({
           requestId: log.requestId,
-          routeId: log.routeId,
+          functionId: log.functionId,
           level: log.level,
           message: log.message,
           args: log.args,
@@ -893,15 +893,15 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
 
     // STEP 10: Create metrics services if needed (after routes exist for FK constraint)
     if (this.flags.executionMetricsService) {
-      context.executionMetricsService = createExecutionMetricsService(db);
+      context.executionMetricsService = createExecutionMetricsService(surrealFactory);
 
-      // Seed deferred metrics
+      // Seed deferred metrics (convert ms to us for storage)
       for (const metric of this.deferredMetrics) {
         await context.executionMetricsService.store({
-          routeId: metric.routeId,
+          functionId: metric.functionId ?? undefined,
           type: metric.type,
-          avgTimeMs: metric.avgTimeMs,
-          maxTimeMs: metric.maxTimeMs,
+          avgTimeUs: metric.avgTimeMs * 1000,
+          maxTimeUs: metric.maxTimeMs * 1000,
           executionCount: metric.executionCount,
           timestamp: metric.timestamp,
         });
@@ -909,7 +909,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     if (this.flags.metricsStateService) {
-      context.metricsStateService = createMetricsStateService(db);
+      context.metricsStateService = createMetricsStateService(surrealFactory);
     }
 
     // STEP 11: Create instance ID service if needed

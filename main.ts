@@ -291,15 +291,15 @@ const userService = new UserService({
 // Initialize stream/console log capture
 // Must be installed after migrations but before handling requests
 // Captures both console.* methods AND direct process.stdout/stderr writes
-const consoleLogService = new ConsoleLogService({ db, settingsService });
+const consoleLogService = new ConsoleLogService({ surrealFactory, settingsService });
 const streamInterceptor = new StreamInterceptor({ logService: consoleLogService });
 streamInterceptor.install();
 
-// Initialize execution metrics service
-const executionMetricsService = new ExecutionMetricsService({ db });
+// Initialize execution metrics service (SurrealDB)
+const executionMetricsService = new ExecutionMetricsService({ surrealFactory });
 
-// Initialize metrics state service (for aggregation watermarks)
-const metricsStateService = new MetricsStateService({ db });
+// Initialize metrics state service for aggregation watermarks (SurrealDB)
+const metricsStateService = new MetricsStateService({ surrealFactory });
 
 // Initialize and start metrics aggregation service
 const metricsAggregationConfig: MetricsAggregationConfig = {
@@ -330,7 +330,7 @@ const keyRotationConfig: KeyRotationConfig = {
   batchSleepMs: await getIntSetting(SettingNames.ENCRYPTION_KEY_ROTATION_BATCH_SLEEP_MS, 100),
 };
 const keyRotationService = new KeyRotationService({
-  db,
+  surrealFactory,
   encryptionService,
   keyStorage: keyStorageService,
   config: keyRotationConfig,
@@ -403,7 +403,7 @@ const secretsService = new SecretsService({
 
 // Initialize routes service
 const routesService = new RoutesService({
-  db,
+  surrealFactory,
   secretsService, // For cascade delete of function-scoped secrets
 });
 

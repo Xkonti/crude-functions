@@ -4,11 +4,12 @@ import { createFunctionsRoutes } from "./functions_routes.ts";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
 import type { BaseTestContext, RoutesContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 interface TestFunction {
   name: string;
   handler: string;
-  route: string;
+  routePath: string;
   methods: string[];
   description?: string;
   keys?: string[];
@@ -23,7 +24,7 @@ function createTestApp(ctx: BaseTestContext & RoutesContext): Hono {
 async function buildTestContext(functions: TestFunction[] = []) {
   const builder = TestSetupBuilder.create().withRoutes();
   for (const f of functions) {
-    builder.withRoute(f.route, f.handler, {
+    builder.withRoute(f.routePath, f.handler, {
       name: f.name,
       methods: f.methods,
       description: f.description,
@@ -52,8 +53,8 @@ integrationTest("GET /api/functions returns empty array for empty database", asy
 
 integrationTest("GET /api/functions returns all functions", async () => {
   const functions = [
-    { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"] },
-    { name: "users", handler: "users.ts", route: "/users", methods: ["GET", "POST"] },
+    { name: "hello", handler: "hello.ts", routePath: "/hello", methods: ["GET"] },
+    { name: "users", handler: "users.ts", routePath: "/users", methods: ["GET", "POST"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -75,14 +76,14 @@ integrationTest("GET /api/functions returns all functions", async () => {
 
 integrationTest("GET /api/functions/:id returns function for existing ID", async () => {
   const functions = [
-    { name: "hello", handler: "hello.ts", route: "/hello", methods: ["GET"], description: "Greeting" },
+    { name: "hello", handler: "hello.ts", routePath: "/hello", methods: ["GET"], description: "Greeting" },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
 
   try {
     const allFunctions = await ctx.routesService.getAll();
-    const funcId = allFunctions[0].id;
+    const funcId = recordIdToString(allFunctions[0].id);
 
     const res = await app.request(`/api/functions/${funcId}`);
     expect(res.status).toBe(200);
@@ -100,7 +101,7 @@ integrationTest("GET /api/functions/:id returns 404 for non-existent ID", async 
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/999");
+    const res = await app.request("/api/functions/nonexistent123");
     expect(res.status).toBe(404);
 
     const json = await res.json();
@@ -115,7 +116,7 @@ integrationTest("GET /api/functions/:id returns 400 for invalid ID", async () =>
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/invalid");
+    const res = await app.request("/api/functions/@@@");
     expect(res.status).toBe(400);
 
     const json = await res.json();
@@ -240,7 +241,7 @@ integrationTest("POST /api/functions rejects invalid methods", async () => {
 
 integrationTest("POST /api/functions returns 409 on duplicate name", async () => {
   const functions = [
-    { name: "existing", handler: "existing.ts", route: "/existing", methods: ["GET"] },
+    { name: "existing", handler: "existing.ts", routePath: "/existing", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -268,7 +269,7 @@ integrationTest("POST /api/functions returns 409 on duplicate name", async () =>
 
 integrationTest("POST /api/functions returns 409 on duplicate route+method", async () => {
   const functions = [
-    { name: "existing", handler: "existing.ts", route: "/users", methods: ["GET", "POST"] },
+    { name: "existing", handler: "existing.ts", routePath: "/users", methods: ["GET", "POST"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -314,7 +315,7 @@ integrationTest("POST /api/functions rejects invalid JSON", async () => {
 
 integrationTest("PUT /api/functions/:id updates function and returns it", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -322,7 +323,7 @@ integrationTest("PUT /api/functions/:id updates function and returns it", async 
   try {
     const func = await ctx.routesService.getByName("test");
 
-    const res = await app.request(`/api/functions/${func!.id}`, {
+    const res = await app.request(`/api/functions/${recordIdToString(func!.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -337,14 +338,14 @@ integrationTest("PUT /api/functions/:id updates function and returns it", async 
 
     const json = await res.json();
     expect(json.function).toBeDefined();
-    expect(json.function.id).toBe(func!.id); // ID preserved
+    expect(json.function.id).toBe(recordIdToString(func!.id)); // ID preserved
     expect(json.function.name).toBe("updated");
     expect(json.function.handler).toBe("updated.ts");
     expect(json.function.route).toBe("/updated");
     expect(json.function.methods).toEqual(["POST"]);
 
     // Verify update persisted
-    const updated = await ctx.routesService.getById(func!.id);
+    const updated = await ctx.routesService.getById(recordIdToString(func!.id));
     expect(updated?.name).toBe("updated");
     expect(updated?.handler).toBe("updated.ts");
   } finally {
@@ -357,7 +358,7 @@ integrationTest("PUT /api/functions/:id returns 404 for non-existent ID", async 
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/999", {
+    const res = await app.request("/api/functions/nonexistent123", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -376,8 +377,8 @@ integrationTest("PUT /api/functions/:id returns 404 for non-existent ID", async 
 
 integrationTest("PUT /api/functions/:id returns 409 on duplicate name", async () => {
   const functions = [
-    { name: "first", handler: "first.ts", route: "/first", methods: ["GET"] },
-    { name: "second", handler: "second.ts", route: "/second", methods: ["POST"] },
+    { name: "first", handler: "first.ts", routePath: "/first", methods: ["GET"] },
+    { name: "second", handler: "second.ts", routePath: "/second", methods: ["POST"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -385,7 +386,7 @@ integrationTest("PUT /api/functions/:id returns 409 on duplicate name", async ()
   try {
     const secondFunc = await ctx.routesService.getByName("second");
 
-    const res = await app.request(`/api/functions/${secondFunc!.id}`, {
+    const res = await app.request(`/api/functions/${recordIdToString(secondFunc!.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -407,7 +408,7 @@ integrationTest("PUT /api/functions/:id returns 400 for invalid ID", async () =>
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/invalid", {
+    const res = await app.request("/api/functions/@@@", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -426,7 +427,7 @@ integrationTest("PUT /api/functions/:id returns 400 for invalid ID", async () =>
 
 integrationTest("PUT /api/functions/:id returns 400 for missing fields", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -434,7 +435,7 @@ integrationTest("PUT /api/functions/:id returns 400 for missing fields", async (
   try {
     const func = await ctx.routesService.getByName("test");
 
-    const res = await app.request(`/api/functions/${func!.id}`, {
+    const res = await app.request(`/api/functions/${recordIdToString(func!.id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -453,7 +454,7 @@ integrationTest("PUT /api/functions/:id returns 400 for missing fields", async (
 
 integrationTest("DELETE /api/functions/:id removes function and returns 204", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -461,14 +462,14 @@ integrationTest("DELETE /api/functions/:id removes function and returns 204", as
   try {
     const func = await ctx.routesService.getByName("test");
 
-    const res = await app.request(`/api/functions/${func!.id}`, {
+    const res = await app.request(`/api/functions/${recordIdToString(func!.id)}`, {
       method: "DELETE",
     });
 
     expect(res.status).toBe(204);
     expect(await res.text()).toBe("");
 
-    const deleted = await ctx.routesService.getById(func!.id);
+    const deleted = await ctx.routesService.getById(recordIdToString(func!.id));
     expect(deleted).toBe(null);
   } finally {
     await ctx.cleanup();
@@ -480,7 +481,7 @@ integrationTest("DELETE /api/functions/:id returns 404 for non-existent ID", asy
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/999", {
+    const res = await app.request("/api/functions/nonexistent123", {
       method: "DELETE",
     });
 
@@ -495,7 +496,7 @@ integrationTest("DELETE /api/functions/:id returns 400 for invalid ID", async ()
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/invalid", {
+    const res = await app.request("/api/functions/@@@", {
       method: "DELETE",
     });
 
@@ -509,7 +510,7 @@ integrationTest("DELETE /api/functions/:id returns 400 for invalid ID", async ()
 
 integrationTest("PUT /api/functions/:id/enable enables function and returns it", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -517,9 +518,9 @@ integrationTest("PUT /api/functions/:id/enable enables function and returns it",
   try {
     const func = await ctx.routesService.getByName("test");
     // First disable it
-    await ctx.routesService.setRouteEnabled(func!.id, false);
+    await ctx.routesService.setRouteEnabled(recordIdToString(func!.id), false);
 
-    const res = await app.request(`/api/functions/${func!.id}/enable`, {
+    const res = await app.request(`/api/functions/${recordIdToString(func!.id)}/enable`, {
       method: "PUT",
     });
 
@@ -530,7 +531,7 @@ integrationTest("PUT /api/functions/:id/enable enables function and returns it",
     expect(json.function.enabled).toBe(true);
 
     // Verify in database
-    const updated = await ctx.routesService.getById(func!.id);
+    const updated = await ctx.routesService.getById(recordIdToString(func!.id));
     expect(updated!.enabled).toBe(true);
   } finally {
     await ctx.cleanup();
@@ -539,7 +540,7 @@ integrationTest("PUT /api/functions/:id/enable enables function and returns it",
 
 integrationTest("PUT /api/functions/:id/enable is idempotent", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -549,7 +550,7 @@ integrationTest("PUT /api/functions/:id/enable is idempotent", async () => {
 
     // Enable multiple times (already enabled by default)
     for (let i = 0; i < 3; i++) {
-      const res = await app.request(`/api/functions/${func!.id}/enable`, {
+      const res = await app.request(`/api/functions/${recordIdToString(func!.id)}/enable`, {
         method: "PUT",
       });
       expect(res.status).toBe(200);
@@ -567,7 +568,7 @@ integrationTest("PUT /api/functions/:id/enable returns 404 for non-existent func
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/999/enable", {
+    const res = await app.request("/api/functions/nonexistent123/enable", {
       method: "PUT",
     });
 
@@ -582,7 +583,7 @@ integrationTest("PUT /api/functions/:id/enable returns 400 for invalid ID", asyn
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/invalid/enable", {
+    const res = await app.request("/api/functions/@@@/enable", {
       method: "PUT",
     });
 
@@ -596,7 +597,7 @@ integrationTest("PUT /api/functions/:id/enable returns 400 for invalid ID", asyn
 
 integrationTest("PUT /api/functions/:id/disable disables function and returns it", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -604,7 +605,7 @@ integrationTest("PUT /api/functions/:id/disable disables function and returns it
   try {
     const func = await ctx.routesService.getByName("test");
 
-    const res = await app.request(`/api/functions/${func!.id}/disable`, {
+    const res = await app.request(`/api/functions/${recordIdToString(func!.id)}/disable`, {
       method: "PUT",
     });
 
@@ -615,7 +616,7 @@ integrationTest("PUT /api/functions/:id/disable disables function and returns it
     expect(json.function.enabled).toBe(false);
 
     // Verify in database
-    const updated = await ctx.routesService.getById(func!.id);
+    const updated = await ctx.routesService.getById(recordIdToString(func!.id));
     expect(updated!.enabled).toBe(false);
   } finally {
     await ctx.cleanup();
@@ -624,7 +625,7 @@ integrationTest("PUT /api/functions/:id/disable disables function and returns it
 
 integrationTest("PUT /api/functions/:id/disable is idempotent", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -634,7 +635,7 @@ integrationTest("PUT /api/functions/:id/disable is idempotent", async () => {
 
     // Disable multiple times
     for (let i = 0; i < 3; i++) {
-      const res = await app.request(`/api/functions/${func!.id}/disable`, {
+      const res = await app.request(`/api/functions/${recordIdToString(func!.id)}/disable`, {
         method: "PUT",
       });
       expect(res.status).toBe(200);
@@ -652,7 +653,7 @@ integrationTest("PUT /api/functions/:id/disable returns 404 for non-existent fun
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/999/disable", {
+    const res = await app.request("/api/functions/nonexistent123/disable", {
       method: "PUT",
     });
 
@@ -667,7 +668,7 @@ integrationTest("PUT /api/functions/:id/disable returns 400 for invalid ID", asy
   const app = createTestApp(ctx);
 
   try {
-    const res = await app.request("/api/functions/invalid/disable", {
+    const res = await app.request("/api/functions/@@@/disable", {
       method: "PUT",
     });
 
@@ -681,7 +682,7 @@ integrationTest("PUT /api/functions/:id/disable returns 400 for invalid ID", asy
 
 integrationTest("enable and disable toggle function state correctly", async () => {
   const functions = [
-    { name: "test", handler: "test.ts", route: "/test", methods: ["GET"] },
+    { name: "test", handler: "test.ts", routePath: "/test", methods: ["GET"] },
   ];
   const ctx = await buildTestContext(functions);
   const app = createTestApp(ctx);
@@ -689,22 +690,24 @@ integrationTest("enable and disable toggle function state correctly", async () =
   try {
     const func = await ctx.routesService.getByName("test");
 
+    const funcId = recordIdToString(func!.id);
+
     // Initially enabled
-    expect((await ctx.routesService.getById(func!.id))!.enabled).toBe(true);
+    expect((await ctx.routesService.getById(funcId))!.enabled).toBe(true);
 
     // Disable
-    let res = await app.request(`/api/functions/${func!.id}/disable`, {
+    let res = await app.request(`/api/functions/${funcId}/disable`, {
       method: "PUT",
     });
     expect(res.status).toBe(200);
-    expect((await ctx.routesService.getById(func!.id))!.enabled).toBe(false);
+    expect((await ctx.routesService.getById(funcId))!.enabled).toBe(false);
 
     // Re-enable
-    res = await app.request(`/api/functions/${func!.id}/enable`, {
+    res = await app.request(`/api/functions/${funcId}/enable`, {
       method: "PUT",
     });
     expect(res.status).toBe(200);
-    expect((await ctx.routesService.getById(func!.id))!.enabled).toBe(true);
+    expect((await ctx.routesService.getById(funcId))!.enabled).toBe(true);
   } finally {
     await ctx.cleanup();
   }

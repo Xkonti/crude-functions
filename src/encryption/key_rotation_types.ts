@@ -2,7 +2,8 @@
  * Types for the key rotation service.
  */
 
-import type { DatabaseService } from "../database/database_service.ts";
+import type { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import type { KeyStorageService } from "./key_storage_service.ts";
 
@@ -22,8 +23,8 @@ export interface KeyRotationConfig {
  * Options for the KeyRotationService.
  */
 export interface KeyRotationServiceOptions {
-  /** Database service for reading/writing encrypted records */
-  db: DatabaseService;
+  /** SurrealDB connection factory for reading/writing encrypted records */
+  surrealFactory: SurrealConnectionFactory;
   /** Encryption service for encrypt/decrypt operations */
   encryptionService: VersionedEncryptionService;
   /** Key storage service for managing encryption keys file */
@@ -35,17 +36,17 @@ export interface KeyRotationServiceOptions {
 /**
  * Tables that contain encrypted data and need key rotation.
  */
-export type EncryptedTable = "secrets" | "apiKeys" | "settings";
+export type EncryptedTable = "secret" | "apiKey" | "setting";
 
 /**
  * A record from an encrypted table that needs re-encryption.
- * Satisfies the Row constraint for database queries.
+ * Uses SurrealDB types (RecordId, Date).
  */
 export interface EncryptedRecord {
   [key: string]: unknown;
-  id: number;
+  id: RecordId;
   value: string;
-  updatedAt: string;
+  updatedAt: Date;
 }
 
 /**

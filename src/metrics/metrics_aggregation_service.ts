@@ -1,3 +1,4 @@
+import { RecordId } from "surrealdb";
 import type { ExecutionMetricsService } from "./execution_metrics_service.ts";
 import type { MetricsStateService } from "./metrics_state_service.ts";
 import type { MetricsAggregationConfig } from "./types.ts";
@@ -16,11 +17,11 @@ export interface MetricsAggregationServiceOptions {
  * Service for aggregating execution metrics into time-based summaries.
  *
  * Uses a watermark-based approach with three sequential passes:
- * 1. MINUTES PASS: Aggregate executions → minute records (global + per-route)
- * 2. HOURS PASS: Aggregate minutes → hour records (global + per-route)
- * 3. DAYS PASS: Aggregate hours → day records (global + per-route)
+ * 1. MINUTES PASS: Aggregate executions → minute records (global + per-function)
+ * 2. HOURS PASS: Aggregate minutes → hour records (global + per-function)
+ * 3. DAYS PASS: Aggregate hours → day records (global + per-function)
  *
- * Global metrics (routeId=NULL) combine data from all functions.
+ * Global metrics (functionId=null) combine data from all functions.
  * Watermarks track progress to ensure crash recovery with minimal reprocessing.
  * Cleanup happens at the end of all passes.
  *
@@ -87,7 +88,7 @@ export class MetricsAggregationService {
 
   /**
    * MINUTES PASS: Aggregate execution records into minute records.
-   * Creates both global (routeId=NULL) and per-route records.
+   * Creates both global (functionId=null) and per-function records.
    */
   private async processMinutesPass(now: Date, token?: CancellationToken): Promise<void> {
     const currentMinute = this.floorToMinute(now);
@@ -131,29 +132,29 @@ export class MetricsAggregationService {
 
         if (globalResult) {
           await this.metricsService.store({
-            routeId: null,
+            functionId: null,
             type: "minute",
-            avgTimeMs: globalResult.avgTimeMs,
-            maxTimeMs: globalResult.maxTimeMs,
+            avgTimeUs: globalResult.avgTimeUs,
+            maxTimeUs: globalResult.maxTimeUs,
             executionCount: globalResult.executionCount,
             timestamp: windowStart,
           });
         }
 
-        // Aggregate per-route metrics
-        const perRouteResults =
-          await this.metricsService.aggregatePerRouteInTimeWindow(
+        // Aggregate per-function metrics
+        const perFunctionResults =
+          await this.metricsService.aggregatePerFunctionInTimeWindow(
             "execution",
             windowStart,
             windowEnd
           );
 
-        for (const [routeId, result] of perRouteResults) {
+        for (const [functionIdStr, result] of perFunctionResults) {
           await this.metricsService.store({
-            routeId,
+            functionId: new RecordId("functionDef", functionIdStr),
             type: "minute",
-            avgTimeMs: result.avgTimeMs,
-            maxTimeMs: result.maxTimeMs,
+            avgTimeUs: result.avgTimeUs,
+            maxTimeUs: result.maxTimeUs,
             executionCount: result.executionCount,
             timestamp: windowStart,
           });
@@ -207,7 +208,7 @@ export class MetricsAggregationService {
 
   /**
    * HOURS PASS: Aggregate minute records into hour records.
-   * Creates both global (routeId=NULL) and per-route records.
+   * Creates both global (functionId=null) and per-function records.
    */
   private async processHoursPass(now: Date, token?: CancellationToken): Promise<void> {
     const currentHour = this.floorToHour(now);
@@ -242,29 +243,29 @@ export class MetricsAggregationService {
 
         if (globalResult) {
           await this.metricsService.store({
-            routeId: null,
+            functionId: null,
             type: "hour",
-            avgTimeMs: globalResult.avgTimeMs,
-            maxTimeMs: globalResult.maxTimeMs,
+            avgTimeUs: globalResult.avgTimeUs,
+            maxTimeUs: globalResult.maxTimeUs,
             executionCount: globalResult.executionCount,
             timestamp: windowStart,
           });
         }
 
-        // Aggregate per-route metrics
-        const perRouteResults =
-          await this.metricsService.aggregatePerRouteInTimeWindow(
+        // Aggregate per-function metrics
+        const perFunctionResults =
+          await this.metricsService.aggregatePerFunctionInTimeWindow(
             "minute",
             windowStart,
             windowEnd
           );
 
-        for (const [routeId, result] of perRouteResults) {
+        for (const [functionIdStr, result] of perFunctionResults) {
           await this.metricsService.store({
-            routeId,
+            functionId: new RecordId("functionDef", functionIdStr),
             type: "hour",
-            avgTimeMs: result.avgTimeMs,
-            maxTimeMs: result.maxTimeMs,
+            avgTimeUs: result.avgTimeUs,
+            maxTimeUs: result.maxTimeUs,
             executionCount: result.executionCount,
             timestamp: windowStart,
           });
@@ -298,7 +299,7 @@ export class MetricsAggregationService {
 
   /**
    * DAYS PASS: Aggregate hour records into day records.
-   * Creates both global (routeId=NULL) and per-route records.
+   * Creates both global (functionId=null) and per-function records.
    */
   private async processDaysPass(now: Date, token?: CancellationToken): Promise<void> {
     const currentDay = this.floorToDay(now);
@@ -333,29 +334,29 @@ export class MetricsAggregationService {
 
         if (globalResult) {
           await this.metricsService.store({
-            routeId: null,
+            functionId: null,
             type: "day",
-            avgTimeMs: globalResult.avgTimeMs,
-            maxTimeMs: globalResult.maxTimeMs,
+            avgTimeUs: globalResult.avgTimeUs,
+            maxTimeUs: globalResult.maxTimeUs,
             executionCount: globalResult.executionCount,
             timestamp: windowStart,
           });
         }
 
-        // Aggregate per-route metrics
-        const perRouteResults =
-          await this.metricsService.aggregatePerRouteInTimeWindow(
+        // Aggregate per-function metrics
+        const perFunctionResults =
+          await this.metricsService.aggregatePerFunctionInTimeWindow(
             "hour",
             windowStart,
             windowEnd
           );
 
-        for (const [routeId, result] of perRouteResults) {
+        for (const [functionIdStr, result] of perFunctionResults) {
           await this.metricsService.store({
-            routeId,
+            functionId: new RecordId("functionDef", functionIdStr),
             type: "day",
-            avgTimeMs: result.avgTimeMs,
-            maxTimeMs: result.maxTimeMs,
+            avgTimeUs: result.avgTimeUs,
+            maxTimeUs: result.maxTimeUs,
             executionCount: result.executionCount,
             timestamp: windowStart,
           });

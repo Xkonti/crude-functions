@@ -4,6 +4,7 @@ import { Hono } from "@hono/hono";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { FunctionRouter } from "./function_router.ts";
 import type { TestContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 /** Creates a FunctionRouter with all required services from TestSetupBuilder context */
 function createFunctionRouterWithContext(ctx: TestContext) {
@@ -643,7 +644,7 @@ integrationTest("FunctionRouter rebuilds router when routes are added", async ()
     await ctx.routesService.addRoute({
       name: "goodbye",
       handler: "goodbye.ts",
-      route: "/goodbye",
+      routePath: "/goodbye",
       methods: ["GET"],
     });
 
@@ -746,18 +747,18 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     // Get the route ID
     const route = await ctx.routesService.getByName("test-route");
     expect(route).not.toBeNull();
-    const routeId = route!.id;
+    const routeId = recordIdToString(route!.id);
 
     // Add console logs for this route
     ctx.consoleLogService.store({
       requestId: "req-1",
-      routeId,
+      functionId: routeId,
       level: "log",
       message: "Test log 1",
     });
     ctx.consoleLogService.store({
       requestId: "req-2",
-      routeId,
+      functionId: routeId,
       level: "info",
       message: "Test log 2",
     });
@@ -774,35 +775,35 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
 
     // Add execution metrics for this route
     await ctx.executionMetricsService.store({
-      routeId,
+      functionId: route!.id,
       type: "execution",
-      avgTimeMs: 100,
-      maxTimeMs: 150,
+      avgTimeUs: 100 * 1000,
+      maxTimeUs: 150 * 1000,
       executionCount: 1,
     });
     await ctx.executionMetricsService.store({
-      routeId,
+      functionId: route!.id,
       type: "minute",
-      avgTimeMs: 120,
-      maxTimeMs: 180,
+      avgTimeUs: 120 * 1000,
+      maxTimeUs: 180 * 1000,
       executionCount: 5,
     });
 
     // Verify data exists before deletion
-    const logsBefore = await ctx.consoleLogService.getByRouteId(routeId);
+    const logsBefore = await ctx.consoleLogService.getByFunctionId(routeId);
     expect(logsBefore.length).toBe(2);
 
     const secretsBefore = await secretsService.getFunctionSecrets(routeId);
     expect(secretsBefore.length).toBe(2);
 
-    const metricsBefore = await ctx.executionMetricsService.getByRouteId(routeId);
+    const metricsBefore = await ctx.executionMetricsService.getByFunctionId(route!.id);
     expect(metricsBefore.length).toBe(2);
 
     // Delete the route
     await ctx.routesService.removeRoute("test-route");
 
     // Verify console logs are CASCADE deleted
-    const logsAfter = await ctx.consoleLogService.getByRouteId(routeId);
+    const logsAfter = await ctx.consoleLogService.getByFunctionId(routeId);
     expect(logsAfter.length).toBe(0);
 
     // Verify function-specific secrets are CASCADE deleted
@@ -810,10 +811,10 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     expect(secretsAfter.length).toBe(0);
 
     // Verify execution metrics are ORPHANED (not deleted, kept for global metrics aggregation)
-    const metricsAfter = await ctx.executionMetricsService.getByRouteId(routeId);
+    const metricsAfter = await ctx.executionMetricsService.getByFunctionId(route!.id);
     expect(metricsAfter.length).toBe(2);
-    expect(metricsAfter[0].routeId).toBe(routeId);
-    expect(metricsAfter[1].routeId).toBe(routeId);
+    expect(recordIdToString(metricsAfter[0].functionId!)).toBe(routeId);
+    expect(recordIdToString(metricsAfter[1].functionId!)).toBe(routeId);
   } finally {
     await ctx.cleanup();
   }

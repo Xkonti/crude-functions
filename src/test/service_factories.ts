@@ -204,18 +204,22 @@ export async function createSettingsService(
 
 /**
  * Creates the ExecutionMetricsService.
- * Requires only database.
+ * Requires SurrealDB connection factory.
  */
-export function createExecutionMetricsService(db: DatabaseService): ExecutionMetricsService {
-  return new ExecutionMetricsService({ db });
+export function createExecutionMetricsService(
+  surrealFactory: SurrealConnectionFactory
+): ExecutionMetricsService {
+  return new ExecutionMetricsService({ surrealFactory });
 }
 
 /**
  * Creates the MetricsStateService.
- * Requires only database.
+ * Requires SurrealDB connection factory.
  */
-export function createMetricsStateService(db: DatabaseService): MetricsStateService {
-  return new MetricsStateService({ db });
+export function createMetricsStateService(
+  surrealFactory: SurrealConnectionFactory
+): MetricsStateService {
+  return new MetricsStateService({ surrealFactory });
 }
 
 // =============================================================================
@@ -227,10 +231,10 @@ export function createMetricsStateService(db: DatabaseService): MetricsStateServ
  * Requires database and settings service.
  */
 export function createConsoleLogService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   settingsService: SettingsService
 ): ConsoleLogService {
-  return new ConsoleLogService({ db, settingsService });
+  return new ConsoleLogService({ surrealFactory, settingsService });
 }
 
 // =============================================================================
@@ -239,13 +243,13 @@ export function createConsoleLogService(
 
 /**
  * Creates the RoutesService.
- * Requires database, optionally accepts SecretsService for cascade delete.
+ * Requires SurrealDB connection factory, optionally accepts SecretsService for cascade delete.
  */
 export function createRoutesService(
-  db: DatabaseService,
+  surrealFactory: SurrealConnectionFactory,
   secretsService?: SecretsService
 ): RoutesService {
-  return new RoutesService({ db, secretsService });
+  return new RoutesService({ surrealFactory, secretsService });
 }
 
 // =============================================================================

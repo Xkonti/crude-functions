@@ -8,6 +8,8 @@ import type { RoutesService } from "../routes/routes_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
 import type { FunctionRoute } from "../routes/routes_service.ts";
 import type { MetricType } from "./types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
+import { RecordId } from "surrealdb";
 
 interface MetricsTestContext {
   app: Hono;
@@ -28,14 +30,14 @@ async function createTestContext(): Promise<MetricsTestContext> {
   // Create test routes
   await ctx.routesService.addRoute({
     name: "test-function-1",
-    route: "/test1",
+    routePath: "/test1",
     handler: "code/test1.ts",
     methods: ["GET"],
   });
 
   await ctx.routesService.addRoute({
     name: "test-function-2",
-    route: "/test2",
+    routePath: "/test2",
     handler: "code/test2.ts",
     methods: ["GET"],
   });
@@ -66,20 +68,21 @@ async function createTestContext(): Promise<MetricsTestContext> {
 }
 
 // Helper to insert test metrics
+// functionId can be a RecordId or null for global metrics
 async function insertMetric(
   service: ExecutionMetricsService,
-  routeId: number | null,
+  functionId: RecordId | null,
   type: MetricType,
   timestamp: Date,
-  avgTimeMs = 50,
-  maxTimeMs = 100,
+  avgTimeUs = 50000, // 50ms default in microseconds
+  maxTimeUs = 100000, // 100ms default in microseconds
   executionCount = 10,
 ): Promise<void> {
   await service.store({
-    routeId,
+    functionId,
     type,
-    avgTimeMs,
-    maxTimeMs,
+    avgTimeUs,
+    maxTimeUs,
     executionCount,
     timestamp,
   });
@@ -112,25 +115,27 @@ integrationTest("GET /api/metrics returns metrics for specific function", async 
     const now = new Date();
     const timestamp = new Date(now.getTime() - 30 * 60 * 1000); // 30 minutes ago
 
+    // Use RecordId directly - 45500 microseconds = 45.5ms
     await insertMetric(
       ctx.executionMetricsService,
       ctx.routes.route1.id,
       "minute",
       timestamp,
-      45.5,
-      120,
+      45500, // avgTimeUs
+      120000, // maxTimeUs (120ms)
       15,
     );
 
     const res = await ctx.app.request(
-      `/?functionId=${ctx.routes.route1.id}&resolution=minutes`,
+      `/?functionId=${recordIdToString(ctx.routes.route1.id)}&resolution=minutes`,
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.data.metrics.length).toBe(1);
-    expect(json.data.functionId).toBe(ctx.routes.route1.id);
+    expect(json.data.functionId).toBe(recordIdToString(ctx.routes.route1.id));
     expect(json.data.resolution).toBe("minutes");
+    // API converts microseconds to milliseconds
     expect(json.data.metrics[0].avgTimeMs).toBe(45.5);
     expect(json.data.metrics[0].maxTimeMs).toBe(120);
     expect(json.data.metrics[0].executionCount).toBe(15);
@@ -145,14 +150,14 @@ integrationTest("GET /api/metrics returns global metrics when functionId omitted
     const now = new Date();
     const timestamp = new Date(now.getTime() - 30 * 60 * 1000);
 
-    // Insert global metric (routeId = null)
+    // Insert global metric (functionId = null)
     await insertMetric(
       ctx.executionMetricsService,
       null,
       "minute",
       timestamp,
-      50,
-      100,
+      50000, // 50ms in microseconds
+      100000, // 100ms in microseconds
       20,
     );
 
@@ -174,7 +179,7 @@ integrationTest("GET /api/metrics filters by resolution (minutes/hours/days)", a
   try {
     const now = new Date();
 
-    // Insert different metric types
+    // Insert different metric types (using null for global metrics)
     await insertMetric(
       ctx.executionMetricsService,
       null,
@@ -227,8 +232,8 @@ integrationTest("GET /api/metrics returns metrics ordered by timestamp ASC", asy
       null,
       "minute",
       new Date(now.getTime() - 50 * 60 * 1000),
-      10,
-      20,
+      10000, // 10ms
+      20000, // 20ms
       5,
     );
     await insertMetric(
@@ -236,8 +241,8 @@ integrationTest("GET /api/metrics returns metrics ordered by timestamp ASC", asy
       null,
       "minute",
       new Date(now.getTime() - 10 * 60 * 1000),
-      30,
-      40,
+      30000, // 30ms
+      40000, // 40ms
       5,
     );
     await insertMetric(
@@ -245,8 +250,8 @@ integrationTest("GET /api/metrics returns metrics ordered by timestamp ASC", asy
       null,
       "minute",
       new Date(now.getTime() - 30 * 60 * 1000),
-      20,
-      30,
+      20000, // 20ms
+      30000, // 30ms
       5,
     );
 
@@ -302,7 +307,8 @@ integrationTest("GET /api/metrics returns 400 for invalid resolution value", asy
 integrationTest("GET /api/metrics returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
-    const res = await ctx.app.request("/?resolution=minutes&functionId=abc");
+    // IDs with colons are invalid for validateSurrealId (alphanumeric + underscore/hyphen only)
+    const res = await ctx.app.request("/?resolution=minutes&functionId=invalid:format");
     const json = await res.json();
 
     expect(res.status).toBe(400);
@@ -315,11 +321,12 @@ integrationTest("GET /api/metrics returns 400 for invalid functionId format", as
 integrationTest("GET /api/metrics returns 404 for non-existent functionId", async () => {
   const ctx = await createTestContext();
   try {
-    const res = await ctx.app.request("/?resolution=minutes&functionId=999999");
+    // Valid format but no function with this ID exists
+    const res = await ctx.app.request("/?resolution=minutes&functionId=nonexistent123");
     const json = await res.json();
 
     expect(res.status).toBe(404);
-    expect(json.error).toContain("Function with id 999999 not found");
+    expect(json.error).toContain("not found");
   } finally {
     await ctx.cleanup();
   }
@@ -337,8 +344,8 @@ integrationTest("GET /api/metrics summary totalExecutions sums all execution cou
       null,
       "minute",
       new Date(now.getTime() - 50 * 60 * 1000),
-      50,
-      100,
+      50000,
+      100000,
       10,
     );
     await insertMetric(
@@ -346,8 +353,8 @@ integrationTest("GET /api/metrics summary totalExecutions sums all execution cou
       null,
       "minute",
       new Date(now.getTime() - 30 * 60 * 1000),
-      50,
-      100,
+      50000,
+      100000,
       20,
     );
     await insertMetric(
@@ -355,8 +362,8 @@ integrationTest("GET /api/metrics summary totalExecutions sums all execution cou
       null,
       "minute",
       new Date(now.getTime() - 10 * 60 * 1000),
-      50,
-      100,
+      50000,
+      100000,
       15,
     );
 
@@ -381,8 +388,8 @@ integrationTest("GET /api/metrics summary avgExecutionTime is weighted average",
       null,
       "minute",
       new Date(now.getTime() - 50 * 60 * 1000),
-      100, // avgTimeMs
-      200,
+      100000, // avgTimeUs = 100ms
+      200000, // maxTimeUs
       10, // executionCount
     );
     await insertMetric(
@@ -390,8 +397,8 @@ integrationTest("GET /api/metrics summary avgExecutionTime is weighted average",
       null,
       "minute",
       new Date(now.getTime() - 30 * 60 * 1000),
-      50, // avgTimeMs
-      100,
+      50000, // avgTimeUs = 50ms
+      100000, // maxTimeUs
       20, // executionCount
     );
 
@@ -416,8 +423,8 @@ integrationTest("GET /api/metrics summary maxExecutionTime is maximum of all max
       null,
       "minute",
       new Date(now.getTime() - 50 * 60 * 1000),
-      50,
-      100,
+      50000, // 50ms
+      100000, // 100ms max
       10,
     );
     await insertMetric(
@@ -425,8 +432,8 @@ integrationTest("GET /api/metrics summary maxExecutionTime is maximum of all max
       null,
       "minute",
       new Date(now.getTime() - 30 * 60 * 1000),
-      60,
-      250,
+      60000, // 60ms
+      250000, // 250ms max - highest
       15,
     );
     await insertMetric(
@@ -434,8 +441,8 @@ integrationTest("GET /api/metrics summary maxExecutionTime is maximum of all max
       null,
       "minute",
       new Date(now.getTime() - 10 * 60 * 1000),
-      55,
-      150,
+      55000, // 55ms
+      150000, // 150ms max
       12,
     );
 
@@ -505,8 +512,8 @@ integrationTest("GET /api/metrics handles metrics with identical timestamps", as
       ctx.routes.route1.id,
       "minute",
       sameTimestamp,
-      50,
-      100,
+      50000, // 50ms
+      100000, // 100ms
       10,
     );
     await insertMetric(
@@ -514,14 +521,14 @@ integrationTest("GET /api/metrics handles metrics with identical timestamps", as
       ctx.routes.route2.id,
       "minute",
       sameTimestamp,
-      60,
-      110,
+      60000, // 60ms
+      110000, // 110ms
       12,
     );
 
     // Query for route1
     const res = await ctx.app.request(
-      `/?functionId=${ctx.routes.route1.id}&resolution=minutes`,
+      `/?functionId=${recordIdToString(ctx.routes.route1.id)}&resolution=minutes`,
     );
     const json = await res.json();
 

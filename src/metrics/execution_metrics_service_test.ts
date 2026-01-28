@@ -1,6 +1,7 @@
 import { integrationTest } from "../test/test_helpers.ts";
 import { expect } from "@std/expect";
 import { TestSetupBuilder } from "../test/test_setup_builder.ts";
+import type { ExecutionMetric } from "./types.ts";
 
 // =====================
 // ExecutionMetricsService tests
@@ -8,24 +9,33 @@ import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 
 integrationTest("ExecutionMetricsService stores metric entry", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    // Create a function to get a valid functionId
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 45,
-      maxTimeMs: 45,
+      avgTimeUs: 45000, // 45ms in microseconds
+      maxTimeUs: 45000,
       executionCount: 1,
     });
 
-    const metrics = await ctx.executionMetricsService.getByRouteId(1);
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func.id);
     expect(metrics.length).toBe(1);
-    expect(metrics[0].routeId).toBe(1);
+    expect(metrics[0].functionId?.id).toBe(func.id.id);
     expect(metrics[0].type).toBe("execution");
-    expect(metrics[0].avgTimeMs).toBe(45);
-    expect(metrics[0].maxTimeMs).toBe(45);
+    expect(metrics[0].avgTimeUs).toBe(45000);
+    expect(metrics[0].maxTimeUs).toBe(45000);
     expect(metrics[0].executionCount).toBe(1);
   } finally {
     await ctx.cleanup();
@@ -34,21 +44,29 @@ integrationTest("ExecutionMetricsService stores metric entry", async () => {
 
 integrationTest("ExecutionMetricsService stores metric with custom timestamp", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
     const customTimestamp = new Date("2024-01-15T10:30:00.000Z");
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "minute",
-      avgTimeMs: 100,
-      maxTimeMs: 150,
+      avgTimeUs: 100000,
+      maxTimeUs: 150000,
       executionCount: 5,
       timestamp: customTimestamp,
     });
 
-    const metrics = await ctx.executionMetricsService.getByRouteId(1);
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func.id);
     expect(metrics.length).toBe(1);
     expect(metrics[0].timestamp.toISOString()).toBe(customTimestamp.toISOString());
   } finally {
@@ -56,60 +74,121 @@ integrationTest("ExecutionMetricsService stores metric with custom timestamp", a
   }
 });
 
-integrationTest("ExecutionMetricsService retrieves metrics by routeId", async () => {
+integrationTest("ExecutionMetricsService retrieves metrics by functionId", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
-    // Store metrics for different routes
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 10, maxTimeMs: 10, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 2, type: "execution", avgTimeMs: 20, maxTimeMs: 20, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 30, maxTimeMs: 30, executionCount: 1 });
+    const func1 = await ctx.routesService.addRoute({
+      name: "func1",
+      handler: "test1.ts",
+      routePath: "/test1",
+      methods: ["GET"],
+    });
+    const func2 = await ctx.routesService.addRoute({
+      name: "func2",
+      handler: "test2.ts",
+      routePath: "/test2",
+      methods: ["GET"],
+    });
 
-    const metrics = await ctx.executionMetricsService.getByRouteId(1);
+    // Store metrics for different functions with explicit timestamps to ensure deterministic ordering
+    const baseTime = new Date("2024-01-15T10:00:00.000Z");
+    await ctx.executionMetricsService.store({
+      functionId: func1.id,
+      type: "execution",
+      avgTimeUs: 10000,
+      maxTimeUs: 10000,
+      executionCount: 1,
+      timestamp: new Date(baseTime.getTime()),
+    });
+    await ctx.executionMetricsService.store({
+      functionId: func2.id,
+      type: "execution",
+      avgTimeUs: 20000,
+      maxTimeUs: 20000,
+      executionCount: 1,
+      timestamp: new Date(baseTime.getTime() + 60000),
+    });
+    await ctx.executionMetricsService.store({
+      functionId: func1.id,
+      type: "execution",
+      avgTimeUs: 30000,
+      maxTimeUs: 30000,
+      executionCount: 1,
+      timestamp: new Date(baseTime.getTime() + 120000),
+    });
+
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func1.id);
     expect(metrics.length).toBe(2);
     // Newest first (DESC order)
-    expect(metrics[0].avgTimeMs).toBe(30);
-    expect(metrics[1].avgTimeMs).toBe(10);
+    expect(metrics[0].avgTimeUs).toBe(30000);
+    expect(metrics[1].avgTimeUs).toBe(10000);
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService retrieves metrics by routeId with type filter", async () => {
+integrationTest("ExecutionMetricsService retrieves metrics by functionId with type filter", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 10, maxTimeMs: 10, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 1, type: "minute", avgTimeMs: 15, maxTimeMs: 20, executionCount: 3 });
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 20, maxTimeMs: 20, executionCount: 1 });
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
 
-    const metrics = await ctx.executionMetricsService.getByRouteId(1, "execution");
+    await ctx.executionMetricsService.store({ functionId: func.id, type: "execution", avgTimeUs: 10000, maxTimeUs: 10000, executionCount: 1 });
+    await ctx.executionMetricsService.store({ functionId: func.id, type: "minute", avgTimeUs: 15000, maxTimeUs: 20000, executionCount: 3 });
+    await ctx.executionMetricsService.store({ functionId: func.id, type: "execution", avgTimeUs: 20000, maxTimeUs: 20000, executionCount: 1 });
+
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func.id, "execution");
     expect(metrics.length).toBe(2);
-    expect(metrics.every((m) => m.type === "execution")).toBe(true);
+    expect(metrics.every((m: ExecutionMetric) => m.type === "execution")).toBe(true);
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService retrieves metrics by routeId with limit", async () => {
+integrationTest("ExecutionMetricsService retrieves metrics by functionId with limit", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
+    const baseTime = new Date("2024-01-15T10:00:00.000Z");
     for (let i = 0; i < 5; i++) {
-      await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: i * 10, maxTimeMs: i * 10, executionCount: 1 });
+      await ctx.executionMetricsService.store({
+        functionId: func.id,
+        type: "execution",
+        avgTimeUs: i * 10000,
+        maxTimeUs: i * 10000,
+        executionCount: 1,
+        timestamp: new Date(baseTime.getTime() + i * 60000), // 1 minute apart
+      });
     }
 
-    const metrics = await ctx.executionMetricsService.getByRouteId(1, undefined, 3);
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func.id, undefined, 3);
     expect(metrics.length).toBe(3);
-    // Newest first
-    expect(metrics[0].avgTimeMs).toBe(40);
-    expect(metrics[2].avgTimeMs).toBe(20);
+    // Newest first (DESC order): i=4, i=3, i=2
+    expect(metrics[0].avgTimeUs).toBe(40000);
+    expect(metrics[1].avgTimeUs).toBe(30000);
+    expect(metrics[2].avgTimeUs).toBe(20000);
   } finally {
     await ctx.cleanup();
   }
@@ -117,20 +196,36 @@ integrationTest("ExecutionMetricsService retrieves metrics by routeId with limit
 
 integrationTest("ExecutionMetricsService getRecent returns most recent metrics", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
+    const baseTime = new Date("2024-01-15T10:00:00.000Z");
     for (let i = 0; i < 5; i++) {
-      await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: i * 10, maxTimeMs: i * 10, executionCount: 1 });
+      await ctx.executionMetricsService.store({
+        functionId: func.id,
+        type: "execution",
+        avgTimeUs: i * 10000,
+        maxTimeUs: i * 10000,
+        executionCount: 1,
+        timestamp: new Date(baseTime.getTime() + i * 60000), // 1 minute apart
+      });
     }
 
     const metrics = await ctx.executionMetricsService.getRecent(3);
     expect(metrics.length).toBe(3);
-    // Most recent first (DESC order)
-    expect(metrics[0].avgTimeMs).toBe(40);
-    expect(metrics[1].avgTimeMs).toBe(30);
-    expect(metrics[2].avgTimeMs).toBe(20);
+    // Most recent first (DESC order): i=4, i=3, i=2
+    expect(metrics[0].avgTimeUs).toBe(40000);
+    expect(metrics[1].avgTimeUs).toBe(30000);
+    expect(metrics[2].avgTimeUs).toBe(20000);
   } finally {
     await ctx.cleanup();
   }
@@ -138,11 +233,19 @@ integrationTest("ExecutionMetricsService getRecent returns most recent metrics",
 
 integrationTest("ExecutionMetricsService deletes metrics older than date", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 10, maxTimeMs: 10, executionCount: 1 });
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
+    await ctx.executionMetricsService.store({ functionId: func.id, type: "execution", avgTimeUs: 10000, maxTimeUs: 10000, executionCount: 1 });
 
     // Delete metrics older than 1 second from now
     const futureDate = new Date(Date.now() + 1000);
@@ -150,30 +253,44 @@ integrationTest("ExecutionMetricsService deletes metrics older than date", async
 
     expect(deleted).toBe(1);
 
-    const metrics = await ctx.executionMetricsService.getByRouteId(1);
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func.id);
     expect(metrics.length).toBe(0);
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService deletes metrics by routeId", async () => {
+integrationTest("ExecutionMetricsService deletes metrics by functionId", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 10, maxTimeMs: 10, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 2, type: "execution", avgTimeMs: 20, maxTimeMs: 20, executionCount: 1 });
+    const func1 = await ctx.routesService.addRoute({
+      name: "func1",
+      handler: "test1.ts",
+      routePath: "/test1",
+      methods: ["GET"],
+    });
+    const func2 = await ctx.routesService.addRoute({
+      name: "func2",
+      handler: "test2.ts",
+      routePath: "/test2",
+      methods: ["GET"],
+    });
 
-    const deleted = await ctx.executionMetricsService.deleteByRouteId(1);
+    await ctx.executionMetricsService.store({ functionId: func1.id, type: "execution", avgTimeUs: 10000, maxTimeUs: 10000, executionCount: 1 });
+    await ctx.executionMetricsService.store({ functionId: func2.id, type: "execution", avgTimeUs: 20000, maxTimeUs: 20000, executionCount: 1 });
+
+    const deleted = await ctx.executionMetricsService.deleteByFunctionId(func1.id);
     expect(deleted).toBe(1);
 
-    const metricsRoute1 = await ctx.executionMetricsService.getByRouteId(1);
-    expect(metricsRoute1.length).toBe(0);
+    const metricsFunc1 = await ctx.executionMetricsService.getByFunctionId(func1.id);
+    expect(metricsFunc1.length).toBe(0);
 
-    const metricsRoute2 = await ctx.executionMetricsService.getByRouteId(2);
-    expect(metricsRoute2.length).toBe(1);
+    const metricsFunc2 = await ctx.executionMetricsService.getByFunctionId(func2.id);
+    expect(metricsFunc2.length).toBe(1);
   } finally {
     await ctx.cleanup();
   }
@@ -181,97 +298,173 @@ integrationTest("ExecutionMetricsService deletes metrics by routeId", async () =
 
 integrationTest("ExecutionMetricsService stores all metric types", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
     const types = ["execution", "minute", "hour", "day"] as const;
-
-    for (const type of types) {
-      await ctx.executionMetricsService.store({ routeId: 1, type, avgTimeMs: 100, maxTimeMs: 100, executionCount: 1 });
-    }
-
-    const metrics = await ctx.executionMetricsService.getByRouteId(1);
-    expect(metrics.length).toBe(4);
+    const baseTime = new Date("2024-01-15T10:00:00.000Z");
 
     for (let i = 0; i < types.length; i++) {
-      // Reverse order since newest first
-      expect(metrics[types.length - 1 - i].type).toBe(types[i]);
+      await ctx.executionMetricsService.store({
+        functionId: func.id,
+        type: types[i],
+        avgTimeUs: 100000,
+        maxTimeUs: 100000,
+        executionCount: 1,
+        timestamp: new Date(baseTime.getTime() + i * 60000), // 1 minute apart
+      });
     }
+
+    const metrics = await ctx.executionMetricsService.getByFunctionId(func.id);
+    expect(metrics.length).toBe(4);
+
+    // Metrics are ordered DESC by timestamp, so newest (day) is first
+    // Index 0 = day (created at +3 minutes), index 3 = execution (created at +0 minutes)
+    expect(metrics[0].type).toBe("day");
+    expect(metrics[1].type).toBe("hour");
+    expect(metrics[2].type).toBe("minute");
+    expect(metrics[3].type).toBe("execution");
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService getDistinctRouteIds returns all unique route IDs", async () => {
+integrationTest("ExecutionMetricsService getDistinctFunctionIds returns all unique function IDs", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 10, maxTimeMs: 10, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 2, type: "execution", avgTimeMs: 20, maxTimeMs: 20, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 1, type: "minute", avgTimeMs: 15, maxTimeMs: 20, executionCount: 2 });
-    await ctx.executionMetricsService.store({ routeId: 3, type: "hour", avgTimeMs: 25, maxTimeMs: 30, executionCount: 10 });
+    const func1 = await ctx.routesService.addRoute({
+      name: "func1",
+      handler: "test1.ts",
+      routePath: "/test1",
+      methods: ["GET"],
+    });
+    const func2 = await ctx.routesService.addRoute({
+      name: "func2",
+      handler: "test2.ts",
+      routePath: "/test2",
+      methods: ["GET"],
+    });
+    const func3 = await ctx.routesService.addRoute({
+      name: "func3",
+      handler: "test3.ts",
+      routePath: "/test3",
+      methods: ["GET"],
+    });
 
-    const routeIds = await ctx.executionMetricsService.getDistinctRouteIds();
-    expect(routeIds.sort()).toEqual([1, 2, 3]);
+    await ctx.executionMetricsService.store({ functionId: func1.id, type: "execution", avgTimeUs: 10000, maxTimeUs: 10000, executionCount: 1 });
+    await ctx.executionMetricsService.store({ functionId: func2.id, type: "execution", avgTimeUs: 20000, maxTimeUs: 20000, executionCount: 1 });
+    await ctx.executionMetricsService.store({ functionId: func1.id, type: "minute", avgTimeUs: 15000, maxTimeUs: 20000, executionCount: 2 });
+    await ctx.executionMetricsService.store({ functionId: func3.id, type: "hour", avgTimeUs: 25000, maxTimeUs: 30000, executionCount: 10 });
+
+    const functionIds = await ctx.executionMetricsService.getDistinctFunctionIds();
+    const idStrings = functionIds.map(id => String(id.id)).sort();
+    expect(idStrings).toContain(String(func1.id.id));
+    expect(idStrings).toContain(String(func2.id.id));
+    expect(idStrings).toContain(String(func3.id.id));
+    expect(functionIds.length).toBe(3);
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService getDistinctRouteIdsByType returns route IDs for specific type", async () => {
+integrationTest("ExecutionMetricsService getDistinctFunctionIdsByType returns function IDs for specific type", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
-    await ctx.executionMetricsService.store({ routeId: 1, type: "execution", avgTimeMs: 10, maxTimeMs: 10, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 2, type: "execution", avgTimeMs: 20, maxTimeMs: 20, executionCount: 1 });
-    await ctx.executionMetricsService.store({ routeId: 1, type: "minute", avgTimeMs: 15, maxTimeMs: 20, executionCount: 2 });
-    await ctx.executionMetricsService.store({ routeId: 3, type: "minute", avgTimeMs: 25, maxTimeMs: 30, executionCount: 5 });
+    const func1 = await ctx.routesService.addRoute({
+      name: "func1",
+      handler: "test1.ts",
+      routePath: "/test1",
+      methods: ["GET"],
+    });
+    const func2 = await ctx.routesService.addRoute({
+      name: "func2",
+      handler: "test2.ts",
+      routePath: "/test2",
+      methods: ["GET"],
+    });
+    const func3 = await ctx.routesService.addRoute({
+      name: "func3",
+      handler: "test3.ts",
+      routePath: "/test3",
+      methods: ["GET"],
+    });
 
-    const executionRouteIds = await ctx.executionMetricsService.getDistinctRouteIdsByType("execution");
-    expect(executionRouteIds.sort()).toEqual([1, 2]);
+    await ctx.executionMetricsService.store({ functionId: func1.id, type: "execution", avgTimeUs: 10000, maxTimeUs: 10000, executionCount: 1 });
+    await ctx.executionMetricsService.store({ functionId: func2.id, type: "execution", avgTimeUs: 20000, maxTimeUs: 20000, executionCount: 1 });
+    await ctx.executionMetricsService.store({ functionId: func1.id, type: "minute", avgTimeUs: 15000, maxTimeUs: 20000, executionCount: 2 });
+    await ctx.executionMetricsService.store({ functionId: func3.id, type: "minute", avgTimeUs: 25000, maxTimeUs: 30000, executionCount: 5 });
 
-    const minuteRouteIds = await ctx.executionMetricsService.getDistinctRouteIdsByType("minute");
-    expect(minuteRouteIds.sort()).toEqual([1, 3]);
+    const executionFunctionIds = await ctx.executionMetricsService.getDistinctFunctionIdsByType("execution");
+    expect(executionFunctionIds.length).toBe(2);
+    const execIdStrings = executionFunctionIds.map(id => String(id.id));
+    expect(execIdStrings).toContain(String(func1.id.id));
+    expect(execIdStrings).toContain(String(func2.id.id));
+
+    const minuteFunctionIds = await ctx.executionMetricsService.getDistinctFunctionIdsByType("minute");
+    expect(minuteFunctionIds.length).toBe(2);
+    const minIdStrings = minuteFunctionIds.map(id => String(id.id));
+    expect(minIdStrings).toContain(String(func1.id.id));
+    expect(minIdStrings).toContain(String(func3.id.id));
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService getByRouteIdTypeAndTimeRange returns metrics in range", async () => {
+integrationTest("ExecutionMetricsService getByFunctionIdTypeAndTimeRange returns metrics in range", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
     const baseTime = new Date("2024-01-15T10:00:00.000Z");
 
     // Store metrics at different times
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 10,
-      maxTimeMs: 10,
+      avgTimeUs: 10000,
+      maxTimeUs: 10000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 0 * 60000), // 10:00
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 20,
-      maxTimeMs: 20,
+      avgTimeUs: 20000,
+      maxTimeUs: 20000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 1 * 60000), // 10:01
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 30,
-      maxTimeMs: 30,
+      avgTimeUs: 30000,
+      maxTimeUs: 30000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 2 * 60000), // 10:02
     });
@@ -279,45 +472,53 @@ integrationTest("ExecutionMetricsService getByRouteIdTypeAndTimeRange returns me
     // Query for 10:00 to 10:02 (exclusive end)
     const start = new Date("2024-01-15T10:00:00.000Z");
     const end = new Date("2024-01-15T10:02:00.000Z");
-    const metrics = await ctx.executionMetricsService.getByRouteIdTypeAndTimeRange(1, "execution", start, end);
+    const metrics = await ctx.executionMetricsService.getByFunctionIdTypeAndTimeRange(func.id, "execution", start, end);
 
     expect(metrics.length).toBe(2);
-    expect(metrics[0].avgTimeMs).toBe(10);
-    expect(metrics[1].avgTimeMs).toBe(20);
+    expect(metrics[0].avgTimeUs).toBe(10000);
+    expect(metrics[1].avgTimeUs).toBe(20000);
   } finally {
     await ctx.cleanup();
   }
 });
 
-integrationTest("ExecutionMetricsService deleteByRouteIdTypeAndTimeRange deletes metrics in range", async () => {
+integrationTest("ExecutionMetricsService deleteByFunctionIdTypeAndTimeRange deletes metrics in range", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
     const baseTime = new Date("2024-01-15T10:00:00.000Z");
 
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 10,
-      maxTimeMs: 10,
+      avgTimeUs: 10000,
+      maxTimeUs: 10000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 0 * 60000), // 10:00
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 20,
-      maxTimeMs: 20,
+      avgTimeUs: 20000,
+      maxTimeUs: 20000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 1 * 60000), // 10:01
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "execution",
-      avgTimeMs: 30,
-      maxTimeMs: 30,
+      avgTimeUs: 30000,
+      maxTimeUs: 30000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 2 * 60000), // 10:02
     });
@@ -325,13 +526,13 @@ integrationTest("ExecutionMetricsService deleteByRouteIdTypeAndTimeRange deletes
     // Delete 10:00 to 10:02 (exclusive end)
     const start = new Date("2024-01-15T10:00:00.000Z");
     const end = new Date("2024-01-15T10:02:00.000Z");
-    const deleted = await ctx.executionMetricsService.deleteByRouteIdTypeAndTimeRange(1, "execution", start, end);
+    const deleted = await ctx.executionMetricsService.deleteByFunctionIdTypeAndTimeRange(func.id, "execution", start, end);
 
     expect(deleted).toBe(2);
 
-    const remaining = await ctx.executionMetricsService.getByRouteId(1);
+    const remaining = await ctx.executionMetricsService.getByFunctionId(func.id);
     expect(remaining.length).toBe(1);
-    expect(remaining[0].avgTimeMs).toBe(30);
+    expect(remaining[0].avgTimeUs).toBe(30000);
   } finally {
     await ctx.cleanup();
   }
@@ -339,41 +540,55 @@ integrationTest("ExecutionMetricsService deleteByRouteIdTypeAndTimeRange deletes
 
 integrationTest("ExecutionMetricsService getMostRecentByType returns most recent metric", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func1 = await ctx.routesService.addRoute({
+      name: "func1",
+      handler: "test1.ts",
+      routePath: "/test1",
+      methods: ["GET"],
+    });
+    const func2 = await ctx.routesService.addRoute({
+      name: "func2",
+      handler: "test2.ts",
+      routePath: "/test2",
+      methods: ["GET"],
+    });
+
     const baseTime = new Date("2024-01-15T10:00:00.000Z");
 
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func1.id,
       type: "minute",
-      avgTimeMs: 10,
-      maxTimeMs: 15,
+      avgTimeUs: 10000,
+      maxTimeUs: 15000,
       executionCount: 2,
       timestamp: new Date(baseTime.getTime() + 0 * 60000),
     });
     await ctx.executionMetricsService.store({
-      routeId: 2,
+      functionId: func2.id,
       type: "minute",
-      avgTimeMs: 20,
-      maxTimeMs: 25,
+      avgTimeUs: 20000,
+      maxTimeUs: 25000,
       executionCount: 3,
       timestamp: new Date(baseTime.getTime() + 1 * 60000),
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func1.id,
       type: "execution",
-      avgTimeMs: 5,
-      maxTimeMs: 5,
+      avgTimeUs: 5000,
+      maxTimeUs: 5000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 2 * 60000),
     });
 
     const mostRecent = await ctx.executionMetricsService.getMostRecentByType("minute");
     expect(mostRecent).not.toBeNull();
-    expect(mostRecent!.routeId).toBe(2);
-    expect(mostRecent!.avgTimeMs).toBe(20);
+    expect(mostRecent!.functionId?.id).toBe(func2.id.id);
+    expect(mostRecent!.avgTimeUs).toBe(20000);
   } finally {
     await ctx.cleanup();
   }
@@ -381,7 +596,7 @@ integrationTest("ExecutionMetricsService getMostRecentByType returns most recent
 
 integrationTest("ExecutionMetricsService getMostRecentByType returns null when no metrics", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
     .build();
 
   try {
@@ -394,33 +609,47 @@ integrationTest("ExecutionMetricsService getMostRecentByType returns null when n
 
 integrationTest("ExecutionMetricsService getOldestByType returns oldest metric", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func1 = await ctx.routesService.addRoute({
+      name: "func1",
+      handler: "test1.ts",
+      routePath: "/test1",
+      methods: ["GET"],
+    });
+    const func2 = await ctx.routesService.addRoute({
+      name: "func2",
+      handler: "test2.ts",
+      routePath: "/test2",
+      methods: ["GET"],
+    });
+
     const baseTime = new Date("2024-01-15T10:00:00.000Z");
 
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func1.id,
       type: "execution",
-      avgTimeMs: 10,
-      maxTimeMs: 10,
+      avgTimeUs: 10000,
+      maxTimeUs: 10000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 0 * 60000),
     });
     await ctx.executionMetricsService.store({
-      routeId: 2,
+      functionId: func2.id,
       type: "execution",
-      avgTimeMs: 20,
-      maxTimeMs: 20,
+      avgTimeUs: 20000,
+      maxTimeUs: 20000,
       executionCount: 1,
       timestamp: new Date(baseTime.getTime() + 1 * 60000),
     });
 
     const oldest = await ctx.executionMetricsService.getOldestByType("execution");
     expect(oldest).not.toBeNull();
-    expect(oldest!.routeId).toBe(1);
-    expect(oldest!.avgTimeMs).toBe(10);
+    expect(oldest!.functionId?.id).toBe(func1.id.id);
+    expect(oldest!.avgTimeUs).toBe(10000);
   } finally {
     await ctx.cleanup();
   }
@@ -428,34 +657,42 @@ integrationTest("ExecutionMetricsService getOldestByType returns oldest metric",
 
 integrationTest("ExecutionMetricsService deleteByTypeOlderThan deletes old metrics of type", async () => {
   const ctx = await TestSetupBuilder.create()
-    .withExecutionMetricsService()
+    .withMetrics()
+    .withRoutes()
     .build();
 
   try {
+    const func = await ctx.routesService.addRoute({
+      name: "test-func",
+      handler: "test.ts",
+      routePath: "/test",
+      methods: ["GET"],
+    });
+
     const oldTime = new Date("2024-01-01T10:00:00.000Z");
     const newTime = new Date("2024-01-15T10:00:00.000Z");
 
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "day",
-      avgTimeMs: 10,
-      maxTimeMs: 15,
+      avgTimeUs: 10000,
+      maxTimeUs: 15000,
       executionCount: 100,
       timestamp: oldTime,
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "day",
-      avgTimeMs: 20,
-      maxTimeMs: 25,
+      avgTimeUs: 20000,
+      maxTimeUs: 25000,
       executionCount: 150,
       timestamp: newTime,
     });
     await ctx.executionMetricsService.store({
-      routeId: 1,
+      functionId: func.id,
       type: "hour",
-      avgTimeMs: 5,
-      maxTimeMs: 8,
+      avgTimeUs: 5000,
+      maxTimeUs: 8000,
       executionCount: 10,
       timestamp: oldTime, // Old but different type
     });
@@ -466,13 +703,37 @@ integrationTest("ExecutionMetricsService deleteByTypeOlderThan deletes old metri
 
     expect(deleted).toBe(1);
 
-    const dayMetrics = await ctx.executionMetricsService.getByRouteId(1, "day");
+    const dayMetrics = await ctx.executionMetricsService.getByFunctionId(func.id, "day");
     expect(dayMetrics.length).toBe(1);
-    expect(dayMetrics[0].avgTimeMs).toBe(20);
+    expect(dayMetrics[0].avgTimeUs).toBe(20000);
 
     // Hour metric should still exist
-    const hourMetrics = await ctx.executionMetricsService.getByRouteId(1, "hour");
+    const hourMetrics = await ctx.executionMetricsService.getByFunctionId(func.id, "hour");
     expect(hourMetrics.length).toBe(1);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("ExecutionMetricsService stores global metrics (null functionId)", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withMetrics()
+    .build();
+
+  try {
+    // Store a global metric (functionId = null)
+    await ctx.executionMetricsService.store({
+      functionId: null,
+      type: "minute",
+      avgTimeUs: 50000,
+      maxTimeUs: 100000,
+      executionCount: 10,
+    });
+
+    const recentMetrics = await ctx.executionMetricsService.getRecent(1);
+    expect(recentMetrics.length).toBe(1);
+    expect(recentMetrics[0].functionId).toBeNull();
+    expect(recentMetrics[0].avgTimeUs).toBe(50000);
   } finally {
     await ctx.cleanup();
   }

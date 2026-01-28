@@ -1,14 +1,35 @@
+import type { RecordId } from "surrealdb";
+
 /** Metric types for execution tracking */
 export type MetricType = "execution" | "minute" | "hour" | "day";
 
+/** Numeric type codes for SurrealDB storage */
+export const MetricTypeCode = {
+  execution: 0,
+  minute: 1,
+  hour: 2,
+  day: 3,
+} as const;
+
+/** Reverse mapping from numeric code to MetricType */
+export const MetricTypeFromCode: Record<number, MetricType> = {
+  0: "execution",
+  1: "minute",
+  2: "hour",
+  3: "day",
+};
+
 /** A stored execution metric entry */
 export interface ExecutionMetric {
-  id: number;
-  /** Route ID, or null for global (combined) metrics */
-  routeId: number | null;
+  /** Unique identifier (SurrealDB RecordId) */
+  id: RecordId;
+  /** Function reference (RecordId), or null for global/combined metrics */
+  functionId: RecordId | null;
   type: MetricType;
-  avgTimeMs: number;
-  maxTimeMs: number;
+  /** Average execution time in microseconds */
+  avgTimeUs: number;
+  /** Maximum execution time in microseconds */
+  maxTimeUs: number;
   executionCount: number;
   timestamp: Date;
 }
@@ -17,6 +38,29 @@ export interface ExecutionMetric {
 export type NewExecutionMetric = Omit<ExecutionMetric, "id" | "timestamp"> & {
   timestamp?: Date;
 };
+
+/**
+ * Database row type for SELECT queries with duration::micros() conversion.
+ * Queries use duration::micros(avgTime) as avgTimeUs to get numeric values directly.
+ */
+export interface ExecutionMetricRow {
+  id: RecordId;
+  functionId: RecordId | undefined; // NONE in SurrealDB = undefined in JS
+  type: number;
+  avgTimeUs: number; // Converted from duration using duration::micros()
+  maxTimeUs: number; // Converted from duration using duration::micros()
+  executionCount: number;
+  timestamp: Date;
+  createdAt: Date;
+}
+
+/** Metrics state row type */
+export interface MetricsStateRow {
+  id: RecordId;
+  key: string;
+  value: Date;
+  updatedAt: Date;
+}
 
 /** Configuration for the metrics aggregation service */
 export interface MetricsAggregationConfig {
@@ -28,8 +72,10 @@ export interface MetricsAggregationConfig {
 
 /** Result of an aggregation query */
 export interface AggregationResult {
-  avgTimeMs: number;
-  maxTimeMs: number;
+  /** Average execution time in microseconds */
+  avgTimeUs: number;
+  /** Maximum execution time in microseconds */
+  maxTimeUs: number;
   executionCount: number;
 }
 

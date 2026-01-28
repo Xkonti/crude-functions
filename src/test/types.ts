@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { Surreal } from "surrealdb";
+import type { Surreal, RecordId } from "surrealdb";
 import type { DatabaseService } from "../database/database_service.ts";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
@@ -331,7 +331,7 @@ export interface DeferredSetting {
  */
 export interface DeferredConsoleLog {
   requestId: string;
-  routeId: number;
+  functionId: string;  // SurrealDB RecordId string of functionDef
   level: "log" | "debug" | "info" | "warn" | "error" | "trace" | "stdout" | "stderr" | "exec_start" | "exec_end" | "exec_reject";
   message: string;
   args?: string; // JSON-serialized additional arguments
@@ -342,8 +342,8 @@ export interface DeferredConsoleLog {
  * Matches NewExecutionMetric type (aggregated metrics, not per-request).
  */
 export interface DeferredMetric {
-  /** Route ID, or null for global metrics */
-  routeId: number | null;
+  /** Function ID (RecordId), or null for global metrics */
+  functionId: RecordId | null;
   /** Metric type: execution, minute, hour, or day */
   type: "execution" | "minute" | "hour" | "day";
   /** Average execution time in milliseconds */

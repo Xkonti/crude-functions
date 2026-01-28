@@ -1,4 +1,5 @@
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import { toDate } from "../database/surreal_helpers.ts";
 import type { betterAuth } from "better-auth";
 import type { User, CreateUserData, UpdateUserData, UserSession } from "./types.ts";
 import { RecordId } from "surrealdb";
@@ -474,21 +475,6 @@ export class UserService {
 
   // ============== Private Helper Methods ==============
 
-  /**
-   * Convert a value to Date, handling SurrealDB's datetime type.
-   * SurrealDB may return Date objects or its own DateTime wrapper.
-   */
-  private toDate(value: Date | unknown): Date {
-    if (value instanceof Date) {
-      return value;
-    }
-    // SurrealDB's DateTime has a toDate() method
-    if (value && typeof value === "object" && "toDate" in value && typeof value.toDate === "function") {
-      return value.toDate() as Date;
-    }
-    // Try to construct from string/number
-    return new Date(value as string | number);
-  }
 
   /**
    * Convert an optional value to Date or undefined.
@@ -497,7 +483,7 @@ export class UserService {
     if (value === null || value === undefined) {
       return undefined;
     }
-    return this.toDate(value);
+    return toDate(value);
   }
 
   /**
@@ -517,8 +503,8 @@ export class UserService {
       banned: row.banned,
       banReason: row.banReason ?? undefined,
       banExpires: this.toOptionalDate(row.banExpires),
-      createdAt: this.toDate(row.createdAt),
-      updatedAt: this.toDate(row.updatedAt),
+      createdAt: toDate(row.createdAt),
+      updatedAt: toDate(row.updatedAt),
     };
   }
 

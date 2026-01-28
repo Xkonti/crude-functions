@@ -13,6 +13,7 @@ import { TestSetupBuilder } from "../test/test_setup_builder.ts";
 import { integrationTest } from "../test/test_helpers.ts";
 import { FunctionRouter } from "../functions/function_router.ts";
 import type { TestContext } from "../test/types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 const simpleHandler = `
 export default async function (c, ctx) {
@@ -51,8 +52,8 @@ integrationTest("Disabled route returns 404 from /run/*", async () => {
 
     // Disable the route
     const routes = await ctx.routesService.getAll();
-    const route = routes.find((r) => r.route === "/hello");
-    await ctx.routesService.setRouteEnabled(route!.id, false);
+    const route = routes.find((r) => r.routePath === "/hello");
+    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
 
     // Route returns 404 when disabled
     res = await app.request("/run/hello");
@@ -103,15 +104,15 @@ integrationTest("Re-enabling disabled route makes it work again", async () => {
     app.all("/run/*", (c) => functionRouter.handle(c));
 
     const routes = await ctx.routesService.getAll();
-    const route = routes.find((r) => r.route === "/hello");
+    const route = routes.find((r) => r.routePath === "/hello");
 
     // Disable
-    await ctx.routesService.setRouteEnabled(route!.id, false);
+    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
     let res = await app.request("/run/hello");
     expect(res.status).toBe(404);
 
     // Re-enable
-    await ctx.routesService.setRouteEnabled(route!.id, true);
+    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), true);
     res = await app.request("/run/hello");
     expect(res.status).toBe(200);
   } finally {
@@ -140,10 +141,10 @@ export default async function (c, ctx) {
     app.all("/run/*", (c) => functionRouter.handle(c));
 
     const routes = await ctx.routesService.getAll();
-    const route = routes.find((r) => r.route === "/fail");
+    const route = routes.find((r) => r.routePath === "/fail");
 
     // Disable the route
-    await ctx.routesService.setRouteEnabled(route!.id, false);
+    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
 
     // Should get 404, not handler error
     const res = await app.request("/run/fail");
@@ -171,21 +172,21 @@ integrationTest("Multiple routes can be independently toggled", async () => {
     app.all("/run/*", (c) => functionRouter.handle(c));
 
     const routes = await ctx.routesService.getAll();
-    const helloRoute = routes.find((r) => r.route === "/hello");
-    const goodbyeRoute = routes.find((r) => r.route === "/goodbye");
+    const helloRoute = routes.find((r) => r.routePath === "/hello");
+    const goodbyeRoute = routes.find((r) => r.routePath === "/goodbye");
 
     // Both enabled initially
     expect((await app.request("/run/hello")).status).toBe(200);
     expect((await app.request("/run/goodbye")).status).toBe(200);
 
     // Disable hello only
-    await ctx.routesService.setRouteEnabled(helloRoute!.id, false);
+    await ctx.routesService.setRouteEnabled(recordIdToString(helloRoute!.id), false);
     expect((await app.request("/run/hello")).status).toBe(404);
     expect((await app.request("/run/goodbye")).status).toBe(200);
 
     // Disable goodbye only (re-enable hello)
-    await ctx.routesService.setRouteEnabled(helloRoute!.id, true);
-    await ctx.routesService.setRouteEnabled(goodbyeRoute!.id, false);
+    await ctx.routesService.setRouteEnabled(recordIdToString(helloRoute!.id), true);
+    await ctx.routesService.setRouteEnabled(recordIdToString(goodbyeRoute!.id), false);
     expect((await app.request("/run/hello")).status).toBe(200);
     expect((await app.request("/run/goodbye")).status).toBe(404);
   } finally {
@@ -212,10 +213,10 @@ integrationTest("Disabled route with API key protection returns 404, not 401", a
     app.all("/run/*", (c) => functionRouter.handle(c));
 
     const routes = await ctx.routesService.getAll();
-    const route = routes.find((r) => r.route === "/protected");
+    const route = routes.find((r) => r.routePath === "/protected");
 
     // Disable the route
-    await ctx.routesService.setRouteEnabled(route!.id, false);
+    await ctx.routesService.setRouteEnabled(recordIdToString(route!.id), false);
 
     // Should get 404 even with valid API key
     const res = await app.request("/run/protected", {
@@ -237,7 +238,7 @@ integrationTest("New routes are enabled by default", async () => {
     await ctx.routesService.addRoute({
       name: "new-route",
       handler: "new.ts",
-      route: "/new",
+      routePath: "/new",
       methods: ["GET"],
     });
 

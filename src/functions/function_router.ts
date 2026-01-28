@@ -17,6 +17,7 @@ import {
 import { runInRequestContext } from "../logs/request_context.ts";
 import { runInEnvContext, createEnvContext } from "../env/env_context.ts";
 import { originalConsole } from "../logs/stream_interceptor.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 export interface FunctionRouterOptions {
   routesService: RoutesService;
@@ -88,14 +89,14 @@ export class FunctionRouter {
       // Register handler for each allowed method
       for (const method of route.methods) {
         const m = method.toLowerCase();
-        if (m === "get") router.get(route.route, handler);
-        else if (m === "post") router.post(route.route, handler);
-        else if (m === "put") router.put(route.route, handler);
-        else if (m === "delete") router.delete(route.route, handler);
-        else if (m === "patch") router.patch(route.route, handler);
+        if (m === "get") router.get(route.routePath, handler);
+        else if (m === "post") router.post(route.routePath, handler);
+        else if (m === "put") router.put(route.routePath, handler);
+        else if (m === "delete") router.delete(route.routePath, handler);
+        else if (m === "patch") router.patch(route.routePath, handler);
         else if (m === "head" || m === "options") {
           // Use .on() for less common methods
-          router.on(method.toUpperCase(), route.route, handler);
+          router.on(method.toUpperCase(), route.routePath, handler);
         }
       }
     }
@@ -112,6 +113,9 @@ export class FunctionRouter {
       const method = c.req.method;
       const fullUrl = c.req.url;
 
+      // Convert route.id to string for logs/metrics (they expect string IDs now)
+      const functionIdString = recordIdToString(route.id);
+
       // 1. API Key Validation (if required)
       let authenticatedKeyGroup: string | undefined;
       let keyGroupId: string | undefined;
@@ -124,7 +128,7 @@ export class FunctionRouter {
           // Log rejected request
           this.consoleLogService.store({
             requestId,
-            routeId: route.id,
+            functionId: functionIdString,
             level: "exec_reject",
             message: `${method} ${fullUrl}`,
             args: JSON.stringify({ reason: "invalid_api_key" }),
@@ -150,13 +154,13 @@ export class FunctionRouter {
         name: route.name,
         description: route.description,
         handler: route.handler,
-        route: route.route,
+        route: route.routePath,
         methods: route.methods,
         keys: route.keys,
       };
 
-      // Capture functionId for secret closures
-      const functionId = route.id;
+      // Capture functionId for secret closures (string ID)
+      const functionId = functionIdString;
 
       const ctx: FunctionContext = {
         route: routeInfo,
@@ -204,7 +208,7 @@ export class FunctionRouter {
       // 3. Execute Handler within request context (for console log capture)
       // Handler loading happens INSIDE the env context so module-level code
       // sees the isolated environment, not the real system environment.
-      const requestContext = { requestId, routeId: route.id };
+      const requestContext = { requestId, functionId: functionIdString };
 
       // Prepare execution logging data
       const origin = c.req.header("origin") || c.req.header("referer") || "";
@@ -215,7 +219,7 @@ export class FunctionRouter {
       const startTime = performance.now();
       this.consoleLogService.store({
         requestId,
-        routeId: route.id,
+        functionId: functionIdString,
         level: "exec_start",
         message: `${method} ${fullUrl}`,
         args: JSON.stringify({ origin, keyGroup, contentLength }),
@@ -237,17 +241,18 @@ export class FunctionRouter {
         const durationMs = Math.round(performance.now() - startTime);
         this.consoleLogService.store({
           requestId,
-          routeId: route.id,
+          functionId: functionIdString,
           level: "exec_end",
           message: `${durationMs}ms`,
         });
 
-        // Store execution metric
+        // Store execution metric with microseconds precision
+        const durationUs = Math.round((performance.now() - startTime) * 1000);
         this.executionMetricsService.store({
-          routeId: route.id,
+          functionId: route.id,
           type: "execution",
-          avgTimeMs: durationMs,
-          maxTimeMs: durationMs,
+          avgTimeUs: durationUs,
+          maxTimeUs: durationUs,
           executionCount: 1,
         }).catch((error) => {
           globalThis.console.error("[FunctionRouter] Failed to store metric:", error);
@@ -267,7 +272,7 @@ export class FunctionRouter {
           // Log execution end (load error) - no metrics for load failures
           this.consoleLogService.store({
             requestId,
-            routeId: route.id,
+            functionId: functionIdString,
             level: "exec_end",
             message: `${durationMs}ms (load error)`,
           });
@@ -278,17 +283,18 @@ export class FunctionRouter {
         // Log execution end (execution error)
         this.consoleLogService.store({
           requestId,
-          routeId: route.id,
+          functionId: functionIdString,
           level: "exec_end",
           message: `${durationMs}ms (error)`,
         });
 
-        // Store metric for failed executions
+        // Store metric for failed executions with microseconds precision
+        const failedDurationUs = Math.round((performance.now() - startTime) * 1000);
         this.executionMetricsService.store({
-          routeId: route.id,
+          functionId: route.id,
           type: "execution",
-          avgTimeMs: durationMs,
-          maxTimeMs: durationMs,
+          avgTimeUs: failedDurationUs,
+          maxTimeUs: failedDurationUs,
           executionCount: 1,
         }).catch((metricError) => {
           globalThis.console.error("[FunctionRouter] Failed to store metric:", metricError);

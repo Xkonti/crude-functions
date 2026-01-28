@@ -1,15 +1,28 @@
 import { Mutex } from "@core/asyncutil/mutex";
-import type { DatabaseService } from "../database/database_service.ts";
+import { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 
+/**
+ * Represents a function route configuration.
+ * ID is RecordId at runtime - convert to string only at API/Web UI boundaries.
+ */
 export interface FunctionRoute {
-  id: number;
+  /** Unique identifier for the route (SurrealDB RecordId) */
+  id: RecordId;
+  /** Route name (unique identifier for display and lookup) */
   name: string;
+  /** Optional description */
   description?: string;
+  /** Path to the handler file (relative to code directory) */
   handler: string;
-  route: string;
+  /** URL path pattern (e.g., "/api/hello" or "/users/:id") */
+  routePath: string;
+  /** Allowed HTTP methods (e.g., ["GET", "POST"]) */
   methods: string[];
+  /** API key group IDs required for access (optional) */
   keys?: string[];
+  /** Whether the route is enabled */
   enabled: boolean;
 }
 
@@ -17,26 +30,28 @@ export interface FunctionRoute {
 export type NewFunctionRoute = Omit<FunctionRoute, "id" | "enabled">;
 
 export interface RoutesServiceOptions {
-  db: DatabaseService;
+  /** SurrealDB connection factory */
+  surrealFactory: SurrealConnectionFactory;
   /** Optional - when provided, function-scoped secrets are cascade deleted with routes */
   secretsService?: SecretsService;
 }
 
-// Row type for database queries
+/** Database row type for routes */
 interface RouteRow {
-  [key: string]: unknown; // Index signature for Row compatibility
-  id: number;
+  id: RecordId;
   name: string;
   description: string | null;
   handler: string;
-  route: string;
-  methods: string; // JSON string
-  keys: string | null; // JSON string or null
-  enabled: number; // SQLite integer: 1 = enabled, 0 = disabled
+  routePath: string;
+  methods: string[];
+  keys: string[] | null;
+  enabled: boolean;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 /**
- * Service for managing function routes stored in SQLite database.
+ * Service for managing function routes stored in SurrealDB.
  *
  * Features:
  * - Dirty flag tracking for efficient rebuild detection
@@ -44,13 +59,13 @@ interface RouteRow {
  * - Write operations wait for any in-progress rebuild before modifying
  */
 export class RoutesService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly secretsService?: SecretsService;
   private readonly rebuildMutex = new Mutex();
   private dirty = true; // Start dirty to force initial build
 
   constructor(options: RoutesServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.secretsService = options.secretsService;
   }
 
@@ -98,93 +113,73 @@ export class RoutesService {
     this.dirty = true;
   }
 
-  // ============== Read Operations (no mutex needed - WAL mode) ==============
+  // ============== Read Operations ==============
 
   /**
    * Get all routes from the database.
    */
   async getAll(): Promise<FunctionRoute[]> {
-    const rows = await this.db.queryAll<RouteRow>(
-      "SELECT id, name, description, handler, route, methods, keys, enabled FROM routes ORDER BY name"
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[RouteRow[]]>(
+        "SELECT * FROM functionDef ORDER BY name"
+      );
 
-    return rows.map((row) => this.rowToFunctionRoute(row));
+      return (rows ?? []).map((row) => this.rowToRoute(row));
+    });
   }
 
   /**
    * Get a single route by name.
    */
   async getByName(name: string): Promise<FunctionRoute | null> {
-    const row = await this.db.queryOne<RouteRow>(
-      "SELECT id, name, description, handler, route, methods, keys, enabled FROM routes WHERE name = ?",
-      [name]
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [rows] = await db.query<[RouteRow[]]>(
+        "SELECT * FROM functionDef WHERE name = $name LIMIT 1",
+        { name }
+      );
 
-    if (!row) {
-      return null;
-    }
+      const row = rows?.[0];
+      if (!row) return null;
 
-    return this.rowToFunctionRoute(row);
+      return this.rowToRoute(row);
+    });
   }
 
   /**
    * Get a single route by ID.
+   * @param id - The string ID part of the RecordId
    */
-  async getById(id: number): Promise<FunctionRoute | null> {
-    const row = await this.db.queryOne<RouteRow>(
-      "SELECT id, name, description, handler, route, methods, keys, enabled FROM routes WHERE id = ?",
-      [id]
-    );
+  async getById(id: string): Promise<FunctionRoute | null> {
+    const recordId = new RecordId("functionDef", id);
 
-    if (!row) {
-      return null;
-    }
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      const [row] = await db.query<[RouteRow | undefined]>(
+        "RETURN $recordId.*",
+        { recordId }
+      );
 
-    return this.rowToFunctionRoute(row);
+      if (!row) return null;
+
+      return this.rowToRoute(row);
+    });
   }
 
-  private rowToFunctionRoute(row: RouteRow): FunctionRoute {
-    // Parse methods with error handling
-    let methods: string[];
-    try {
-      methods = JSON.parse(row.methods) as string[];
-    } catch (error) {
-      globalThis.console.error(
-        `[RoutesService] Failed to parse methods for route ${row.id}: ${row.methods}`,
-        error
-      );
-      methods = []; // Return empty array to allow other routes to load
-    }
-
-    // Parse keys with error handling
-    let keys: string[] | undefined;
-    if (row.keys) {
-      try {
-        keys = JSON.parse(row.keys) as string[];
-      } catch (error) {
-        globalThis.console.error(
-          `[RoutesService] Failed to parse keys for route ${row.id}: ${row.keys}`,
-          error
-        );
-        keys = undefined;
-      }
-    }
-
+  private rowToRoute(row: RouteRow): FunctionRoute {
     const route: FunctionRoute = {
       id: row.id,
       name: row.name,
       handler: row.handler,
-      route: row.route,
-      methods,
-      enabled: row.enabled === 1,
+      routePath: row.routePath,
+      methods: row.methods,
+      enabled: row.enabled,
     };
 
     if (row.description) {
       route.description = row.description;
     }
 
-    if (keys) {
-      route.keys = keys;
+    if (row.keys && row.keys.length > 0) {
+      route.keys = row.keys;
     }
 
     return route;
@@ -201,228 +196,230 @@ export class RoutesService {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    // Validate: check for duplicate name
-    const existingByName = await this.db.queryOne(
-      "SELECT 1 FROM routes WHERE name = ?",
-      [route.name]
-    );
-    if (existingByName) {
-      throw new Error(`Route with name '${route.name}' already exists`);
-    }
-
-    // Validate: check for duplicate route+method combinations
-    // Get all existing routes with the same path
-    const existingRoutes = await this.db.queryAll<{ name: string; methods: string }>(
-      "SELECT name, methods FROM routes WHERE route = ?",
-      [route.route]
-    );
-
-    for (const existing of existingRoutes) {
-      let existingMethods: string[];
-      try {
-        existingMethods = JSON.parse(existing.methods) as string[];
-      } catch (error) {
-        globalThis.console.error(
-          `[RoutesService] Failed to parse methods for route '${existing.name}': ${existing.methods}`,
-          error,
-        );
-        existingMethods = [];
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Validate: check for duplicate name
+      const [existingByName] = await db.query<[RouteRow[]]>(
+        "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
+        { name: route.name }
+      );
+      if (existingByName && existingByName.length > 0) {
+        throw new Error(`Route with name '${route.name}' already exists`);
       }
-      for (const method of route.methods) {
-        if (existingMethods.includes(method)) {
-          throw new Error(
-            `Route '${route.route}' with method '${method}' already exists (route: '${existing.name}')`
-          );
+
+      // Validate: check for duplicate routePath+method combinations
+      const [existingRoutes] = await db.query<[RouteRow[]]>(
+        "SELECT name, methods FROM functionDef WHERE routePath = $routePath",
+        { routePath: route.routePath }
+      );
+
+      for (const existing of existingRoutes ?? []) {
+        for (const method of route.methods) {
+          if (existing.methods.includes(method)) {
+            throw new Error(
+              `Route '${route.routePath}' with method '${method}' already exists (route: '${existing.name}')`
+            );
+          }
         }
       }
-    }
 
-    // Insert the route (enabled defaults to 1 in the schema)
-    const result = await this.db.execute(
-      "INSERT INTO routes (name, description, handler, route, methods, keys) VALUES (?, ?, ?, ?, ?, ?)",
-      [
-        route.name,
-        route.description ?? null,
-        route.handler,
-        route.route,
-        JSON.stringify(route.methods),
-        route.keys ? JSON.stringify(route.keys) : null,
-      ]
-    );
+      // Create the route
+      // Note: For option<T> fields, undefined maps to NONE, null is not valid
+      const [rows] = await db.query<[RouteRow[]]>(
+        `CREATE functionDef SET
+          name = $name,
+          description = $description,
+          handler = $handler,
+          routePath = $routePath,
+          methods = $methods,
+          keys = $keys,
+          enabled = true`,
+        {
+          name: route.name,
+          description: route.description,
+          handler: route.handler,
+          routePath: route.routePath,
+          methods: route.methods,
+          keys: route.keys && route.keys.length > 0 ? route.keys : undefined,
+        }
+      );
 
-    this.markDirty();
+      const created = rows?.[0];
+      if (!created) {
+        throw new Error("Failed to create route");
+      }
 
-    // Fetch and return the created route
-    const created = await this.getById(Number(result.lastInsertRowId));
-    if (!created) {
-      throw new Error("Failed to retrieve created route");
-    }
-    return created;
+      this.markDirty();
+      return this.rowToRoute(created);
+    });
   }
 
   /**
    * Remove a route by name.
    * Waits for any in-progress rebuild to complete before modifying.
-   * If secretsService is configured, cascade deletes function-scoped secrets.
+   * Note: Function-scoped secrets are cascade-deleted by SurrealDB event.
    */
   async removeRoute(name: string): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    // Get the route ID first for cascade delete (if secretsService is configured)
-    if (this.secretsService) {
-      const route = await this.db.queryOne<{ id: number }>(
-        "SELECT id FROM routes WHERE name = ?",
-        [name]
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Get the route ID first (for logging purposes and to check if exists)
+      const [rows] = await db.query<[RouteRow[]]>(
+        "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
+        { name }
       );
-      if (route) {
-        await this.secretsService.deleteFunctionSecretsByFunctionId(route.id);
-      }
-    }
 
-    const result = await this.db.execute("DELETE FROM routes WHERE name = ?", [
-      name,
-    ]);
+      const route = rows?.[0];
+      if (!route) return; // No-op if doesn't exist
 
-    // Only mark dirty if we actually deleted something
-    if (result.changes > 0) {
+      // Delete the route (secrets cascade-deleted by SurrealDB event)
+      await db.query("DELETE $recordId", { recordId: route.id });
       this.markDirty();
-    }
+    });
   }
 
   /**
    * Update an existing route by ID.
    * Preserves the route ID to maintain log/metrics associations.
    * Waits for any in-progress rebuild to complete before modifying.
+   * @param id - The string ID part of the RecordId
    * @returns The updated route
    */
-  async updateRoute(id: number, route: NewFunctionRoute): Promise<FunctionRoute> {
+  async updateRoute(id: string, route: NewFunctionRoute): Promise<FunctionRoute> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    // Verify route exists
-    const existing = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM routes WHERE id = ?",
-      [id]
-    );
-    if (!existing) {
-      throw new Error(`Route with id '${id}' not found`);
-    }
+    const recordId = new RecordId("functionDef", id);
 
-    // Validate: check for duplicate name (excluding current route)
-    const existingByName = await this.db.queryOne<{ id: number }>(
-      "SELECT id FROM routes WHERE name = ? AND id != ?",
-      [route.name, id]
-    );
-    if (existingByName) {
-      throw new Error(`Route with name '${route.name}' already exists`);
-    }
-
-    // Validate: check for duplicate route+method combinations (excluding current route)
-    const existingRoutes = await this.db.queryAll<{ id: number; name: string; methods: string }>(
-      "SELECT id, name, methods FROM routes WHERE route = ? AND id != ?",
-      [route.route, id]
-    );
-
-    for (const existingRoute of existingRoutes) {
-      let existingMethods: string[];
-      try {
-        existingMethods = JSON.parse(existingRoute.methods) as string[];
-      } catch (error) {
-        globalThis.console.error(
-          `[RoutesService] Failed to parse methods for route '${existingRoute.name}': ${existingRoute.methods}`,
-          error,
-        );
-        existingMethods = [];
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Verify route exists
+      const [existing] = await db.query<[RouteRow | undefined]>(
+        "RETURN $recordId.*",
+        { recordId }
+      );
+      if (!existing) {
+        throw new Error(`Route with id '${id}' not found`);
       }
-      for (const method of route.methods) {
-        if (existingMethods.includes(method)) {
-          throw new Error(
-            `Route '${route.route}' with method '${method}' already exists (route: '${existingRoute.name}')`
-          );
+
+      // Validate: check for duplicate name (excluding current route)
+      const [existingByName] = await db.query<[RouteRow[]]>(
+        "SELECT id FROM functionDef WHERE name = $name AND id != $recordId LIMIT 1",
+        { name: route.name, recordId }
+      );
+      if (existingByName && existingByName.length > 0) {
+        throw new Error(`Route with name '${route.name}' already exists`);
+      }
+
+      // Validate: check for duplicate routePath+method combinations (excluding current route)
+      const [existingRoutes] = await db.query<[RouteRow[]]>(
+        "SELECT name, methods FROM functionDef WHERE routePath = $routePath AND id != $recordId",
+        { routePath: route.routePath, recordId }
+      );
+
+      for (const existingRoute of existingRoutes ?? []) {
+        for (const method of route.methods) {
+          if (existingRoute.methods.includes(method)) {
+            throw new Error(
+              `Route '${route.routePath}' with method '${method}' already exists (route: '${existingRoute.name}')`
+            );
+          }
         }
       }
-    }
 
-    // Update the route
-    await this.db.execute(
-      `UPDATE routes
-       SET name = ?, description = ?, handler = ?, route = ?, methods = ?, keys = ?
-       WHERE id = ?`,
-      [
-        route.name,
-        route.description ?? null,
-        route.handler,
-        route.route,
-        JSON.stringify(route.methods),
-        route.keys ? JSON.stringify(route.keys) : null,
-        id,
-      ]
-    );
+      // Update the route
+      // Note: For option<T> fields, undefined maps to NONE, null is not valid
+      await db.query(
+        `UPDATE $recordId SET
+          name = $name,
+          description = $description,
+          handler = $handler,
+          routePath = $routePath,
+          methods = $methods,
+          keys = $keys`,
+        {
+          recordId,
+          name: route.name,
+          description: route.description,
+          handler: route.handler,
+          routePath: route.routePath,
+          methods: route.methods,
+          keys: route.keys && route.keys.length > 0 ? route.keys : undefined,
+        }
+      );
 
-    this.markDirty();
+      this.markDirty();
 
-    // Fetch and return the updated route
-    const updated = await this.getById(id);
-    if (!updated) {
-      throw new Error("Failed to retrieve updated route");
-    }
-    return updated;
+      // Fetch and return the updated route
+      const updated = await this.getById(id);
+      if (!updated) {
+        throw new Error("Failed to retrieve updated route");
+      }
+      return updated;
+    });
   }
 
   /**
    * Remove a route by ID.
    * Waits for any in-progress rebuild to complete before modifying.
-   * If secretsService is configured, cascade deletes function-scoped secrets.
+   * Note: Function-scoped secrets are cascade-deleted by SurrealDB event.
+   * @param id - The string ID part of the RecordId
    */
-  async removeRouteById(id: number): Promise<void> {
+  async removeRouteById(id: string): Promise<void> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    // Cascade delete function-scoped secrets before deleting the route
-    // (Routes are in SQLite, secrets in SurrealDB, so no FK constraint)
-    if (this.secretsService) {
-      await this.secretsService.deleteFunctionSecretsByFunctionId(id);
-    }
+    const recordId = new RecordId("functionDef", id);
 
-    const result = await this.db.execute("DELETE FROM routes WHERE id = ?", [
-      id,
-    ]);
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Check if route exists first
+      const [existing] = await db.query<[RouteRow | undefined]>(
+        "RETURN $recordId.*",
+        { recordId }
+      );
+      if (!existing) return; // No-op if doesn't exist
 
-    // Only mark dirty if we actually deleted something
-    if (result.changes > 0) {
+      // Delete the route (secrets cascade-deleted by SurrealDB event)
+      await db.query("DELETE $recordId", { recordId });
       this.markDirty();
-    }
+    });
   }
 
   /**
    * Set the enabled state of a route by ID.
    * Waits for any in-progress rebuild to complete before modifying.
+   * @param id - The string ID part of the RecordId
    * @returns The updated route
    */
-  async setRouteEnabled(id: number, enabled: boolean): Promise<FunctionRoute> {
+  async setRouteEnabled(id: string, enabled: boolean): Promise<FunctionRoute> {
     // Wait for any in-progress rebuild to complete
     using _lock = await this.rebuildMutex.acquire();
 
-    // Verify route exists
-    const existingRoute = await this.getById(id);
-    if (!existingRoute) {
-      throw new Error(`Route with id '${id}' not found`);
-    }
+    const recordId = new RecordId("functionDef", id);
 
-    // Update the enabled state
-    await this.db.execute(
-      "UPDATE routes SET enabled = ? WHERE id = ?",
-      [enabled ? 1 : 0, id]
-    );
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      // Verify route exists
+      const [existing] = await db.query<[RouteRow | undefined]>(
+        "RETURN $recordId.*",
+        { recordId }
+      );
+      if (!existing) {
+        throw new Error(`Route with id '${id}' not found`);
+      }
 
-    this.markDirty();
+      // Update the enabled state
+      await db.query(
+        "UPDATE $recordId SET enabled = $enabled",
+        { recordId, enabled }
+      );
 
-    // Fetch and return the updated route
-    const updated = await this.getById(id);
-    if (!updated) {
-      throw new Error("Failed to retrieve updated route");
-    }
-    return updated;
+      this.markDirty();
+
+      // Fetch and return the updated route
+      const updated = await this.getById(id);
+      if (!updated) {
+        throw new Error("Failed to retrieve updated route");
+      }
+      return updated;
+    });
   }
 }

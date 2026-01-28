@@ -7,6 +7,7 @@ import type { ConsoleLogService } from "./console_log_service.ts";
 import type { RoutesService } from "../routes/routes_service.ts";
 import type { FunctionRoute } from "../routes/routes_service.ts";
 import type { ConsoleLog, ConsoleLogLevel } from "./types.ts";
+import { recordIdToString } from "../database/surreal_helpers.ts";
 
 interface LogsTestContext {
   app: Hono;
@@ -25,14 +26,14 @@ async function createTestContext(): Promise<LogsTestContext> {
   // Create test routes
   await ctx.routesService.addRoute({
     name: "test-route-1",
-    route: "/test1",
+    routePath: "/test1",
     handler: "test1.ts",
     methods: ["GET"],
   });
 
   await ctx.routesService.addRoute({
     name: "test-route-2",
-    route: "/test2",
+    routePath: "/test2",
     handler: "test2.ts",
     methods: ["GET"],
   });
@@ -62,7 +63,7 @@ async function createTestContext(): Promise<LogsTestContext> {
 // Helper to insert test logs
 async function insertLogs(
   service: ConsoleLogService,
-  routeId: number,
+  functionId: string,
   count: number,
   level: ConsoleLogLevel = "log",
   baseRequestId = "req",
@@ -70,7 +71,7 @@ async function insertLogs(
   for (let i = 0; i < count; i++) {
     service.store({
       requestId: `${baseRequestId}-${i}`,
-      routeId,
+      functionId,
       level,
       message: `Test message ${i}`,
     });
@@ -97,8 +98,8 @@ integrationTest("GET /api/logs returns empty array when no logs exist", async ()
 integrationTest("GET /api/logs returns all logs across functions when no filters", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 5);
-    await insertLogs(ctx.consoleLogService, ctx.routes.route2.id, 3);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 5);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route2.id), 3);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -114,17 +115,17 @@ integrationTest("GET /api/logs returns all logs across functions when no filters
 integrationTest("GET /api/logs filters by functionId correctly", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 5);
-    await insertLogs(ctx.consoleLogService, ctx.routes.route2.id, 3);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 5);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route2.id), 3);
 
     const res = await ctx.app.request(
-      `/api/logs?functionId=${ctx.routes.route1.id}`,
+      `/api/logs?functionId=${recordIdToString(ctx.routes.route1.id)}`,
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.data.logs.length).toBe(5);
-    expect(json.data.logs.every((log: ConsoleLog) => log.routeId === ctx.routes.route1.id)).toBe(true);
+    expect(json.data.logs.every((log: ConsoleLog) => log.functionId === recordIdToString(ctx.routes.route1.id))).toBe(true);
   } finally {
     await ctx.cleanup();
   }
@@ -133,9 +134,9 @@ integrationTest("GET /api/logs filters by functionId correctly", async () => {
 integrationTest("GET /api/logs filters by single level", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 3, "error");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 2, "warn");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1, "info");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 3, "error");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 2, "warn");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 1, "info");
 
     const res = await ctx.app.request("/api/logs?level=error");
     const json = await res.json();
@@ -151,9 +152,9 @@ integrationTest("GET /api/logs filters by single level", async () => {
 integrationTest("GET /api/logs filters by multiple levels", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 3, "error");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 2, "warn");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1, "info");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 3, "error");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 2, "warn");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 1, "info");
 
     const res = await ctx.app.request("/api/logs?level=error,warn");
     const json = await res.json();
@@ -173,19 +174,19 @@ integrationTest("GET /api/logs filters by multiple levels", async () => {
 integrationTest("GET /api/logs combines functionId and level filters", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 3, "error");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 2, "info");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route2.id, 2, "error");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 3, "error");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 2, "info");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route2.id), 2, "error");
 
     const res = await ctx.app.request(
-      `/api/logs?functionId=${ctx.routes.route1.id}&level=error`,
+      `/api/logs?functionId=${recordIdToString(ctx.routes.route1.id)}&level=error`,
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.data.logs.length).toBe(3);
     expect(json.data.logs.every((log: ConsoleLog) =>
-      log.routeId === ctx.routes.route1.id && log.level === "error"
+      log.functionId === recordIdToString(ctx.routes.route1.id) && log.level === "error"
     )).toBe(true);
   } finally {
     await ctx.cleanup();
@@ -195,7 +196,7 @@ integrationTest("GET /api/logs combines functionId and level filters", async () 
 integrationTest("GET /api/logs respects default limit of 50", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -212,7 +213,7 @@ integrationTest("GET /api/logs respects default limit of 50", async () => {
 integrationTest("GET /api/logs respects custom limit", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 20);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 20);
 
     const res = await ctx.app.request("/api/logs?limit=10");
     const json = await res.json();
@@ -229,7 +230,7 @@ integrationTest("GET /api/logs respects custom limit", async () => {
 integrationTest("GET /api/logs returns logs ordered newest to oldest", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 5);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 5);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -253,7 +254,8 @@ integrationTest("GET /api/logs returns logs ordered newest to oldest", async () 
 integrationTest("GET /api/logs returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
-    const res = await ctx.app.request("/api/logs?functionId=invalid");
+    // Use a functionId with invalid characters (spaces, special chars)
+    const res = await ctx.app.request("/api/logs?functionId=invalid%20format!");
     const json = await res.json();
 
     expect(res.status).toBe(400);
@@ -333,7 +335,7 @@ integrationTest("GET /api/logs returns 400 for malformed cursor", async () => {
 integrationTest("GET /api/logs hasMore=true when more logs exist", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request("/api/logs?limit=50");
     const json = await res.json();
@@ -349,7 +351,7 @@ integrationTest("GET /api/logs hasMore=true when more logs exist", async () => {
 integrationTest("GET /api/logs hasMore=false when all logs retrieved", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 10);
 
     const res = await ctx.app.request("/api/logs?limit=50");
     const json = await res.json();
@@ -365,7 +367,7 @@ integrationTest("GET /api/logs hasMore=false when all logs retrieved", async () 
 integrationTest("GET /api/logs includes next link when hasMore=true", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request("/api/logs?limit=50");
     const json = await res.json();
@@ -382,7 +384,7 @@ integrationTest("GET /api/logs includes next link when hasMore=true", async () =
 integrationTest("GET /api/logs does not include next link when hasMore=false", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 10);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -397,7 +399,7 @@ integrationTest("GET /api/logs does not include next link when hasMore=false", a
 integrationTest("GET /api/logs includes prev link when cursor provided", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     // Get first page
     const res1 = await ctx.app.request("/api/logs?limit=10");
@@ -418,7 +420,7 @@ integrationTest("GET /api/logs includes prev link when cursor provided", async (
 integrationTest("GET /api/logs does not include prev link on first page", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request("/api/logs?limit=10");
     const json = await res.json();
@@ -433,7 +435,7 @@ integrationTest("GET /api/logs does not include prev link on first page", async 
 integrationTest("GET /api/logs next cursor retrieves correct second page", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 15);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 15);
 
     // Get first page
     const res1 = await ctx.app.request("/api/logs?limit=10");
@@ -458,15 +460,15 @@ integrationTest("GET /api/logs next cursor retrieves correct second page", async
 integrationTest("GET /api/logs preserves functionId in pagination links", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request(
-      `/api/logs?functionId=${ctx.routes.route1.id}&limit=10`,
+      `/api/logs?functionId=${recordIdToString(ctx.routes.route1.id)}&limit=10`,
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.data.pagination.next).toContain(`functionId=${ctx.routes.route1.id}`);
+    expect(json.data.pagination.next).toContain(`functionId=${recordIdToString(ctx.routes.route1.id)}`);
   } finally {
     await ctx.cleanup();
   }
@@ -475,7 +477,7 @@ integrationTest("GET /api/logs preserves functionId in pagination links", async 
 integrationTest("GET /api/logs preserves level filter in pagination links", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60, "error");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60, "error");
 
     const res = await ctx.app.request("/api/logs?level=error&limit=10");
     const json = await res.json();
@@ -490,7 +492,7 @@ integrationTest("GET /api/logs preserves level filter in pagination links", asyn
 integrationTest("GET /api/logs preserves custom limit in pagination links", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request("/api/logs?limit=25");
     const json = await res.json();
@@ -511,7 +513,7 @@ integrationTest("GET /api/logs handles logs with identical timestamps", async ()
     for (let i = 0; i < 5; i++) {
       ctx.consoleLogService.store({
         requestId: `req-${i}`,
-        routeId: ctx.routes.route1.id,
+        functionId: recordIdToString(ctx.routes.route1.id),
         level: "log",
         message: `Message ${i}`,
       });
@@ -539,7 +541,7 @@ integrationTest("GET /api/logs handles logs with identical timestamps", async ()
 integrationTest("GET /api/logs works with empty result after cursor", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 10);
 
     // Get all logs
     const res1 = await ctx.app.request("/api/logs?limit=10");
@@ -562,8 +564,8 @@ integrationTest("GET /api/logs works with empty result after cursor", async () =
 integrationTest("GET /api/logs pagination with level filtering works correctly", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 30, "error");
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 30, "info");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 30, "error");
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 30, "info");
 
     const res1 = await ctx.app.request("/api/logs?level=error&limit=20");
     const json1 = await res1.json();
@@ -590,21 +592,21 @@ integrationTest("GET /api/logs pagination with level filtering works correctly",
 integrationTest("DELETE /api/logs/:functionId deletes logs and returns count", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 10);
 
     const res = await ctx.app.request(
-      `/api/logs/${ctx.routes.route1.id}`,
+      `/api/logs/${recordIdToString(ctx.routes.route1.id)}`,
       { method: "DELETE" },
     );
     const json = await res.json();
 
     expect(res.status).toBe(200);
     expect(json.data.deleted).toBe(10);
-    expect(json.data.functionId).toBe(ctx.routes.route1.id);
+    expect(json.data.functionId).toBe(recordIdToString(ctx.routes.route1.id));
 
     // Verify logs are actually deleted
     const logsRes = await ctx.app.request(
-      `/api/logs?functionId=${ctx.routes.route1.id}`,
+      `/api/logs?functionId=${recordIdToString(ctx.routes.route1.id)}`,
     );
     const logsJson = await logsRes.json();
     expect(logsJson.data.logs.length).toBe(0);
@@ -617,7 +619,7 @@ integrationTest("DELETE /api/logs/:functionId returns count=0 when no logs exist
   const ctx = await createTestContext();
   try {
     const res = await ctx.app.request(
-      `/api/logs/${ctx.routes.route1.id}`,
+      `/api/logs/${recordIdToString(ctx.routes.route1.id)}`,
       { method: "DELETE" },
     );
     const json = await res.json();
@@ -632,7 +634,8 @@ integrationTest("DELETE /api/logs/:functionId returns count=0 when no logs exist
 integrationTest("DELETE /api/logs/:functionId returns 400 for invalid functionId format", async () => {
   const ctx = await createTestContext();
   try {
-    const res = await ctx.app.request("/api/logs/invalid", { method: "DELETE" });
+    // Use a functionId with invalid characters (special chars)
+    const res = await ctx.app.request("/api/logs/invalid%20format!", { method: "DELETE" });
     const json = await res.json();
 
     expect(res.status).toBe(400);
@@ -658,11 +661,11 @@ integrationTest("DELETE /api/logs/:functionId returns 404 for non-existent funct
 integrationTest("DELETE /api/logs/:functionId only deletes specified function's logs", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
-    await insertLogs(ctx.consoleLogService, ctx.routes.route2.id, 5);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 10);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route2.id), 5);
 
     const res = await ctx.app.request(
-      `/api/logs/${ctx.routes.route1.id}`,
+      `/api/logs/${recordIdToString(ctx.routes.route1.id)}`,
       { method: "DELETE" },
     );
     const json = await res.json();
@@ -672,7 +675,7 @@ integrationTest("DELETE /api/logs/:functionId only deletes specified function's 
 
     // Verify route2 logs are still there
     const logsRes = await ctx.app.request(
-      `/api/logs?functionId=${ctx.routes.route2.id}`,
+      `/api/logs?functionId=${recordIdToString(ctx.routes.route2.id)}`,
     );
     const logsJson = await logsRes.json();
     expect(logsJson.data.logs.length).toBe(5);
@@ -686,7 +689,7 @@ integrationTest("DELETE /api/logs/:functionId only deletes specified function's 
 integrationTest("GET /api/logs has correct data wrapper structure", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 1);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -703,7 +706,7 @@ integrationTest("GET /api/logs has correct data wrapper structure", async () => 
 integrationTest("GET /api/logs pagination object has correct structure", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 10);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 10);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -721,7 +724,7 @@ integrationTest("GET /api/logs pagination object has correct structure", async (
 integrationTest("GET /api/logs log objects have all required fields", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 1);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -730,7 +733,7 @@ integrationTest("GET /api/logs log objects have all required fields", async () =
     const log = json.data.logs[0];
     expect(log).toHaveProperty("id");
     expect(log).toHaveProperty("requestId");
-    expect(log).toHaveProperty("routeId");
+    expect(log).toHaveProperty("functionId");
     expect(log).toHaveProperty("level");
     expect(log).toHaveProperty("message");
     expect(log).toHaveProperty("timestamp");
@@ -742,7 +745,7 @@ integrationTest("GET /api/logs log objects have all required fields", async () =
 integrationTest("GET /api/logs timestamps are in ISO format", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 1);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 1);
 
     const res = await ctx.app.request("/api/logs");
     const json = await res.json();
@@ -759,7 +762,7 @@ integrationTest("GET /api/logs timestamps are in ISO format", async () => {
 integrationTest("GET /api/logs HATEOAS links are relative paths", async () => {
   const ctx = await createTestContext();
   try {
-    await insertLogs(ctx.consoleLogService, ctx.routes.route1.id, 60);
+    await insertLogs(ctx.consoleLogService, recordIdToString(ctx.routes.route1.id), 60);
 
     const res = await ctx.app.request("/api/logs?limit=10");
     const json = await res.json();

@@ -11,7 +11,8 @@
  * It does not maintain its own timer - scheduling is handled externally.
  */
 
-import type { DatabaseService } from "../database/database_service.ts";
+import type { RecordId } from "surrealdb";
+import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { VersionedEncryptionService } from "./versioned_encryption_service.ts";
 import type { KeyStorageService } from "./key_storage_service.ts";
 import type { EncryptionKeyFile } from "./key_storage_types.ts";
@@ -28,7 +29,7 @@ import { logger } from "../utils/logger.ts";
 /**
  * Tables containing encrypted data that need key rotation.
  */
-const ENCRYPTED_TABLES: EncryptedTable[] = ["secrets", "apiKeys", "settings"];
+const ENCRYPTED_TABLES: EncryptedTable[] = ["secret", "apiKey", "setting"];
 
 /**
  * Result of a key rotation check.
@@ -73,7 +74,7 @@ export interface KeyRotationCheckResult extends DynamicScheduleResult {
  * check cycle, ensuring no data becomes permanently inaccessible due to partial rotation.
  */
 export class KeyRotationService {
-  private readonly db: DatabaseService;
+  private readonly surrealFactory: SurrealConnectionFactory;
   private readonly encryptionService: VersionedEncryptionService;
   private readonly keyStorage: KeyStorageService;
   private readonly config: KeyRotationConfig;
@@ -84,7 +85,7 @@ export class KeyRotationService {
   private stopRequested = false;
 
   constructor(options: KeyRotationServiceOptions) {
-    this.db = options.db;
+    this.surrealFactory = options.surrealFactory;
     this.encryptionService = options.encryptionService;
     this.keyStorage = options.keyStorage;
     this.config = options.config;
@@ -387,28 +388,36 @@ export class KeyRotationService {
     table: EncryptedTable,
     phasedOutVersion: string
   ): Promise<EncryptedRecord[]> {
-    let query: string;
+    return await this.surrealFactory.withSystemConnection({}, async (db) => {
+      let query: string;
 
-    if (table === "settings") {
-      query = `
-        SELECT id, value, updatedAt FROM ${table}
-        WHERE isEncrypted = 1 AND value LIKE ?
-        LIMIT ?
-      `;
-    } else {
-      query = `
-        SELECT id, value, updatedAt FROM ${table}
-        WHERE value LIKE ?
-        LIMIT ?
-      `;
-    }
+      if (table === "setting") {
+        // For settings, only fetch encrypted settings
+        query = `
+          SELECT id, value, updatedAt
+          FROM type::table($table)
+          WHERE isEncrypted = true
+            AND string::starts_with(value, $prefix)
+          LIMIT $limit
+        `;
+      } else {
+        // For secret and apiKey, all records are encrypted
+        query = `
+          SELECT id, value, updatedAt
+          FROM type::table($table)
+          WHERE string::starts_with(value, $prefix)
+          LIMIT $limit
+        `;
+      }
 
-    const rows = await this.db.queryAll<EncryptedRecord>(query, [
-      `${phasedOutVersion}%`,
-      this.config.batchSize,
-    ]);
+      const [rows] = await db.query<[EncryptedRecord[]]>(query, {
+        table: table,
+        prefix: phasedOutVersion,
+        limit: this.config.batchSize,
+      });
 
-    return rows;
+      return rows ?? [];
+    });
   }
 
   /**
@@ -422,43 +431,51 @@ export class KeyRotationService {
   ): Promise<number> {
     let successCount = 0;
 
-    for (const record of records) {
-      // Check for cancellation
-      if (token?.isCancelled) {
-        this.stopRequested = true;
-      }
-      if (this.stopRequested) {
-        break;
-      }
-
-      try {
-        // Decrypt with old key, encrypt with new key
-        // Using unlocked variants because caller already holds the rotation lock
-        const plaintext = await this.encryptionService.decryptUnlocked(record.value);
-        const newValue = await this.encryptionService.encryptUnlocked(plaintext);
-
-        // Update with optimistic concurrency
-        const result = await this.db.execute(
-          `UPDATE ${table}
-           SET value = ?, updatedAt = CURRENT_TIMESTAMP
-           WHERE id = ? AND updatedAt = ?`,
-          [newValue, record.id, record.updatedAt]
-        );
-
-        if (result.changes === 0) {
-          logger.warn(
-            `[KeyRotation] Optimistic concurrency conflict for ${table} id=${record.id}, will be picked up in next batch`
-          );
-        } else {
-          successCount++;
+    // Wrap the entire loop in a single connection
+    await this.surrealFactory.withSystemConnection({}, async (db) => {
+      for (const record of records) {
+        // Check for cancellation
+        if (token?.isCancelled) {
+          this.stopRequested = true;
         }
-      } catch (error) {
-        logger.error(
-          `[KeyRotation] Failed to re-encrypt ${table} id=${record.id}:`,
-          error
-        );
+        if (this.stopRequested) {
+          break;
+        }
+
+        try {
+          // Decrypt with old key, encrypt with new key
+          // Using unlocked variants because caller already holds the rotation lock
+          const plaintext = await this.encryptionService.decryptUnlocked(record.value);
+          const newValue = await this.encryptionService.encryptUnlocked(plaintext);
+
+          // Update with optimistic concurrency (SurrealQL)
+          const [results] = await db.query<[{ id: RecordId }[]]>(
+            `UPDATE $recordId
+             SET value = $value, updatedAt = time::now()
+             WHERE updatedAt = $oldUpdatedAt
+             RETURN id`,
+            {
+              recordId: record.id,
+              value: newValue,
+              oldUpdatedAt: record.updatedAt,
+            }
+          );
+
+          if (!results || results.length === 0) {
+            logger.warn(
+              `[KeyRotation] Optimistic concurrency conflict for ${table} id=${record.id}, will be picked up in next batch`
+            );
+          } else {
+            successCount++;
+          }
+        } catch (error) {
+          logger.error(
+            `[KeyRotation] Failed to re-encrypt ${table} id=${record.id}:`,
+            error
+          );
+        }
       }
-    }
+    });
 
     return successCount;
   }

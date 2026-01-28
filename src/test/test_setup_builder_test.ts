@@ -37,10 +37,10 @@ integrationTest("TestSetupBuilder creates basic context with all services", asyn
 
     // Verify database is open and migrations ran (check for a table)
     const result = await ctx.db.queryOne<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name='apiKeyGroups'"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='jobQueue'"
     );
     expect(result).toBeDefined();
-    expect(result?.name).toBe("apiKeyGroups");
+    expect(result?.name).toBe("jobQueue");
   } finally {
     await ctx.cleanup();
   }
@@ -84,7 +84,7 @@ integrationTest("TestSetupBuilder.withRoute creates route", async () => {
   try {
     const routes = await ctx.routesService.getAll();
     expect(routes.length).toBe(1);
-    expect(routes[0].route).toBe("/test");
+    expect(routes[0].routePath).toBe("/test");
     expect(routes[0].handler).toBe("test.ts");
     expect(routes[0].methods).toContain("GET");
     expect(routes[0].methods).toContain("POST");
@@ -138,18 +138,27 @@ integrationTest("TestSetupBuilder.withAdminUser creates user", async () => {
 });
 
 integrationTest("TestSetupBuilder.withConsoleLog seeds log data", async () => {
-  // First create a route to have a valid routeId
+  // First create a route to have a valid functionId
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts")
-    .withConsoleLog({
-      requestId: "test-request-123",
-      routeId: 1, // Will match the created route
-      level: "info",
-      message: "Test log message",
-    })
+    .withLogs()
     .build();
 
   try {
+    // Get the functionId from the created route
+    const route = await ctx.routesService.getByName("test");
+    const { recordIdToString } = await import("../database/surreal_helpers.ts");
+    const functionId = recordIdToString(route!.id);
+
+    // Now seed the log with the actual functionId
+    ctx.consoleLogService.store({
+      requestId: "test-request-123",
+      functionId,
+      level: "info",
+      message: "Test log message",
+    });
+    await ctx.consoleLogService.flush();
+
     const logs = await ctx.consoleLogService.getByRequestId("test-request-123");
     expect(logs.length).toBe(1);
     expect(logs[0].message).toBe("Test log message");
@@ -163,7 +172,7 @@ integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
   const ctx = await TestSetupBuilder.create()
     .withRoute("/test", "test.ts")
     .withMetric({
-      routeId: 1,
+      functionId: null, // Global metric
       type: "execution",
       avgTimeMs: 100,
       maxTimeMs: 150,
@@ -172,12 +181,14 @@ integrationTest("TestSetupBuilder.withMetric seeds metric data", async () => {
     .build();
 
   try {
-    // Query directly since service may not have a direct getter for raw metrics
-    const metrics = await ctx.db.queryAll<{ avgTimeMs: number; executionCount: number }>(
-      "SELECT avgTimeMs, executionCount FROM executionMetrics WHERE routeId = 1"
+    // Use service to fetch metrics (stored in microseconds, converted from milliseconds)
+    const metrics = await ctx.executionMetricsService.getGlobalMetricsByTypeAndTimeRange(
+      "execution",
+      new Date(0),
+      new Date()
     );
     expect(metrics.length).toBe(1);
-    expect(metrics[0].avgTimeMs).toBe(100);
+    expect(metrics[0].avgTimeUs).toBe(100000); // 100ms = 100000us
     expect(metrics[0].executionCount).toBe(10);
   } finally {
     await ctx.cleanup();
@@ -212,7 +223,7 @@ integrationTest("TestSetupBuilder full integration", async () => {
 
     // Verify route
     const routes = await ctx.routesService.getAll();
-    expect(routes.some((r) => r.route === "/hello")).toBe(true);
+    expect(routes.some((r) => r.routePath === "/hello")).toBe(true);
 
     // Verify file
     expect(await ctx.fileService.fileExists("hello.ts")).toBe(true);
