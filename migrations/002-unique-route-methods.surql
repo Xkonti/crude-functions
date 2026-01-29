@@ -32,7 +32,7 @@ THEN {
     -- Name-based exclusion works for both CREATE and UPDATE
     LET $others = SELECT * FROM functionDef
         WHERE normalizedRoute = $value.normalizedRoute
-        AND name != $value.name;
+        AND <string>id != <string>$value.id;
 
     FOR $other IN $others {
         LET $intersection = $value.methods.intersect($other.methods);
