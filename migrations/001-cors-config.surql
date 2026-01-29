@@ -14,20 +14,9 @@
 --   exposeHeaders: ["X-Request-Id"]         -- Optional: headers client can read
 -- }
 
--- Parent field: optional object, defaults to NONE (no CORS)
 DEFINE FIELD IF NOT EXISTS cors ON TABLE functionDef TYPE option<object> DEFAULT NONE;
-
--- Required when cors is present: array of allowed origins
 DEFINE FIELD IF NOT EXISTS cors.origins ON TABLE functionDef TYPE array<string>;
-
--- Optional: allow credentials (cookies, auth headers)
 DEFINE FIELD IF NOT EXISTS cors.credentials ON TABLE functionDef TYPE option<bool>;
-
--- Optional: preflight cache duration in seconds
 DEFINE FIELD IF NOT EXISTS cors.maxAge ON TABLE functionDef TYPE option<int>;
-
--- Optional: additional headers the client is allowed to send
 DEFINE FIELD IF NOT EXISTS cors.allowHeaders ON TABLE functionDef TYPE option<array<string>>;
-
--- Optional: headers the client is allowed to read from response
 DEFINE FIELD IF NOT EXISTS cors.exposeHeaders ON TABLE functionDef TYPE option<array<string>>;
