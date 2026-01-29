@@ -211,67 +211,51 @@ export class FunctionsService {
     using _lock = await this.rebuildMutex.acquire();
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      // Validate: check for duplicate name
-      // TODO: Probably can move this check to the DB and let it provide decent error messages on it's own
-      //       as it's just a duplicate of the logic that already exists in the DB anyway
-      const [existingByName] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
-        { name: func.name }
-      );
-      if (existingByName && existingByName.length > 0) {
-        throw new Error(`Function with name '${func.name}' already exists`);
-      }
-
-      // Validate: check for duplicate normalizedRoute+method combinations
-      // normalizedRoute is used for collision detection (e.g., /users/:id and /users/:userId both normalize to /users/*)
-      // TODO: Probably can move this check to the DB and let it provide decent error messages on it's own
-      //       as it's just a duplicate of the logic that already exists in the DB anyway
       const normalizedRoute = normalizeRoutePattern(func.routePath);
-      const [existingFunctions] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT name, methods FROM functionDef WHERE normalizedRoute = $normalizedRoute",
-        { normalizedRoute }
-      );
-
-      // TODO: Probably can move this check to the DB and let it provide decent error messages on it's own
-      //       as it's just a duplicate of the logic that already exists in the DB anyway
-      for (const existing of existingFunctions ?? []) {
-        // SurrealDB returns set<string> as a JavaScript Set, convert to array for comparison
-        const existingMethods = existing.methods instanceof Set
-          ? Array.from(existing.methods)
-          : existing.methods;
-        for (const method of func.methods) {
-          if (existingMethods.includes(method)) {
-            throw new Error(
-              `Route '${func.routePath}' with method '${method}' already exists (function: '${existing.name}')`
-            );
-          }
-        }
-      }
 
       // Create the function definition
+      // Database handles validation via:
+      // - unique_functionDef_name index (duplicate name check)
+      // - idx_functionDef_route_methods index (exact route+methods duplicate)
+      // - check_route_method_overlap event (overlapping methods on same route)
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
-      const [records] = await db.query<[FunctionDefRecord[]]>(
-        `CREATE functionDef SET
-          name = $name,
-          description = $description,
-          handler = $handler,
-          routePath = $routePath,
-          normalizedRoute = $normalizedRoute,
-          methods = <set>$methods,
-          keys = $keys,
-          cors = $cors,
-          enabled = true`,
-        {
-          name: func.name,
-          description: func.description,
-          handler: func.handler,
-          routePath: func.routePath,
-          normalizedRoute: normalizedRoute,
-          methods: func.methods,
-          keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
-          cors: func.cors,
+      let records: FunctionDefRecord[];
+      try {
+        [records] = await db.query<[FunctionDefRecord[]]>(
+          `CREATE functionDef SET
+            name = $name,
+            description = $description,
+            handler = $handler,
+            routePath = $routePath,
+            normalizedRoute = $normalizedRoute,
+            methods = <set>$methods,
+            keys = $keys,
+            cors = $cors,
+            enabled = true`,
+          {
+            name: func.name,
+            description: func.description,
+            handler: func.handler,
+            routePath: func.routePath,
+            normalizedRoute: normalizedRoute,
+            methods: func.methods,
+            keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+            cors: func.cors,
+          }
+        );
+      } catch (error) {
+        // DEBUG: Print error details to understand SurrealDB error format
+        console.error("SurrealDB CREATE error:", error);
+        console.error("Error type:", typeof error);
+        console.error("Error name:", (error as Error)?.name);
+        console.error("Error message:", (error as Error)?.message);
+        console.error("Error constructor:", (error as Error)?.constructor?.name);
+        if (error && typeof error === "object") {
+          console.error("Error keys:", Object.keys(error));
+          console.error("Full error object:", JSON.stringify(error, null, 2));
         }
-      );
+        throw error;
+      }
 
       const created = records?.[0];
       if (!created) {
@@ -331,61 +315,50 @@ export class FunctionsService {
         throw new Error(`Function with id '${id}' not found`);
       }
 
-      // Validate: check for duplicate name (excluding current function)
-      const [existingByName] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT id FROM functionDef WHERE name = $name AND id != $recordId LIMIT 1",
-        { name: func.name, recordId }
-      );
-      if (existingByName && existingByName.length > 0) {
-        throw new Error(`Function with name '${func.name}' already exists`);
-      }
-
-      // Validate: check for duplicate normalizedRoute+method combinations (excluding current function)
-      // normalizedRoute is used for collision detection (e.g., /users/:id and /users/:userId both normalize to /users/*)
       const normalizedRoute = normalizeRoutePattern(func.routePath);
-      const [existingFunctions] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT name, methods FROM functionDef WHERE normalizedRoute = $normalizedRoute AND id != $recordId",
-        { normalizedRoute, recordId }
-      );
-
-      for (const existingFunc of existingFunctions ?? []) {
-        // SurrealDB returns set<string> as a JavaScript Set, convert to array for comparison
-        const existingMethods = existingFunc.methods instanceof Set
-          ? Array.from(existingFunc.methods)
-          : existingFunc.methods;
-        for (const method of func.methods) {
-          if (existingMethods.includes(method)) {
-            throw new Error(
-              `Route '${func.routePath}' with method '${method}' already exists (function: '${existingFunc.name}')`
-            );
-          }
-        }
-      }
 
       // Update the function definition
+      // Database handles validation via:
+      // - unique_functionDef_name index (duplicate name check)
+      // - idx_functionDef_route_methods index (exact route+methods duplicate)
+      // - check_route_method_overlap event (overlapping methods on same route)
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
-      await db.query(
-        `UPDATE $recordId SET
-          name = $name,
-          description = $description,
-          handler = $handler,
-          routePath = $routePath,
-          normalizedRoute = $normalizedRoute,
-          methods = <set>$methods,
-          keys = $keys,
-          cors = $cors`,
-        {
-          recordId,
-          name: func.name,
-          description: func.description,
-          handler: func.handler,
-          routePath: func.routePath,
-          normalizedRoute: normalizedRoute,
-          methods: func.methods,
-          keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
-          cors: func.cors,
+      try {
+        await db.query(
+          `UPDATE $recordId SET
+            name = $name,
+            description = $description,
+            handler = $handler,
+            routePath = $routePath,
+            normalizedRoute = $normalizedRoute,
+            methods = <set>$methods,
+            keys = $keys,
+            cors = $cors`,
+          {
+            recordId,
+            name: func.name,
+            description: func.description,
+            handler: func.handler,
+            routePath: func.routePath,
+            normalizedRoute: normalizedRoute,
+            methods: func.methods,
+            keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+            cors: func.cors,
+          }
+        );
+      } catch (error) {
+        // DEBUG: Print error details to understand SurrealDB error format
+        console.error("SurrealDB UPDATE error:", error);
+        console.error("Error type:", typeof error);
+        console.error("Error name:", (error as Error)?.name);
+        console.error("Error message:", (error as Error)?.message);
+        console.error("Error constructor:", (error as Error)?.constructor?.name);
+        if (error && typeof error === "object") {
+          console.error("Error keys:", Object.keys(error));
+          console.error("Full error object:", JSON.stringify(error, null, 2));
         }
-      );
+        throw error;
+      }
 
       this.markDirty();
 
