@@ -11,6 +11,7 @@ import {
 } from "../validation/routes.ts";
 import { validateSurrealId } from "../validation/common.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
+import type { CorsConfig } from "../functions/types.ts";
 
 /**
  * Normalize a FunctionDefinition for API responses.
@@ -26,7 +27,92 @@ function normalizeFunctionDef(func: FunctionDefinition): Record<string, unknown>
     route: func.routePath, // API uses 'route', internal uses 'routePath'
     methods: func.methods,
     keys: func.keys ?? null,
+    cors: func.cors ?? null,
     enabled: func.enabled,
+  };
+}
+
+/**
+ * Validate CORS configuration from API request body.
+ * Returns validated CorsConfig or null if not provided.
+ * Throws Error with descriptive message if invalid.
+ */
+function validateCorsConfig(cors: unknown): CorsConfig | undefined {
+  if (cors === undefined || cors === null) {
+    return undefined;
+  }
+
+  if (typeof cors !== "object" || Array.isArray(cors)) {
+    throw new Error("cors must be an object");
+  }
+
+  const config = cors as Record<string, unknown>;
+
+  // Validate origins (required when cors is provided)
+  if (!Array.isArray(config.origins) || config.origins.length === 0) {
+    throw new Error("cors.origins must be a non-empty array of strings");
+  }
+  for (const origin of config.origins) {
+    if (typeof origin !== "string" || origin.length === 0) {
+      throw new Error("cors.origins must contain only non-empty strings");
+    }
+    // Validate origin format (must be "*" or a valid URL)
+    if (origin !== "*") {
+      try {
+        new URL(origin);
+      } catch {
+        throw new Error(`cors.origins contains invalid URL: ${origin}`);
+      }
+    }
+  }
+
+  // Validate credentials (optional boolean)
+  if (config.credentials !== undefined && typeof config.credentials !== "boolean") {
+    throw new Error("cors.credentials must be a boolean");
+  }
+
+  // credentials: true cannot be used with origin "*"
+  if (config.credentials === true && config.origins.includes("*")) {
+    throw new Error("cors.credentials cannot be true when origins includes '*'");
+  }
+
+  // Validate maxAge (optional positive integer)
+  if (config.maxAge !== undefined) {
+    if (typeof config.maxAge !== "number" || !Number.isInteger(config.maxAge) || config.maxAge < 0) {
+      throw new Error("cors.maxAge must be a non-negative integer");
+    }
+  }
+
+  // Validate allowHeaders (optional array of strings)
+  if (config.allowHeaders !== undefined) {
+    if (!Array.isArray(config.allowHeaders)) {
+      throw new Error("cors.allowHeaders must be an array of strings");
+    }
+    for (const header of config.allowHeaders) {
+      if (typeof header !== "string" || header.length === 0) {
+        throw new Error("cors.allowHeaders must contain only non-empty strings");
+      }
+    }
+  }
+
+  // Validate exposeHeaders (optional array of strings)
+  if (config.exposeHeaders !== undefined) {
+    if (!Array.isArray(config.exposeHeaders)) {
+      throw new Error("cors.exposeHeaders must be an array of strings");
+    }
+    for (const header of config.exposeHeaders) {
+      if (typeof header !== "string" || header.length === 0) {
+        throw new Error("cors.exposeHeaders must contain only non-empty strings");
+      }
+    }
+  }
+
+  return {
+    origins: config.origins as string[],
+    credentials: config.credentials as boolean | undefined,
+    maxAge: config.maxAge as number | undefined,
+    allowHeaders: config.allowHeaders as string[] | undefined,
+    exposeHeaders: config.exposeHeaders as string[] | undefined,
   };
 }
 
@@ -64,6 +150,7 @@ export function createFunctionsRoutes(service: FunctionsService): Hono {
       methods?: string[];
       description?: string;
       keys?: string[];
+      cors?: unknown;
     };
     try {
       body = await c.req.json();
@@ -97,6 +184,14 @@ export function createFunctionsRoutes(service: FunctionsService): Hono {
       }
     }
 
+    // Validate CORS config if provided
+    let corsConfig: CorsConfig | undefined;
+    try {
+      corsConfig = validateCorsConfig(body.cors);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : "Invalid CORS config" }, 400);
+    }
+
     const newFunction: NewFunctionDefinition = {
       name: body.name,
       handler: body.handler,
@@ -104,6 +199,7 @@ export function createFunctionsRoutes(service: FunctionsService): Hono {
       methods: body.methods,
       description: body.description,
       keys: body.keys,
+      cors: corsConfig,
     };
 
     try {
@@ -132,6 +228,7 @@ export function createFunctionsRoutes(service: FunctionsService): Hono {
       methods?: string[];
       description?: string;
       keys?: string[];
+      cors?: unknown;
     };
     try {
       body = await c.req.json();
@@ -165,6 +262,14 @@ export function createFunctionsRoutes(service: FunctionsService): Hono {
       }
     }
 
+    // Validate CORS config if provided
+    let corsConfig: CorsConfig | undefined;
+    try {
+      corsConfig = validateCorsConfig(body.cors);
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : "Invalid CORS config" }, 400);
+    }
+
     const updatedFunction: NewFunctionDefinition = {
       name: body.name,
       handler: body.handler,
@@ -172,6 +277,7 @@ export function createFunctionsRoutes(service: FunctionsService): Hono {
       methods: body.methods,
       description: body.description,
       keys: body.keys,
+      cors: corsConfig,
     };
 
     try {

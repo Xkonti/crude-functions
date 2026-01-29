@@ -2,6 +2,7 @@ import { Mutex } from "@core/asyncutil/mutex";
 import { RecordId } from "surrealdb";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
+import type { CorsConfig } from "../functions/types.ts";
 
 /**
  * Represents a function definition.
@@ -22,6 +23,8 @@ export interface FunctionDefinition {
   methods: string[];
   /** API key group IDs required for access (optional) */
   keys?: string[];
+  /** CORS configuration (optional). When present, enables automatic CORS handling */
+  cors?: CorsConfig;
   /** Whether the function is enabled */
   enabled: boolean;
 }
@@ -45,6 +48,7 @@ interface FunctionDefRecord {
   routePath: string;
   methods: string[];
   keys: string[] | null;
+  cors: CorsConfig | null;
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -182,6 +186,10 @@ export class FunctionsService {
       func.keys = record.keys;
     }
 
+    if (record.cors) {
+      func.cors = record.cors;
+    }
+
     return func;
   }
 
@@ -232,6 +240,7 @@ export class FunctionsService {
           routePath = $routePath,
           methods = $methods,
           keys = $keys,
+          cors = $cors,
           enabled = true`,
         {
           name: func.name,
@@ -240,6 +249,7 @@ export class FunctionsService {
           routePath: func.routePath,
           methods: func.methods,
           keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+          cors: func.cors,
         }
       );
 
@@ -335,7 +345,8 @@ export class FunctionsService {
           handler = $handler,
           routePath = $routePath,
           methods = $methods,
-          keys = $keys`,
+          keys = $keys,
+          cors = $cors`,
         {
           recordId,
           name: func.name,
@@ -344,6 +355,7 @@ export class FunctionsService {
           routePath: func.routePath,
           methods: func.methods,
           keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+          cors: func.cors,
         }
       );
 

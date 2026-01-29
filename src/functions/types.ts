@@ -1,6 +1,25 @@
 import type { Context } from "@hono/hono";
 
 /**
+ * CORS configuration for a function endpoint.
+ * When present, CORS is automatically handled:
+ * - OPTIONS preflight requests are intercepted and responded to
+ * - CORS headers are added to all responses
+ */
+export interface CorsConfig {
+  /** Allowed origins. Use ["*"] for any origin, or specific URLs like ["https://app.example.com"] */
+  origins: string[];
+  /** Allow credentials (cookies, auth headers). Requires specific origins, not "*" */
+  credentials?: boolean;
+  /** Preflight cache duration in seconds (default: 86400 = 24 hours) */
+  maxAge?: number;
+  /** Additional headers the client is allowed to send */
+  allowHeaders?: string[];
+  /** Headers the client is allowed to read from response */
+  exposeHeaders?: string[];
+}
+
+/**
  * Metadata about the matched route
  */
 export interface RouteInfo {

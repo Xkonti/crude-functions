@@ -720,3 +720,140 @@ integrationTest("FunctionsService.removeRouteById is no-op for non-existent ID",
     await ctx.cleanup();
   }
 });
+
+// ============== CORS Configuration Tests ==============
+
+integrationTest("FunctionsService.addFunction creates route with CORS config", async () => {
+  const ctx = await TestSetupBuilder.create().withFunctions().build();
+  try {
+    await ctx.functionsService.addFunction({
+      name: "cors-test",
+      handler: "cors.ts",
+      routePath: "/cors-test",
+      methods: ["GET", "POST"],
+      cors: {
+        origins: ["https://example.com", "https://app.example.com"],
+        credentials: true,
+        maxAge: 3600,
+        allowHeaders: ["X-Custom-Header"],
+        exposeHeaders: ["X-Request-Id"],
+      },
+    });
+
+    const route = await ctx.functionsService.getByName("cors-test");
+    expect(route?.cors).toBeDefined();
+    expect(route?.cors?.origins).toEqual(["https://example.com", "https://app.example.com"]);
+    expect(route?.cors?.credentials).toBe(true);
+    expect(route?.cors?.maxAge).toBe(3600);
+    expect(route?.cors?.allowHeaders).toEqual(["X-Custom-Header"]);
+    expect(route?.cors?.exposeHeaders).toEqual(["X-Request-Id"]);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionsService.addFunction creates route without CORS config", async () => {
+  const ctx = await TestSetupBuilder.create().withFunctions().build();
+  try {
+    await ctx.functionsService.addFunction({
+      name: "no-cors",
+      handler: "no-cors.ts",
+      routePath: "/no-cors",
+      methods: ["GET"],
+      // No cors field
+    });
+
+    const route = await ctx.functionsService.getByName("no-cors");
+    expect(route?.cors).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionsService.updateFunction updates CORS config", async () => {
+  const ctx = await TestSetupBuilder.create().withFunctions().build();
+  try {
+    await ctx.functionsService.addFunction({
+      name: "cors-update-test",
+      handler: "cors.ts",
+      routePath: "/cors-update-test",
+      methods: ["GET"],
+      cors: {
+        origins: ["https://old.example.com"],
+      },
+    });
+
+    const route = await ctx.functionsService.getByName("cors-update-test");
+    await ctx.functionsService.updateFunction(recordIdToString(route!.id), {
+      name: "cors-update-test",
+      handler: "cors.ts",
+      routePath: "/cors-update-test",
+      methods: ["GET"],
+      cors: {
+        origins: ["https://new.example.com"],
+        credentials: true,
+        maxAge: 7200,
+      },
+    });
+
+    const updated = await ctx.functionsService.getByName("cors-update-test");
+    expect(updated?.cors?.origins).toEqual(["https://new.example.com"]);
+    expect(updated?.cors?.credentials).toBe(true);
+    expect(updated?.cors?.maxAge).toBe(7200);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionsService.updateFunction can remove CORS config", async () => {
+  const ctx = await TestSetupBuilder.create().withFunctions().build();
+  try {
+    await ctx.functionsService.addFunction({
+      name: "cors-remove-test",
+      handler: "cors.ts",
+      routePath: "/cors-remove-test",
+      methods: ["GET"],
+      cors: {
+        origins: ["https://example.com"],
+      },
+    });
+
+    const route = await ctx.functionsService.getByName("cors-remove-test");
+    expect(route?.cors).toBeDefined();
+
+    // Update without cors config to remove it
+    await ctx.functionsService.updateFunction(recordIdToString(route!.id), {
+      name: "cors-remove-test",
+      handler: "cors.ts",
+      routePath: "/cors-remove-test",
+      methods: ["GET"],
+      // No cors field - should remove it
+    });
+
+    const updated = await ctx.functionsService.getByName("cors-remove-test");
+    expect(updated?.cors).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionsService.addFunction creates route with wildcard CORS origin", async () => {
+  const ctx = await TestSetupBuilder.create().withFunctions().build();
+  try {
+    await ctx.functionsService.addFunction({
+      name: "wildcard-cors",
+      handler: "wildcard.ts",
+      routePath: "/wildcard-cors",
+      methods: ["GET"],
+      cors: {
+        origins: ["*"],
+      },
+    });
+
+    const route = await ctx.functionsService.getByName("wildcard-cors");
+    expect(route?.cors?.origins).toEqual(["*"]);
+    expect(route?.cors?.credentials).toBeUndefined();
+  } finally {
+    await ctx.cleanup();
+  }
+});

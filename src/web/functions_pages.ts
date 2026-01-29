@@ -1,5 +1,6 @@
 import { Hono } from "@hono/hono";
 import type { FunctionsService, FunctionDefinition, NewFunctionDefinition } from "../routes/functions_service.ts";
+import type { CorsConfig } from "../functions/types.ts";
 import {
   validateFunctionName,
   validateFunctionPath,
@@ -1153,12 +1154,53 @@ function renderFunctionForm(
         ${ALL_METHODS.map(
           (method) => `
           <label>
-            <input type="checkbox" name="methods" value="${method}"
+            <input type="checkbox" name="methods" value="${method}" id="method-${method}"
+                   onchange="toggleCorsVisibility()"
                    ${(route.methods ?? []).includes(method) ? "checked" : ""}>
             ${method}
           </label>
         `
         ).join("")}
+      </fieldset>
+      <fieldset id="corsFieldset" style="${(route.methods ?? []).includes("OPTIONS") ? "" : "display:none"}">
+        <legend>CORS Configuration</legend>
+        <p style="margin: 0 0 1rem 0; color: #6c757d; font-size: 0.9em;">
+          <em>When enabled, the function will automatically respond to CORS preflight requests and add CORS headers to responses.</em>
+        </p>
+        <label>
+          <input type="checkbox" name="corsEnabled" id="corsEnabled"
+                 ${route.cors ? "checked" : ""}
+                 onchange="document.getElementById('corsConfig').style.display = this.checked ? 'block' : 'none'">
+          Enable CORS (auto-handle OPTIONS preflight)
+        </label>
+        <div id="corsConfig" style="${route.cors ? "" : "display:none"}; margin-top: 1rem;">
+          <label>
+            Allowed Origins (one per line, or * for any)
+            <textarea name="corsOrigins" rows="3" placeholder="https://example.com&#10;https://app.example.com">${escapeHtml(route.cors?.origins?.join("\n") ?? "*")}</textarea>
+            <small>Enter one origin URL per line, or use * to allow any origin</small>
+          </label>
+          <label>
+            <input type="checkbox" name="corsCredentials"
+                   ${route.cors?.credentials ? "checked" : ""}>
+            Allow Credentials (cookies, auth headers)
+          </label>
+          <small style="display: block; margin-top: -0.5rem; margin-bottom: 1rem;">Note: Cannot be enabled when using * for origins</small>
+          <label>
+            Preflight Cache (seconds)
+            <input type="number" name="corsMaxAge" value="${route.cors?.maxAge ?? 86400}" min="0" placeholder="86400">
+            <small>How long browsers can cache preflight responses (default: 86400 = 24 hours)</small>
+          </label>
+          <label>
+            Allow Headers (one per line, optional)
+            <textarea name="corsAllowHeaders" rows="2" placeholder="X-Custom-Header&#10;X-Another-Header">${escapeHtml(route.cors?.allowHeaders?.join("\n") ?? "")}</textarea>
+            <small>Additional request headers the client is allowed to send</small>
+          </label>
+          <label>
+            Expose Headers (one per line, optional)
+            <textarea name="corsExposeHeaders" rows="2" placeholder="X-Request-Id&#10;X-Response-Time">${escapeHtml(route.cors?.exposeHeaders?.join("\n") ?? "")}</textarea>
+            <small>Response headers the client is allowed to read</small>
+          </label>
+        </div>
       </fieldset>
       <fieldset>
         <legend>Required API Key Groups</legend>
@@ -1201,6 +1243,17 @@ function renderFunctionForm(
         <a href="/web/functions" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
+
+    <script>
+    // Toggle CORS fieldset visibility based on OPTIONS method checkbox
+    function toggleCorsVisibility() {
+      const optionsCheckbox = document.getElementById('method-OPTIONS');
+      const corsFieldset = document.getElementById('corsFieldset');
+      if (optionsCheckbox && corsFieldset) {
+        corsFieldset.style.display = optionsCheckbox.checked ? '' : 'none';
+      }
+    }
+    </script>
 
     ${isEdit ? `
     ${secretScripts()}
@@ -1292,6 +1345,62 @@ function parseFormData(formData: FormData): {
   // Keys are optional - only include if any selected
   const keys = keysArray.length > 0 ? keysArray : undefined;
 
+  // Parse CORS configuration
+  const corsEnabled = formData.get("corsEnabled") === "on";
+  let cors: CorsConfig | undefined = undefined;
+
+  if (corsEnabled) {
+    const originsText = formData.get("corsOrigins")?.toString().trim() ?? "*";
+    const origins = originsText
+      .split("\n")
+      .map((o) => o.trim())
+      .filter((o) => o.length > 0);
+
+    if (origins.length === 0) {
+      origins.push("*");
+    }
+
+    const credentials = formData.get("corsCredentials") === "on";
+    const maxAgeStr = formData.get("corsMaxAge")?.toString().trim();
+    const maxAge = maxAgeStr ? parseInt(maxAgeStr, 10) : 86400;
+
+    const allowHeadersText = formData.get("corsAllowHeaders")?.toString().trim() ?? "";
+    const allowHeaders = allowHeadersText
+      .split("\n")
+      .map((h) => h.trim())
+      .filter((h) => h.length > 0);
+
+    const exposeHeadersText = formData.get("corsExposeHeaders")?.toString().trim() ?? "";
+    const exposeHeaders = exposeHeadersText
+      .split("\n")
+      .map((h) => h.trim())
+      .filter((h) => h.length > 0);
+
+    // Validate: credentials cannot be true with wildcard origin
+    if (credentials && origins.includes("*")) {
+      errors.push("CORS credentials cannot be enabled when using wildcard (*) origin");
+    }
+
+    // Validate origins format
+    for (const origin of origins) {
+      if (origin !== "*") {
+        try {
+          new URL(origin);
+        } catch {
+          errors.push(`Invalid CORS origin URL: ${origin}`);
+        }
+      }
+    }
+
+    cors = {
+      origins,
+      credentials: credentials || undefined,
+      maxAge: isNaN(maxAge) ? 86400 : maxAge,
+      allowHeaders: allowHeaders.length > 0 ? allowHeaders : undefined,
+      exposeHeaders: exposeHeaders.length > 0 ? exposeHeaders : undefined,
+    };
+  }
+
   const route: NewFunctionDefinition = {
     name,
     description,
@@ -1299,6 +1408,7 @@ function parseFormData(formData: FormData): {
     routePath,
     methods,
     keys,
+    cors,
   };
 
   return { route, errors };
