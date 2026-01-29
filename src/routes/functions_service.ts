@@ -4,6 +4,7 @@ import type { SurrealConnectionFactory } from "../database/surreal_connection_fa
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { CorsConfig } from "../functions/types.ts";
 import { normalizeRoutePattern } from "../functions/route_helpers.ts";
+import { parseSurrealError } from "../database/surreal_error_parser.ts";
 
 /**
  * Represents a function definition.
@@ -244,15 +245,22 @@ export class FunctionsService {
           }
         );
       } catch (error) {
-        // DEBUG: Print error details to understand SurrealDB error format
-        console.error("SurrealDB CREATE error:", error);
-        console.error("Error type:", typeof error);
-        console.error("Error name:", (error as Error)?.name);
-        console.error("Error message:", (error as Error)?.message);
-        console.error("Error constructor:", (error as Error)?.constructor?.name);
-        if (error && typeof error === "object") {
-          console.error("Error keys:", Object.keys(error));
-          console.error("Full error object:", JSON.stringify(error, null, 2));
+        const parsed = parseSurrealError(error);
+        if (parsed.type === "index_violation") {
+          if (parsed.indexName === "unique_functionDef_name") {
+            throw new Error(`Function with name '${func.name}' already exists`);
+          }
+          if (parsed.indexName === "idx_functionDef_route_methods") {
+            throw new Error(`Route '${func.routePath}' with these methods already exists`);
+          }
+        }
+        if (parsed.type === "event_error" && parsed.code === "ROUTE_METHOD_COLLISION") {
+          const route = parsed.fields.ROUTE ?? func.routePath;
+          const methods = parsed.fields.METHODS ?? "unknown";
+          const existingFunc = parsed.fields.FUNCTION ?? "another function";
+          throw new Error(
+            `Route '${route}' with method(s) ${methods} already exists (function: '${existingFunc}')`
+          );
         }
         throw error;
       }
@@ -347,15 +355,22 @@ export class FunctionsService {
           }
         );
       } catch (error) {
-        // DEBUG: Print error details to understand SurrealDB error format
-        console.error("SurrealDB UPDATE error:", error);
-        console.error("Error type:", typeof error);
-        console.error("Error name:", (error as Error)?.name);
-        console.error("Error message:", (error as Error)?.message);
-        console.error("Error constructor:", (error as Error)?.constructor?.name);
-        if (error && typeof error === "object") {
-          console.error("Error keys:", Object.keys(error));
-          console.error("Full error object:", JSON.stringify(error, null, 2));
+        const parsed = parseSurrealError(error);
+        if (parsed.type === "index_violation") {
+          if (parsed.indexName === "unique_functionDef_name") {
+            throw new Error(`Function with name '${func.name}' already exists`);
+          }
+          if (parsed.indexName === "idx_functionDef_route_methods") {
+            throw new Error(`Route '${func.routePath}' with these methods already exists`);
+          }
+        }
+        if (parsed.type === "event_error" && parsed.code === "ROUTE_METHOD_COLLISION") {
+          const route = parsed.fields.ROUTE ?? func.routePath;
+          const methods = parsed.fields.METHODS ?? "unknown";
+          const existingFunc = parsed.fields.FUNCTION ?? "another function";
+          throw new Error(
+            `Route '${route}' with method(s) ${methods} already exists (function: '${existingFunc}')`
+          );
         }
         throw error;
       }

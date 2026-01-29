@@ -31,12 +31,8 @@ DEFINE FIELD IF NOT EXISTS cors ON TABLE functionDef TYPE option<object> DEFAULT
   -- Optional: headers the client is allowed to read from response
   DEFINE FIELD IF NOT EXISTS cors.exposeHeaders ON TABLE functionDef TYPE option<array<string>>;
 
-
 -- Unique name constraint
 DEFINE INDEX IF NOT EXISTS unique_functionDef_name ON functionDef FIELDS name UNIQUE;
-
--- Index for route path lookups (used by FunctionRouter)
-DEFINE INDEX IF NOT EXISTS idx_functionDef_path ON functionDef FIELDS routePath;
 
 -- Unique constraint on route+methods combination (prevents exact duplicates)
 DEFINE INDEX IF NOT EXISTS idx_functionDef_route_methods ON functionDef FIELDS normalizedRoute, methods UNIQUE;
@@ -50,17 +46,18 @@ DEFINE EVENT IF NOT EXISTS delete_functionDef ON TABLE functionDef WHEN $event =
 -- Prevent overlapping HTTP methods on same normalized route
 -- Example: if one function has {GET, POST} and another tries {POST, PUT} on same route,
 -- both define POST which is a collision
+-- Error format uses tagged values for easy parsing: [TAG] value [TAG]
 DEFINE EVENT OVERWRITE check_route_method_overlap ON TABLE functionDef
 WHEN $event = "CREATE" OR $event = "UPDATE"
 THEN {
     LET $others = SELECT * FROM functionDef
         WHERE normalizedRoute = $value.normalizedRoute
-        AND id != $value.id;
+        AND <string>id != <string>$value.id;
 
     FOR $other IN $others {
         LET $intersection = $value.methods.intersect($other.methods);
         IF $intersection.len() > 0 {
-            THROW "Route collision: methods " + <string>$intersection + " already defined for route " + $value.normalizedRoute + " by function " + <string>$other.name;
+            THROW "[CODE] ROUTE_METHOD_COLLISION [CODE] Route collision on [ROUTE] " + $value.normalizedRoute + " [ROUTE] for methods [METHODS] " + <string>$intersection + " [METHODS] already defined by function [FUNCTION] " + <string>$other.name + " [FUNCTION]";
         };
     };
 };
