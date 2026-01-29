@@ -54,13 +54,13 @@ DEFINE EVENT OVERWRITE check_route_method_overlap ON TABLE functionDef
 WHEN $event = "CREATE" OR $event = "UPDATE"
 THEN {
     LET $others = SELECT * FROM functionDef
-        WHERE normalizedRoute = $after.normalizedRoute
-        AND id != $after.id;
+        WHERE normalizedRoute = $value.normalizedRoute
+        AND id != $value.id;
 
     FOR $other IN $others {
-        LET $intersection = $after.methods.intersect($other.methods);
+        LET $intersection = $value.methods.intersect($other.methods);
         IF $intersection.len() > 0 {
-            THROW "Route collision: methods " + <string>$intersection + " already defined for route " + $after.normalizedRoute + " by function " + <string>$other.name;
+            THROW "Route collision: methods " + <string>$intersection + " already defined for route " + $value.normalizedRoute + " by function " + <string>$other.name;
         };
     };
 };

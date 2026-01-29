@@ -171,16 +171,16 @@ export class FunctionsService {
 
   private recordToFunctionDef(record: FunctionDefRecord): FunctionDefinition {
     // SurrealDB returns set<string> as a JavaScript Set, convert to array for interface compatibility
-    // const methods = record.methods instanceof Set
-    //   ? Array.from(record.methods)
-    //   : record.methods;
+    const methods = record.methods instanceof Set
+      ? Array.from(record.methods)
+      : record.methods;
 
     const func: FunctionDefinition = {
       id: record.id,
       name: record.name,
       handler: record.handler,
       routePath: record.routePath,
-      methods: record.methods,
+      methods: methods,
       enabled: record.enabled,
     };
 

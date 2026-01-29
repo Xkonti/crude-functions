@@ -24,17 +24,20 @@ FOR $fun IN $functionDefs {
 DEFINE INDEX OVERWRITE idx_functionDef_route_methods ON functionDef FIELDS normalizedRoute, methods UNIQUE;
 
 -- Event to prevent overlapping HTTP methods on same normalized route
+-- Exclude by name (which has unique constraint) since id comparison doesn't work reliably in events
 DEFINE EVENT OVERWRITE check_route_method_overlap ON TABLE functionDef
 WHEN $event = "CREATE" OR $event = "UPDATE"
 THEN {
+    -- Query for other functions with same route, excluding current by name
+    -- Name-based exclusion works for both CREATE and UPDATE
     LET $others = SELECT * FROM functionDef
-        WHERE normalizedRoute = $after.normalizedRoute
-        AND id != $after.id;
+        WHERE normalizedRoute = $value.normalizedRoute
+        AND name != $value.name;
 
     FOR $other IN $others {
-        LET $intersection = $after.methods.intersect($other.methods);
+        LET $intersection = $value.methods.intersect($other.methods);
         IF $intersection.len() > 0 {
-            THROW "Route collision: methods " + <string>$intersection + " already defined for route " + $after.normalizedRoute + " by function " + <string>$other.name;
+            THROW "Route collision: methods " + <string>$intersection + " already defined for route " + $value.normalizedRoute + " by function " + <string>$other.name;
         };
     };
 };
