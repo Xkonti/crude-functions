@@ -3,6 +3,7 @@ import { RecordId } from "surrealdb";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { CorsConfig } from "../functions/types.ts";
+import { normalizeRoutePattern } from "../functions/route_helpers.ts";
 
 /**
  * Represents a function definition.
@@ -232,12 +233,14 @@ export class FunctionsService {
 
       // Create the function definition
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
+      const normalizedRoute = normalizeRoutePattern(func.routePath);
       const [records] = await db.query<[FunctionDefRecord[]]>(
         `CREATE functionDef SET
           name = $name,
           description = $description,
           handler = $handler,
           routePath = $routePath,
+          normalizedRoute = $normalizedRoute,
           methods = $methods,
           keys = $keys,
           cors = $cors,
@@ -247,6 +250,7 @@ export class FunctionsService {
           description: func.description,
           handler: func.handler,
           routePath: func.routePath,
+          normalizedRoute: normalizedRoute,
           methods: func.methods,
           keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
           cors: func.cors,
@@ -338,12 +342,14 @@ export class FunctionsService {
 
       // Update the function definition
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
+      const normalizedRoute = normalizeRoutePattern(func.routePath);
       await db.query(
         `UPDATE $recordId SET
           name = $name,
           description = $description,
           handler = $handler,
           routePath = $routePath,
+          normalizedRoute = $normalizedRoute,
           methods = $methods,
           keys = $keys,
           cors = $cors`,
@@ -353,6 +359,7 @@ export class FunctionsService {
           description: func.description,
           handler: func.handler,
           routePath: func.routePath,
+          normalizedRoute: normalizedRoute,
           methods: func.methods,
           keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
           cors: func.cors,

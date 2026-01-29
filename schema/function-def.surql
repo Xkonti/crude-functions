@@ -6,6 +6,7 @@ DEFINE FIELD IF NOT EXISTS name ON TABLE functionDef TYPE string;
 DEFINE FIELD IF NOT EXISTS description ON TABLE functionDef TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS handler ON TABLE functionDef TYPE string;
 DEFINE FIELD IF NOT EXISTS routePath ON TABLE functionDef TYPE string;
+DEFINE FIELD IF NOT EXISTS normalizedRoute ON TABLE functionDef TYPE string;  -- Normalized version of routePath for collision detection
 DEFINE FIELD IF NOT EXISTS methods ON TABLE functionDef TYPE array<string>;
 DEFINE FIELD IF NOT EXISTS keys ON TABLE functionDef TYPE option<array<string>>;  -- API key group IDs
 DEFINE FIELD IF NOT EXISTS enabled ON TABLE functionDef TYPE bool DEFAULT true;

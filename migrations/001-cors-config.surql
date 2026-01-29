@@ -20,3 +20,9 @@ DEFINE FIELD IF NOT EXISTS cors.credentials ON TABLE functionDef TYPE option<boo
 DEFINE FIELD IF NOT EXISTS cors.maxAge ON TABLE functionDef TYPE option<int>;
 DEFINE FIELD IF NOT EXISTS cors.allowHeaders ON TABLE functionDef TYPE option<array<string>>;
 DEFINE FIELD IF NOT EXISTS cors.exposeHeaders ON TABLE functionDef TYPE option<array<string>>;
+
+-- Normalized route pattern for collision detection
+-- This field stores the canonical form of routePath where all parameter names
+-- are replaced with wildcards while preserving regex constraints.
+-- Used to detect route collisions (e.g., /users/:id vs /users/:userId both normalize to /users/*)
+DEFINE FIELD IF NOT EXISTS normalizedRoute ON TABLE functionDef TYPE string;
