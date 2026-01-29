@@ -170,6 +170,11 @@ export class FunctionsService {
   }
 
   private recordToFunctionDef(record: FunctionDefRecord): FunctionDefinition {
+    // SurrealDB returns set<string> as a JavaScript Set, convert to array for interface compatibility
+    // const methods = record.methods instanceof Set
+    //   ? Array.from(record.methods)
+    //   : record.methods;
+
     const func: FunctionDefinition = {
       id: record.id,
       name: record.name,
@@ -207,6 +212,8 @@ export class FunctionsService {
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
       // Validate: check for duplicate name
+      // TODO: Probably can move this check to the DB and let it provide decent error messages on it's own
+      //       as it's just a duplicate of the logic that already exists in the DB anyway
       const [existingByName] = await db.query<[FunctionDefRecord[]]>(
         "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
         { name: func.name }
@@ -215,15 +222,25 @@ export class FunctionsService {
         throw new Error(`Function with name '${func.name}' already exists`);
       }
 
-      // Validate: check for duplicate routePath+method combinations
+      // Validate: check for duplicate normalizedRoute+method combinations
+      // normalizedRoute is used for collision detection (e.g., /users/:id and /users/:userId both normalize to /users/*)
+      // TODO: Probably can move this check to the DB and let it provide decent error messages on it's own
+      //       as it's just a duplicate of the logic that already exists in the DB anyway
+      const normalizedRoute = normalizeRoutePattern(func.routePath);
       const [existingFunctions] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT name, methods FROM functionDef WHERE routePath = $routePath",
-        { routePath: func.routePath }
+        "SELECT name, methods FROM functionDef WHERE normalizedRoute = $normalizedRoute",
+        { normalizedRoute }
       );
 
+      // TODO: Probably can move this check to the DB and let it provide decent error messages on it's own
+      //       as it's just a duplicate of the logic that already exists in the DB anyway
       for (const existing of existingFunctions ?? []) {
+        // SurrealDB returns set<string> as a JavaScript Set, convert to array for comparison
+        const existingMethods = existing.methods instanceof Set
+          ? Array.from(existing.methods)
+          : existing.methods;
         for (const method of func.methods) {
-          if (existing.methods.includes(method)) {
+          if (existingMethods.includes(method)) {
             throw new Error(
               `Route '${func.routePath}' with method '${method}' already exists (function: '${existing.name}')`
             );
@@ -233,7 +250,6 @@ export class FunctionsService {
 
       // Create the function definition
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
-      const normalizedRoute = normalizeRoutePattern(func.routePath);
       const [records] = await db.query<[FunctionDefRecord[]]>(
         `CREATE functionDef SET
           name = $name,
@@ -241,7 +257,7 @@ export class FunctionsService {
           handler = $handler,
           routePath = $routePath,
           normalizedRoute = $normalizedRoute,
-          methods = $methods,
+          methods = <set>$methods,
           keys = $keys,
           cors = $cors,
           enabled = true`,
@@ -324,15 +340,21 @@ export class FunctionsService {
         throw new Error(`Function with name '${func.name}' already exists`);
       }
 
-      // Validate: check for duplicate routePath+method combinations (excluding current function)
+      // Validate: check for duplicate normalizedRoute+method combinations (excluding current function)
+      // normalizedRoute is used for collision detection (e.g., /users/:id and /users/:userId both normalize to /users/*)
+      const normalizedRoute = normalizeRoutePattern(func.routePath);
       const [existingFunctions] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT name, methods FROM functionDef WHERE routePath = $routePath AND id != $recordId",
-        { routePath: func.routePath, recordId }
+        "SELECT name, methods FROM functionDef WHERE normalizedRoute = $normalizedRoute AND id != $recordId",
+        { normalizedRoute, recordId }
       );
 
       for (const existingFunc of existingFunctions ?? []) {
+        // SurrealDB returns set<string> as a JavaScript Set, convert to array for comparison
+        const existingMethods = existingFunc.methods instanceof Set
+          ? Array.from(existingFunc.methods)
+          : existingFunc.methods;
         for (const method of func.methods) {
-          if (existingFunc.methods.includes(method)) {
+          if (existingMethods.includes(method)) {
             throw new Error(
               `Route '${func.routePath}' with method '${method}' already exists (function: '${existingFunc.name}')`
             );
@@ -342,7 +364,6 @@ export class FunctionsService {
 
       // Update the function definition
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
-      const normalizedRoute = normalizeRoutePattern(func.routePath);
       await db.query(
         `UPDATE $recordId SET
           name = $name,
@@ -350,7 +371,7 @@ export class FunctionsService {
           handler = $handler,
           routePath = $routePath,
           normalizedRoute = $normalizedRoute,
-          methods = $methods,
+          methods = <set>$methods,
           keys = $keys,
           cors = $cors`,
         {
