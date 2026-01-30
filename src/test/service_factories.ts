@@ -59,14 +59,25 @@ export interface FactoryContext {
 export interface CoreInfrastructureOptions {
   /** Whether to run SurrealDB migrations (default: true) */
   runSurrealMigrations?: boolean;
+  /**
+   * Use a dedicated SurrealDB instance instead of the shared one.
+   *
+   * Set this to true for tests that need complete isolation, such as:
+   * - Tests that modify namespaces or databases
+   * - Tests that test custom database users
+   * - Tests that need to restart SurrealDB during the test
+   *
+   * Default: false (use shared instance for better performance)
+   */
+  useDedicatedSurreal?: boolean;
 }
 
 /**
  * Creates the base infrastructure: temp directory, code directory,
- * and shared SurrealDB connection with isolated namespace.
+ * and SurrealDB connection.
  *
- * SurrealDB is shared across all tests - each test gets a unique namespace for isolation.
- * This dramatically improves test performance by avoiding process startup overhead per test.
+ * By default, uses a shared SurrealDB instance with namespace isolation.
+ * Set `useDedicatedSurreal: true` for tests that need complete isolation.
  *
  * @param migrationsDir - Directory containing migration files
  * @param options - Configuration options
@@ -81,24 +92,62 @@ export async function createCoreInfrastructure(
   surrealTestContext: SharedSurrealTestContext;
   surrealDb: Surreal;
   surrealFactory: SurrealConnectionFactory;
+  /** Cleanup function for dedicated instance (undefined for shared) */
+  dedicatedCleanup?: () => Promise<void>;
 }> {
-  const { runSurrealMigrations = true } = options;
+  const { runSurrealMigrations = true, useDedicatedSurreal = false } = options;
 
   // Create temp directory for test isolation
   const tempDir = await Deno.makeTempDir();
   const codeDir = `${tempDir}/code`;
   await Deno.mkdir(codeDir, { recursive: true });
 
-  // Get shared SurrealDB context with unique namespace
-  const manager = SharedSurrealManager.getInstance();
-  const surrealTestContext = await manager.createTestContext();
+  let surrealTestContext: SharedSurrealTestContext;
+  let dedicatedCleanup: (() => Promise<void>) | undefined;
+
+  if (useDedicatedSurreal) {
+    // Create dedicated SurrealDB instance
+    const dedicated = await SharedSurrealManager.createDedicatedInstance();
+    dedicatedCleanup = dedicated.cleanup;
+
+    // Create a namespace for this test within the dedicated instance
+    const namespace = `test_${crypto.randomUUID().replace(/-/g, "_")}`;
+    const database = namespace;
+
+    // Define namespace and database
+    await dedicated.db.query(`DEFINE NAMESPACE ${namespace}`);
+    await dedicated.db.query(`USE NAMESPACE ${namespace}; DEFINE DATABASE ${database}`);
+
+    // Create a factory configured for this namespace
+    const factory = new SurrealConnectionFactory({
+      connectionUrl: dedicated.connectionUrl,
+      username: "root",
+      password: "root",
+      defaultNamespace: namespace,
+      defaultDatabase: database,
+    });
+
+    // Create a connection for this namespace
+    const db = await factory.connect();
+
+    surrealTestContext = {
+      namespace,
+      database,
+      db,
+      factory,
+    };
+  } else {
+    // Get shared SurrealDB context with unique namespace
+    const manager = SharedSurrealManager.getInstance();
+    surrealTestContext = await manager.createTestContext();
+  }
 
   // Initialize the connection pool for this test's factory
   // Use shorter idle timeout for tests (30 seconds)
   surrealTestContext.factory.initializePool({ idleTimeoutMs: 30000 });
 
   // Run SurrealDB migrations in this namespace if requested
-  // Uses factory's default namespace/database (set by SharedSurrealManager)
+  // Uses factory's default namespace/database
   if (runSurrealMigrations) {
     const surrealMigrationService = new SurrealMigrationService({
       connectionFactory: surrealTestContext.factory,
@@ -113,6 +162,7 @@ export async function createCoreInfrastructure(
     surrealTestContext,
     surrealDb: surrealTestContext.db,
     surrealFactory: surrealTestContext.factory,
+    dedicatedCleanup,
   };
 }
 
@@ -474,13 +524,14 @@ export function createCodeSourceService(
  * Creates a cleanup function for the test context.
  * Handles proper teardown order: namespace deletion before temp dir removal.
  *
- * Note: SurrealDB process is shared and managed by SharedSurrealManager.
- * We only clean up the namespace here, not the process.
+ * For shared instances: deletes namespace, shared process stays running.
+ * For dedicated instances: stops the dedicated SurrealDB process.
  */
 export function createCleanupFunction(
   tempDir: string,
   surrealTestContext: SharedSurrealTestContext,
-  consoleLogService?: ConsoleLogService
+  consoleLogService?: ConsoleLogService,
+  dedicatedCleanup?: () => Promise<void>
 ): () => Promise<void> {
   return async () => {
     // 1. Shutdown console log service if present (flush pending logs)
@@ -491,12 +542,23 @@ export function createCleanupFunction(
     // 2. Close SurrealDB connection pool for this test
     await surrealTestContext.factory.closePool();
 
-    // 3. Delete SurrealDB namespace (fast cleanup, shared process stays running)
-    const manager = SharedSurrealManager.getInstance();
-    await manager.deleteTestContext(
-      surrealTestContext.namespace,
-      surrealTestContext.db
-    );
+    // 3. Clean up SurrealDB
+    if (dedicatedCleanup) {
+      // Dedicated instance: close connection and stop the process
+      try {
+        await surrealTestContext.db.close();
+      } catch {
+        // Ignore close errors
+      }
+      await dedicatedCleanup();
+    } else {
+      // Shared instance: delete namespace (process stays running)
+      const manager = SharedSurrealManager.getInstance();
+      await manager.deleteTestContext(
+        surrealTestContext.namespace,
+        surrealTestContext.db
+      );
+    }
 
     // 4. Remove temp directory
     try {

@@ -29,6 +29,7 @@
 
 import type { Surreal, RecordId } from "surrealdb";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import type { SurrealProcessManager } from "../database/surreal_process_manager.ts";
 import type { VersionedEncryptionService } from "../encryption/versioned_encryption_service.ts";
 import type { HashService } from "../encryption/hash_service.ts";
 import type { EncryptionKeyFile } from "../encryption/key_storage_types.ts";
@@ -79,6 +80,34 @@ export interface BaseTestContext {
    * Cleanup function to tear down all resources.
    * Call this in a finally block after tests complete.
    * Removes the SurrealDB namespace (shared process stays running).
+   */
+  cleanup: () => Promise<void>;
+}
+
+/**
+ * Context for a dedicated SurrealDB instance.
+ *
+ * Used for special tests that need their own isolated SurrealDB process
+ * (e.g., tests that modify namespaces, test custom DB users, or test
+ * error handling when DB is unavailable).
+ *
+ * Created via SharedSurrealManager.createDedicatedInstance().
+ * The cleanup function MUST be called to stop the SurrealDB process.
+ */
+export interface DedicatedSurrealContext {
+  /** The SurrealDB process manager for this instance */
+  processManager: SurrealProcessManager;
+  /** Connection factory configured for this instance */
+  factory: SurrealConnectionFactory;
+  /** Raw Surreal SDK connection */
+  db: Surreal;
+  /** WebSocket connection URL */
+  connectionUrl: string;
+  /** Port number the instance is running on */
+  port: number;
+  /**
+   * Cleanup function - stops the SurrealDB process.
+   * MUST be called in a finally block to prevent process leaks.
    */
   cleanup: () => Promise<void>;
 }
