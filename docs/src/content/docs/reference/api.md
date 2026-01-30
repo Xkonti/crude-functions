@@ -233,10 +233,10 @@ curl -X POST \
 | GET | `/api/users` | List all users |
 | GET | `/api/users/:id` | Get a user by ID |
 | POST | `/api/users` | Create a new user |
-| PUT | `/api/users/:id` | Update a user (password, roles) |
+| PUT | `/api/users/:id` | Update a user (password) |
 | DELETE | `/api/users/:id` | Delete a user |
 
-**Note:** Cannot delete your own account. First user created has permanent admin access.
+**Note:** Cannot delete your own account. The first user created has special administrative privileges.
 
 ### Logs
 

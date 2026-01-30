@@ -938,13 +938,23 @@ export class CodeSourceService {
       );
     }
 
-    // Validate URL format (basic check)
-    if (
-      !s.url.startsWith("https://") &&
-      !s.url.startsWith("git@")
-    ) {
+    // Validate URL format - only HTTPS is supported
+    // SSH URLs (git@github.com:user/repo.git) are not supported because
+    // isomorphic-git only supports HTTP/HTTPS protocols
+    if (!s.url.startsWith("https://")) {
+      if (s.url.startsWith("git@") || s.url.startsWith("ssh://")) {
+        throw new InvalidSourceConfigError(
+          "SSH URLs are not supported. Please use HTTPS URL instead (e.g., https://github.com/user/repo.git). " +
+          "For private repositories, use the Authentication Token field with a personal access token.",
+        );
+      }
+      if (s.url.startsWith("git://")) {
+        throw new InvalidSourceConfigError(
+          "The git:// protocol is not supported. Please use HTTPS URL instead (e.g., https://github.com/user/repo.git).",
+        );
+      }
       throw new InvalidSourceConfigError(
-        "Git URL must start with https:// or git@",
+        "Git URL must use HTTPS (e.g., https://github.com/user/repo.git). SSH and git:// protocols are not supported.",
       );
     }
 

@@ -11,7 +11,6 @@ export function createUserRoutes(service: UserService): Hono {
       password?: string;
       passwordConfirmation?: string;
       name?: string;
-      roles?: string[];
     };
 
     try {
@@ -49,28 +48,24 @@ export function createUserRoutes(service: UserService): Hono {
     }
 
     try {
-      // Convert roles array to comma-separated string for service
-      const roleString = body.roles?.join(",");
-
       // Build create data - service will handle removing undefined fields
       const id = await service.createUser(
         {
           email: body.email,
           password: body.password,
           name: body.name,
-          role: roleString,
         },
         new Headers()  // Better Auth admin API doesn't need request headers for user creation
       );
 
-      return c.json(
-        {
-          id,
-          email: body.email,
-          roles: body.roles || [],
-        },
-        201
-      );
+      // Fetch created user and strip roles from response
+      const user = await service.getById(id);
+      if (!user) {
+        return c.json({ error: "Failed to retrieve created user" }, 500);
+      }
+      const { roles: _roles, ...publicUser } = user;
+
+      return c.json(publicUser, 201);
     } catch (error) {
       if (error instanceof Error) {
         if (error.message.includes("already exists")) {
@@ -84,7 +79,9 @@ export function createUserRoutes(service: UserService): Hono {
   // GET /api/users - List all users
   routes.get("/", async (c) => {
     const users = await service.getAll();
-    return c.json({ users });
+    // Strip roles from response
+    const publicUsers = users.map(({ roles: _roles, ...user }) => user);
+    return c.json({ users: publicUsers });
   });
 
   // GET /api/users/:id - Get a single user by ID
@@ -96,7 +93,9 @@ export function createUserRoutes(service: UserService): Hono {
       return c.json({ error: "User not found" }, 404);
     }
 
-    return c.json(user);
+    // Strip roles from response
+    const { roles: _roles, ...publicUser } = user;
+    return c.json(publicUser);
   });
 
   // PUT /api/users/:id - Update a user
@@ -106,7 +105,6 @@ export function createUserRoutes(service: UserService): Hono {
     let body: {
       password?: string;
       passwordConfirmation?: string;
-      roles?: string[];
     };
 
     try {
@@ -137,14 +135,10 @@ export function createUserRoutes(service: UserService): Hono {
     }
 
     try {
-      // Convert roles to comma-separated string for service
-      const roleString = body.roles !== undefined ? body.roles.join(",") : undefined;
-
       await service.updateUser(
         id,
         {
           password: body.password,
-          role: roleString,
         },
         new Headers()  // Better Auth admin API doesn't need request headers
       );

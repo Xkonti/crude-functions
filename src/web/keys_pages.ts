@@ -88,7 +88,6 @@ export function createKeysPages(
                     : `<table>
                   <thead>
                     <tr>
-                      <th>ID</th>
                       <th>Name</th>
                       <th>Value</th>
                       <th>Description</th>
@@ -100,7 +99,6 @@ export function createKeysPages(
                       .map(
                         (key) => `
                       <tr>
-                        <td><code>${key.id}</code></td>
                         <td><strong>${escapeHtml(key.name)}</strong></td>
                         <td class="secret-value">
                           <span class="masked">••••••••</span>

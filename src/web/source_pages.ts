@@ -94,6 +94,55 @@ export function createSourcePages(
   }
 
   /**
+   * Checks if a file path is hidden.
+   * A path is hidden if any segment starts with a dot.
+   * Examples: .env, .git/config, config/.private/key.json
+   */
+  function isHiddenFile(path: string): boolean {
+    const segments = path.split('/');
+    return segments.some(segment => segment.startsWith('.'));
+  }
+
+  /**
+   * Checks if a file is a Git-related file.
+   * Git files include: .git/* (entire directory), .gitignore, .gitkeep, .gitattributes
+   */
+  function isGitFile(path: string): boolean {
+    // Check if path starts with .git/ (contents of .git directory)
+    if (path.startsWith('.git/')) {
+      return true;
+    }
+
+    // Check if path is one of the specific git files
+    const gitFiles = ['.gitignore', '.gitkeep', '.gitattributes'];
+    return gitFiles.includes(path);
+  }
+
+  /**
+   * Builds URL with query parameters for filter toggles.
+   * Preserves other query parameters that should persist.
+   */
+  function buildFilterUrl(
+    sourceId: string,
+    currentShowHidden: boolean,
+    currentShowGit: boolean,
+    toggleFilter: "hidden" | "git"
+  ): string {
+    const baseUrl = `/web/code/sources/${sourceId}`;
+    const params: string[] = [];
+
+    // Toggle the requested filter
+    const newShowHidden = toggleFilter === "hidden" ? !currentShowHidden : currentShowHidden;
+    const newShowGit = toggleFilter === "git" ? !currentShowGit : currentShowGit;
+
+    // Add params only if they're true (default is false)
+    if (newShowHidden) params.push("showhidden=true");
+    if (newShowGit) params.push("showgit=true");
+
+    return params.length > 0 ? `${baseUrl}?${params.join("&")}` : baseUrl;
+  }
+
+  /**
    * Sync status display section
    */
   function syncStatusSection(source: CodeSource): string {
@@ -156,9 +205,9 @@ export function createSourcePages(
       // Action buttons (icons)
       const csrfToken = getCsrfToken(c);
       const syncButton = source.type === "git"
-        ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline; margin: 0;">
+        ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline-block; margin: 0; width: auto;">
             ${csrfInput(csrfToken)}
-            <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="Sync" ${source.lastSyncStartedAt ? "disabled" : ""}>
+            <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1; width: auto; min-width: auto;" title="Sync" ${source.lastSyncStartedAt ? "disabled" : ""}>
               🔄
             </button>
           </form>`
@@ -358,7 +407,7 @@ export function createSourcePages(
           <label>
             Repository URL *
             <input type="url" name="url" required placeholder="https://github.com/user/repo.git">
-            <small>HTTPS URL to the Git repository</small>
+            <small>HTTPS URL to the Git repository. SSH URLs (git@...) are not supported.</small>
           </label>
 
           <label>
@@ -581,13 +630,44 @@ export function createSourcePages(
 
     const success = c.req.query("success");
     const error = c.req.query("error");
+    const showHidden = c.req.query("showhidden") === "true";
+    const showGit = c.req.query("showgit") === "true";
 
     // Get files for this source
-    let files: { path: string; size: number; mtime: Date }[] = [];
+    let allFiles: { path: string; size: number; mtime: Date }[] = [];
     try {
-      files = await sourceFileService.listFilesWithMetadata(source.name);
+      allFiles = await sourceFileService.listFilesWithMetadata(source.name);
     } catch {
       // Source directory might not exist yet
+    }
+
+    // Apply filters based on query parameters
+    let files = allFiles;
+
+    if (source.type === "git") {
+      // For Git sources: git files are controlled by showGit, other hidden files by showHidden
+      files = files.filter(file => {
+        const isHidden = isHiddenFile(file.path);
+        const isGit = isGitFile(file.path);
+
+        // Git files: respect showGit flag (even if they're hidden)
+        if (isGit) {
+          return showGit;
+        }
+
+        // Non-git hidden files: respect showHidden flag
+        if (isHidden) {
+          return showHidden;
+        }
+
+        // Regular files: always show
+        return true;
+      });
+    } else {
+      // For non-Git sources: only apply hidden files filter
+      if (!showHidden) {
+        files = files.filter(file => !isHiddenFile(file.path));
+      }
     }
 
     const isEditable = await codeSourceService.isEditable(id);
@@ -630,14 +710,14 @@ export function createSourcePages(
                 ${!source.enabled ? disabledBadge() : ""}
               </div>
               <div style="display: flex; gap: 0.25rem;">
-                <form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline;">
+                <form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline; margin: 0;">
                   ${csrfInput(csrfToken)}
-                  <button type="submit" class="outline" style="padding: 0.25rem 0.5rem;" ${source.lastSyncStartedAt ? "disabled" : ""}>
+                  <button type="submit" class="outline" style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5;" ${source.lastSyncStartedAt ? "disabled" : ""}>
                     ${source.lastSyncStartedAt ? "Syncing..." : "Sync Now"}
                   </button>
                 </form>
-                <a href="/web/code/sources/${source.id}/edit" role="button" class="outline" style="padding: 0.25rem 0.5rem;">Edit</a>
-                <a href="/web/code/sources/${source.id}/delete" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem;">Delete</a>
+                <a href="/web/code/sources/${source.id}/edit" role="button" class="outline" style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">Edit</a>
+                <a href="/web/code/sources/${source.id}/delete" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">Delete</a>
               </div>
             </div>
           </header>
@@ -695,7 +775,25 @@ export function createSourcePages(
       </p>
       ${flashMessages(success, error)}
       ${sourceInfoSection}
-      <h2>Files${source.type === "git" ? " (Read-Only)" : ""}</h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h2 style="margin-bottom: 0;">Files${source.type === "git" ? " (Read-Only)" : ""}</h2>
+        <div style="display: flex; gap: 0.25rem;">
+          <a href="${buildFilterUrl(source.id, showHidden, showGit, "hidden")}"
+             role="button"
+             class="outline"
+             style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">
+            ${showHidden ? "Hide hidden files" : "Show hidden files"}
+          </a>
+          ${source.type === "git" ? `
+            <a href="${buildFilterUrl(source.id, showHidden, showGit, "git")}"
+               role="button"
+               class="outline"
+               style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">
+              ${showGit ? "Hide git files" : "Show git files"}
+            </a>
+          ` : ""}
+        </div>
+      </div>
       ${fileActionsSection}
       ${filesTable}
     `;
@@ -765,6 +863,7 @@ export function createSourcePages(
             <label>
               Repository URL *
               <input type="url" name="url" required value="${escapeHtml(gitSettings.url)}">
+              <small>HTTPS URL only. SSH URLs (git@...) are not supported.</small>
             </label>
 
             <label>

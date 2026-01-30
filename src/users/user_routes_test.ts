@@ -133,7 +133,6 @@ Deno.test("POST /api/users creates user with all fields", async () => {
       password: "password123",
       passwordConfirmation: "password123",
       name: "Test User",
-      roles: ["userMgmt"],
     }),
   });
 
@@ -141,13 +140,12 @@ Deno.test("POST /api/users creates user with all fields", async () => {
   const json = await res.json();
   expect(json.id).toBeDefined();
   expect(json.email).toBe("test@example.com");
-  expect(json.roles).toEqual(["userMgmt"]);
+  expect(json.roles).toBeUndefined(); // Roles hidden from API response
 
   // Verify user was actually created in mock
   const user = users.get(json.id);
   expect(user).toBeDefined();
   expect(user!.name).toBe("Test User");
-  expect(user!.roles).toEqual(["userMgmt"]);
 });
 
 Deno.test("POST /api/users creates user with minimal fields", async () => {
@@ -168,37 +166,13 @@ Deno.test("POST /api/users creates user with minimal fields", async () => {
   const json = await res.json();
   expect(json.id).toBeDefined();
   expect(json.email).toBe("minimal@example.com");
-  expect(json.roles).toEqual([]);
+  expect(json.roles).toBeUndefined(); // Roles hidden from API response
 
   // Verify user was created without name
   const user = users.get(json.id);
   expect(user).toBeDefined();
   expect(user!.name).toBeUndefined();
-  expect(user!.roles).toEqual([]);
-});
-
-Deno.test("POST /api/users creates user with multiple roles", async () => {
-  const { service, users } = createMockUserService();
-  const app = createTestApp(service);
-
-  const res = await app.request("/api/users", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      email: "admin@example.com",
-      password: "password123",
-      passwordConfirmation: "password123",
-      roles: ["userMgmt", "permanent"],
-    }),
-  });
-
-  expect(res.status).toBe(201);
-  const json = await res.json();
-  expect(json.roles).toEqual(["userMgmt", "permanent"]);
-
-  // Verify roles stored correctly
-  const user = users.get(json.id);
-  expect(user!.roles).toEqual(["userMgmt", "permanent"]);
+  expect(user!.roles).toEqual([]); // Internal mock still has roles
 });
 
 Deno.test("POST /api/users returns 400 when email is missing", async () => {
@@ -389,10 +363,10 @@ Deno.test("GET /api/users returns all users", async () => {
   expect(json.users.length).toBe(2);
 });
 
-Deno.test("GET /api/users returns users with roles as array", async () => {
-  const { service } = createMockUserService();
+Deno.test("GET /api/users does not include roles in response", async () => {
+  const { service, users } = createMockUserService();
 
-  await service.createUser(
+  const userId = await service.createUser(
     {
       email: "admin@example.com",
       password: "password123",
@@ -406,10 +380,14 @@ Deno.test("GET /api/users returns users with roles as array", async () => {
   expect(res.status).toBe(200);
 
   const json = await res.json();
-  expect(json.users[0].roles).toEqual(["userMgmt", "permanent"]);
+  expect(json.users[0].roles).toBeUndefined(); // Roles hidden from API
+
+  // Verify roles still stored internally
+  const user = users.get(userId);
+  expect(user!.roles).toEqual(["userMgmt", "permanent"]);
 });
 
-Deno.test("GET /api/users returns all user fields", async () => {
+Deno.test("GET /api/users returns all user fields except roles", async () => {
   const { service } = createMockUserService();
 
   await service.createUser(
@@ -432,7 +410,7 @@ Deno.test("GET /api/users returns all user fields", async () => {
   expect(user.email).toBe("test@example.com");
   expect(user.emailVerified).toBeDefined();
   expect(user.name).toBe("Test User");
-  expect(user.roles).toEqual(["userMgmt"]);
+  expect(user.roles).toBeUndefined(); // Roles hidden from API
   expect(user.banned).toBeDefined();
   expect(user.createdAt).toBeDefined();
   expect(user.updatedAt).toBeDefined();
@@ -462,8 +440,8 @@ Deno.test("GET /api/users/:id returns user by ID", async () => {
   expect(json.name).toBe("Test User");
 });
 
-Deno.test("GET /api/users/:id returns user with roles as array", async () => {
-  const { service } = createMockUserService();
+Deno.test("GET /api/users/:id does not include roles in response", async () => {
+  const { service, users } = createMockUserService();
 
   const userId = await service.createUser(
     {
@@ -479,10 +457,14 @@ Deno.test("GET /api/users/:id returns user with roles as array", async () => {
   expect(res.status).toBe(200);
 
   const json = await res.json();
-  expect(json.roles).toEqual(["userMgmt", "permanent"]);
+  expect(json.roles).toBeUndefined(); // Roles hidden from API
+
+  // Verify roles still stored internally
+  const user = users.get(userId);
+  expect(user!.roles).toEqual(["userMgmt", "permanent"]);
 });
 
-Deno.test("GET /api/users/:id returns all user fields", async () => {
+Deno.test("GET /api/users/:id returns all user fields except roles", async () => {
   const { service } = createMockUserService();
 
   const userId = await service.createUser(
@@ -503,7 +485,7 @@ Deno.test("GET /api/users/:id returns all user fields", async () => {
   expect(json.email).toBeDefined();
   expect(json.emailVerified).toBeDefined();
   expect(json.name).toBeDefined();
-  expect(json.roles).toBeDefined();
+  expect(json.roles).toBeUndefined(); // Roles hidden from API
   expect(json.banned).toBeDefined();
   expect(json.createdAt).toBeDefined();
   expect(json.updatedAt).toBeDefined();
@@ -557,67 +539,6 @@ Deno.test("PUT /api/users/:id updates password", async () => {
   expect(res.status).toBe(200);
   const json = await res.json();
   expect(json.success).toBe(true);
-});
-
-Deno.test("PUT /api/users/:id updates roles", async () => {
-  const { service, users } = createMockUserService();
-
-  const userId = await service.createUser(
-    {
-      email: "test@example.com",
-      password: "password123",
-      role: "userMgmt",
-    },
-    new Headers()
-  );
-
-  const app = createTestApp(service);
-  const res = await app.request(`/api/users/${userId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      roles: ["userMgmt", "userRead"],
-    }),
-  });
-
-  expect(res.status).toBe(200);
-  const json = await res.json();
-  expect(json.success).toBe(true);
-
-  // Verify roles were updated
-  const user = users.get(userId);
-  expect(user!.roles).toEqual(["userMgmt", "userRead"]);
-});
-
-Deno.test("PUT /api/users/:id updates both password and roles", async () => {
-  const { service, users } = createMockUserService();
-
-  const userId = await service.createUser(
-    {
-      email: "test@example.com",
-      password: "oldPassword123",
-    },
-    new Headers()
-  );
-
-  const app = createTestApp(service);
-  const res = await app.request(`/api/users/${userId}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      password: "newPassword123",
-      passwordConfirmation: "newPassword123",
-      roles: ["userMgmt"],
-    }),
-  });
-
-  expect(res.status).toBe(200);
-  const json = await res.json();
-  expect(json.success).toBe(true);
-
-  // Verify roles were updated
-  const user = users.get(userId);
-  expect(user!.roles).toEqual(["userMgmt"]);
 });
 
 Deno.test("PUT /api/users/:id accepts empty body (no-op)", async () => {
@@ -730,7 +651,8 @@ Deno.test("PUT /api/users/:id returns 404 for non-existent user", async () => {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      roles: ["userMgmt"],
+      password: "newPassword123",
+      passwordConfirmation: "newPassword123",
     }),
   });
 
