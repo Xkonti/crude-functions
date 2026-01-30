@@ -55,8 +55,11 @@ const MIGRATION_FILENAME_REGEX = /^(\d{3})-.+\.surql$/;
  * - 001-surreal-users.surql
  * - 005-surreal-indexes.surql (gaps are allowed)
  *
- * The first migration (000) should create the schema_version table and
- * the system namespace/database.
+ * Each migration must self-register by including:
+ * `CREATE schemaVersion SET version = X;`
+ *
+ * The schemaVersion table maintains a history of all applied migrations.
+ * The special record `schemaVersion:current` always points to the latest version.
  *
  * @example
  * ```typescript
@@ -85,18 +88,34 @@ export class SurrealMigrationService {
   /**
    * Gets the current schema version from the database.
    *
+   * Checks the new schemaVersion table first, then falls back to the old
+   * schema_version table for backwards compatibility with existing installations.
+   *
    * @param db - Open database connection
    * @returns Current version number, or null if no migrations have been applied
-   *          (schema_version table doesn't exist or is empty)
    */
   private async getCurrentVersion(db: Surreal): Promise<number | null> {
+    // Try new table first (schemaVersion)
+    try {
+      const result = await db.query<[{ version: number }[]]>(
+        "SELECT version FROM schemaVersion:current"
+      );
+      const version = result?.[0]?.[0]?.version;
+      if (version !== undefined) {
+        return version;
+      }
+    } catch {
+      // Table doesn't exist - try old table
+    }
+
+    // Fall back to old table (schema_version) for backwards compatibility
     try {
       const result = await db.query<[{ version: number }[]]>(
         "SELECT version FROM schema_version:current"
       );
       return result?.[0]?.[0]?.version ?? null;
     } catch {
-      // Table doesn't exist or record doesn't exist - no migrations applied yet
+      // Neither table exists - no migrations applied yet
       return null;
     }
   }
@@ -186,11 +205,11 @@ export class SurrealMigrationService {
   }
 
   /**
-   * Applies a single migration and updates the schema version.
+   * Applies a single migration wrapped in a transaction.
    *
-   * Note: SurrealDB doesn't have explicit transaction support like traditional SQL databases,
-   * so migrations are applied as individual queries. Each query within the
-   * migration file is executed sequentially.
+   * Migrations are self-registering: each migration file must include a
+   * `CREATE schemaVersion SET version = X` statement to register itself.
+   * The transaction ensures the migration and its version registration are atomic.
    *
    * @param db - Open database connection
    * @param migration - The migration to apply
@@ -209,13 +228,10 @@ export class SurrealMigrationService {
       throw new SurrealMigrationFileError(migration.path, error);
     }
 
-    // Execute migration
+    // Execute migration wrapped in a transaction
     try {
-      // Execute the migration SurrealQL
-      await db.query(surql);
-
-      // Update the schema version
-      await this.updateVersion(db, migration.version);
+      const wrappedSql = `BEGIN;\n\n${surql}\n\nCOMMIT;`;
+      await db.query(wrappedSql);
     } catch (error) {
       // If it's already a SurrealMigrationFileError, re-throw as is
       if (error instanceof SurrealMigrationFileError) {
@@ -228,16 +244,5 @@ export class SurrealMigrationService {
         error
       );
     }
-  }
-
-  /**
-   * Updates the schema version in the database.
-   * Uses UPSERT semantics to create or update the version record.
-   */
-  private async updateVersion(db: Surreal, version: number): Promise<void> {
-    // Use UPSERT to create or update the version record
-    await db.query("UPSERT schema_version:current SET version = $version", {
-      version,
-    });
   }
 }
