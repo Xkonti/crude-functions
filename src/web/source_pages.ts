@@ -94,6 +94,55 @@ export function createSourcePages(
   }
 
   /**
+   * Checks if a file path is hidden.
+   * A path is hidden if any segment starts with a dot.
+   * Examples: .env, .git/config, config/.private/key.json
+   */
+  function isHiddenFile(path: string): boolean {
+    const segments = path.split('/');
+    return segments.some(segment => segment.startsWith('.'));
+  }
+
+  /**
+   * Checks if a file is a Git-related file.
+   * Git files include: .git/* (entire directory), .gitignore, .gitkeep, .gitattributes
+   */
+  function isGitFile(path: string): boolean {
+    // Check if path starts with .git/ (contents of .git directory)
+    if (path.startsWith('.git/')) {
+      return true;
+    }
+
+    // Check if path is one of the specific git files
+    const gitFiles = ['.gitignore', '.gitkeep', '.gitattributes'];
+    return gitFiles.includes(path);
+  }
+
+  /**
+   * Builds URL with query parameters for filter toggles.
+   * Preserves other query parameters that should persist.
+   */
+  function buildFilterUrl(
+    sourceId: string,
+    currentShowHidden: boolean,
+    currentShowGit: boolean,
+    toggleFilter: "hidden" | "git"
+  ): string {
+    const baseUrl = `/web/code/sources/${sourceId}`;
+    const params: string[] = [];
+
+    // Toggle the requested filter
+    const newShowHidden = toggleFilter === "hidden" ? !currentShowHidden : currentShowHidden;
+    const newShowGit = toggleFilter === "git" ? !currentShowGit : currentShowGit;
+
+    // Add params only if they're true (default is false)
+    if (newShowHidden) params.push("showhidden=true");
+    if (newShowGit) params.push("showgit=true");
+
+    return params.length > 0 ? `${baseUrl}?${params.join("&")}` : baseUrl;
+  }
+
+  /**
    * Sync status display section
    */
   function syncStatusSection(source: CodeSource): string {
@@ -581,13 +630,44 @@ export function createSourcePages(
 
     const success = c.req.query("success");
     const error = c.req.query("error");
+    const showHidden = c.req.query("showhidden") === "true";
+    const showGit = c.req.query("showgit") === "true";
 
     // Get files for this source
-    let files: { path: string; size: number; mtime: Date }[] = [];
+    let allFiles: { path: string; size: number; mtime: Date }[] = [];
     try {
-      files = await sourceFileService.listFilesWithMetadata(source.name);
+      allFiles = await sourceFileService.listFilesWithMetadata(source.name);
     } catch {
       // Source directory might not exist yet
+    }
+
+    // Apply filters based on query parameters
+    let files = allFiles;
+
+    if (source.type === "git") {
+      // For Git sources: git files are controlled by showGit, other hidden files by showHidden
+      files = files.filter(file => {
+        const isHidden = isHiddenFile(file.path);
+        const isGit = isGitFile(file.path);
+
+        // Git files: respect showGit flag (even if they're hidden)
+        if (isGit) {
+          return showGit;
+        }
+
+        // Non-git hidden files: respect showHidden flag
+        if (isHidden) {
+          return showHidden;
+        }
+
+        // Regular files: always show
+        return true;
+      });
+    } else {
+      // For non-Git sources: only apply hidden files filter
+      if (!showHidden) {
+        files = files.filter(file => !isHiddenFile(file.path));
+      }
     }
 
     const isEditable = await codeSourceService.isEditable(id);
@@ -695,7 +775,25 @@ export function createSourcePages(
       </p>
       ${flashMessages(success, error)}
       ${sourceInfoSection}
-      <h2>Files${source.type === "git" ? " (Read-Only)" : ""}</h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h2 style="margin-bottom: 0;">Files${source.type === "git" ? " (Read-Only)" : ""}</h2>
+        <div style="display: flex; gap: 0.25rem;">
+          <a href="${buildFilterUrl(source.id, showHidden, showGit, "hidden")}"
+             role="button"
+             class="outline"
+             style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">
+            ${showHidden ? "Hide hidden files" : "Show hidden files"}
+          </a>
+          ${source.type === "git" ? `
+            <a href="${buildFilterUrl(source.id, showHidden, showGit, "git")}"
+               role="button"
+               class="outline"
+               style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">
+              ${showGit ? "Hide git files" : "Show git files"}
+            </a>
+          ` : ""}
+        </div>
+      </div>
       ${fileActionsSection}
       ${filesTable}
     `;
