@@ -630,14 +630,14 @@ export function createSourcePages(
                 ${!source.enabled ? disabledBadge() : ""}
               </div>
               <div style="display: flex; gap: 0.25rem;">
-                <form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline;">
+                <form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline; margin: 0;">
                   ${csrfInput(csrfToken)}
-                  <button type="submit" class="outline" style="padding: 0.25rem 0.5rem;" ${source.lastSyncStartedAt ? "disabled" : ""}>
+                  <button type="submit" class="outline" style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5;" ${source.lastSyncStartedAt ? "disabled" : ""}>
                     ${source.lastSyncStartedAt ? "Syncing..." : "Sync Now"}
                   </button>
                 </form>
-                <a href="/web/code/sources/${source.id}/edit" role="button" class="outline" style="padding: 0.25rem 0.5rem;">Edit</a>
-                <a href="/web/code/sources/${source.id}/delete" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem;">Delete</a>
+                <a href="/web/code/sources/${source.id}/edit" role="button" class="outline" style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">Edit</a>
+                <a href="/web/code/sources/${source.id}/delete" role="button" class="outline contrast" style="padding: 0.25rem 0.5rem; margin: 0; line-height: 1.5; display: inline-block;">Delete</a>
               </div>
             </div>
           </header>
