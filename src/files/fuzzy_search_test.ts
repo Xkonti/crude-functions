@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { fuzzyMatch, fuzzySearch, type FuzzyMatch } from "./fuzzy_search.ts";
+import { fuzzyMatch, fuzzySearch } from "./fuzzy_search.ts";
 
 // =============================================================================
 // fuzzyMatch tests
