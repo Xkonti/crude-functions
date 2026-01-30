@@ -23,6 +23,7 @@ export default defineConfig({
 						// Security
 						{ label: 'API Keys', slug: 'guides/api-keys' },
 						{ label: 'Secrets', slug: 'guides/secrets' },
+						{ label: 'CORS', slug: 'guides/cors' },
 
 						// Monitoring
 						{ label: 'Logs', slug: 'guides/logs' },

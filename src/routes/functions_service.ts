@@ -2,6 +2,9 @@ import { Mutex } from "@core/asyncutil/mutex";
 import { RecordId } from "surrealdb";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { SecretsService } from "../secrets/secrets_service.ts";
+import type { CorsConfig } from "../functions/types.ts";
+import { normalizeRoutePattern } from "../functions/route_helpers.ts";
+import { parseSurrealError } from "../database/surreal_error_parser.ts";
 
 /**
  * Represents a function definition.
@@ -22,6 +25,8 @@ export interface FunctionDefinition {
   methods: string[];
   /** API key group IDs required for access (optional) */
   keys?: string[];
+  /** CORS configuration (optional). When present, enables automatic CORS handling */
+  cors?: CorsConfig;
   /** Whether the function is enabled */
   enabled: boolean;
 }
@@ -45,6 +50,7 @@ interface FunctionDefRecord {
   routePath: string;
   methods: string[];
   keys: string[] | null;
+  cors: CorsConfig | null;
   enabled: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -165,12 +171,17 @@ export class FunctionsService {
   }
 
   private recordToFunctionDef(record: FunctionDefRecord): FunctionDefinition {
+    // SurrealDB returns set<string> as a JavaScript Set, convert to array for interface compatibility
+    const methods = record.methods instanceof Set
+      ? Array.from(record.methods)
+      : record.methods;
+
     const func: FunctionDefinition = {
       id: record.id,
       name: record.name,
       handler: record.handler,
       routePath: record.routePath,
-      methods: record.methods,
+      methods: methods,
       enabled: record.enabled,
     };
 
@@ -180,6 +191,10 @@ export class FunctionsService {
 
     if (record.keys && record.keys.length > 0) {
       func.keys = record.keys;
+    }
+
+    if (record.cors) {
+      func.cors = record.cors;
     }
 
     return func;
@@ -197,51 +212,58 @@ export class FunctionsService {
     using _lock = await this.rebuildMutex.acquire();
 
     return await this.surrealFactory.withSystemConnection({}, async (db) => {
-      // Validate: check for duplicate name
-      const [existingByName] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT id FROM functionDef WHERE name = $name LIMIT 1",
-        { name: func.name }
-      );
-      if (existingByName && existingByName.length > 0) {
-        throw new Error(`Function with name '${func.name}' already exists`);
-      }
-
-      // Validate: check for duplicate routePath+method combinations
-      const [existingFunctions] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT name, methods FROM functionDef WHERE routePath = $routePath",
-        { routePath: func.routePath }
-      );
-
-      for (const existing of existingFunctions ?? []) {
-        for (const method of func.methods) {
-          if (existing.methods.includes(method)) {
-            throw new Error(
-              `Route '${func.routePath}' with method '${method}' already exists (function: '${existing.name}')`
-            );
-          }
-        }
-      }
+      const normalizedRoute = normalizeRoutePattern(func.routePath);
 
       // Create the function definition
+      // Database handles validation via:
+      // - unique_functionDef_name index (duplicate name check)
+      // - idx_functionDef_route_methods index (exact route+methods duplicate)
+      // - check_route_method_overlap event (overlapping methods on same route)
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
-      const [records] = await db.query<[FunctionDefRecord[]]>(
-        `CREATE functionDef SET
-          name = $name,
-          description = $description,
-          handler = $handler,
-          routePath = $routePath,
-          methods = $methods,
-          keys = $keys,
-          enabled = true`,
-        {
-          name: func.name,
-          description: func.description,
-          handler: func.handler,
-          routePath: func.routePath,
-          methods: func.methods,
-          keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+      let records: FunctionDefRecord[];
+      try {
+        [records] = await db.query<[FunctionDefRecord[]]>(
+          `CREATE functionDef SET
+            name = $name,
+            description = $description,
+            handler = $handler,
+            routePath = $routePath,
+            normalizedRoute = $normalizedRoute,
+            methods = <set>$methods,
+            keys = $keys,
+            cors = $cors,
+            enabled = true`,
+          {
+            name: func.name,
+            description: func.description,
+            handler: func.handler,
+            routePath: func.routePath,
+            normalizedRoute: normalizedRoute,
+            methods: func.methods,
+            keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+            cors: func.cors,
+          }
+        );
+      } catch (error) {
+        const parsed = parseSurrealError(error);
+        if (parsed.type === "index_violation") {
+          if (parsed.indexName === "unique_functionDef_name") {
+            throw new Error(`Function with name '${func.name}' already exists`);
+          }
+          if (parsed.indexName === "idx_functionDef_route_methods") {
+            throw new Error(`Route '${func.routePath}' with these methods already exists`);
+          }
         }
-      );
+        if (parsed.type === "event_error" && parsed.code === "ROUTE_METHOD_COLLISION") {
+          const route = parsed.fields.ROUTE ?? func.routePath;
+          const methods = parsed.fields.METHODS ?? "unknown";
+          const existingFunc = parsed.fields.FUNCTION ?? "another function";
+          throw new Error(
+            `Route '${route}' with method(s) ${methods} already exists (function: '${existingFunc}')`
+          );
+        }
+        throw error;
+      }
 
       const created = records?.[0];
       if (!created) {
@@ -301,51 +323,57 @@ export class FunctionsService {
         throw new Error(`Function with id '${id}' not found`);
       }
 
-      // Validate: check for duplicate name (excluding current function)
-      const [existingByName] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT id FROM functionDef WHERE name = $name AND id != $recordId LIMIT 1",
-        { name: func.name, recordId }
-      );
-      if (existingByName && existingByName.length > 0) {
-        throw new Error(`Function with name '${func.name}' already exists`);
-      }
-
-      // Validate: check for duplicate routePath+method combinations (excluding current function)
-      const [existingFunctions] = await db.query<[FunctionDefRecord[]]>(
-        "SELECT name, methods FROM functionDef WHERE routePath = $routePath AND id != $recordId",
-        { routePath: func.routePath, recordId }
-      );
-
-      for (const existingFunc of existingFunctions ?? []) {
-        for (const method of func.methods) {
-          if (existingFunc.methods.includes(method)) {
-            throw new Error(
-              `Route '${func.routePath}' with method '${method}' already exists (function: '${existingFunc.name}')`
-            );
-          }
-        }
-      }
+      const normalizedRoute = normalizeRoutePattern(func.routePath);
 
       // Update the function definition
+      // Database handles validation via:
+      // - unique_functionDef_name index (duplicate name check)
+      // - idx_functionDef_route_methods index (exact route+methods duplicate)
+      // - check_route_method_overlap event (overlapping methods on same route)
       // Note: For option<T> fields, undefined maps to NONE, null is not valid
-      await db.query(
-        `UPDATE $recordId SET
-          name = $name,
-          description = $description,
-          handler = $handler,
-          routePath = $routePath,
-          methods = $methods,
-          keys = $keys`,
-        {
-          recordId,
-          name: func.name,
-          description: func.description,
-          handler: func.handler,
-          routePath: func.routePath,
-          methods: func.methods,
-          keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+      try {
+        await db.query(
+          `UPDATE $recordId SET
+            name = $name,
+            description = $description,
+            handler = $handler,
+            routePath = $routePath,
+            normalizedRoute = $normalizedRoute,
+            methods = <set>$methods,
+            keys = $keys,
+            cors = $cors`,
+          {
+            recordId,
+            name: func.name,
+            description: func.description,
+            handler: func.handler,
+            routePath: func.routePath,
+            normalizedRoute: normalizedRoute,
+            methods: func.methods,
+            keys: func.keys && func.keys.length > 0 ? func.keys : undefined,
+            cors: func.cors,
+          }
+        );
+      } catch (error) {
+        const parsed = parseSurrealError(error);
+        if (parsed.type === "index_violation") {
+          if (parsed.indexName === "unique_functionDef_name") {
+            throw new Error(`Function with name '${func.name}' already exists`);
+          }
+          if (parsed.indexName === "idx_functionDef_route_methods") {
+            throw new Error(`Route '${func.routePath}' with these methods already exists`);
+          }
         }
-      );
+        if (parsed.type === "event_error" && parsed.code === "ROUTE_METHOD_COLLISION") {
+          const route = parsed.fields.ROUTE ?? func.routePath;
+          const methods = parsed.fields.METHODS ?? "unknown";
+          const existingFunc = parsed.fields.FUNCTION ?? "another function";
+          throw new Error(
+            `Route '${route}' with method(s) ${methods} already exists (function: '${existingFunc}')`
+          );
+        }
+        throw error;
+      }
 
       this.markDirty();
 

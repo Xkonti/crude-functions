@@ -1,4 +1,5 @@
 import { Hono, type Context } from "@hono/hono";
+import { cors } from "@hono/hono/cors";
 import { FunctionsService, type FunctionDefinition } from "../routes/functions_service.ts";
 import type { ApiKeyService } from "../keys/api_key_service.ts";
 import type { ConsoleLogService } from "../logs/console_log_service.ts";
@@ -6,7 +7,7 @@ import type { ExecutionMetricsService } from "../metrics/execution_metrics_servi
 import type { SecretsService } from "../secrets/secrets_service.ts";
 import { HandlerLoader } from "./handler_loader.ts";
 import { ApiKeyValidator } from "./api_key_validator.ts";
-import type { FunctionContext, RouteInfo } from "./types.ts";
+import type { FunctionContext, RouteInfo, CorsConfig } from "./types.ts";
 import {
   HandlerNotFoundError,
   HandlerExportError,
@@ -82,6 +83,19 @@ export class FunctionRouter {
     // Filter out disabled routes - they should behave as if they don't exist
     const enabledRoutes = routes.filter((route) => route.enabled);
 
+    // Phase 1: Apply CORS middleware for routes that have it configured
+    // This must happen BEFORE registering route handlers so OPTIONS preflight is intercepted.
+    // CORS middleware is registered per exact route path (no inheritance to child paths).
+    // If multiple functions on the same path have CORS, first one wins.
+    const corsAppliedPaths = new Set<string>();
+    for (const route of enabledRoutes) {
+      if (route.cors && !corsAppliedPaths.has(route.routePath)) {
+        router.use(route.routePath, cors(this.buildCorsOptions(route.cors)));
+        corsAppliedPaths.add(route.routePath);
+      }
+    }
+
+    // Phase 2: Register handlers for each route
     for (const route of enabledRoutes) {
       // Create actual handler for each route
       const handler = this.createHandler(route);
@@ -105,6 +119,22 @@ export class FunctionRouter {
     router.all("*", (c) => c.json({ error: "Function not found" }, 404));
 
     return router;
+  }
+
+  /**
+   * Build Hono CORS middleware options from CorsConfig.
+   */
+  private buildCorsOptions(config: CorsConfig): Parameters<typeof cors>[0] {
+    return {
+      // If single origin is "*", pass string "*". Otherwise pass array.
+      origin: config.origins.length === 1 && config.origins[0] === "*"
+        ? "*"
+        : config.origins,
+      credentials: config.credentials,
+      maxAge: config.maxAge ?? 86400,
+      allowHeaders: config.allowHeaders,
+      exposeHeaders: config.exposeHeaders,
+    };
   }
 
   private createHandler(route: FunctionDefinition) {

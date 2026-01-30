@@ -48,6 +48,7 @@ import type { SchedulingService } from "../scheduling/scheduling_service.ts";
 import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { betterAuth } from "better-auth";
 import type { SettingName } from "../settings/types.ts";
+import type { CorsConfig } from "../functions/types.ts";
 
 // =============================================================================
 // Base Context (Always Present)
@@ -266,6 +267,8 @@ export interface FunctionOptions {
    * Group must be created with withApiKeyGroup before the function.
    */
   keys?: string[];
+  /** CORS configuration for the function (optional) */
+  cors?: CorsConfig;
 }
 
 /**

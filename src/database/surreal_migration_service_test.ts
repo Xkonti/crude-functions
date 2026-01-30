@@ -166,9 +166,11 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
       tempMigrationsDir,
       "000-init.surql",
       `
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-      CREATE schema_version:current SET version = 0;
+      DEFINE TABLE schemaVersion SCHEMAFULL;
+      DEFINE FIELD version ON schemaVersion TYPE int;
+      DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+      DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+      CREATE schemaVersion SET version = 0;
 
       DEFINE TABLE users SCHEMAFULL;
       DEFINE FIELD name ON users TYPE string;
@@ -177,7 +179,10 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
     await writeMigration(
       tempMigrationsDir,
       "001-add-email.surql",
-      "DEFINE FIELD email ON users TYPE option<string>;"
+      `
+      DEFINE FIELD email ON users TYPE option<string>;
+      CREATE schemaVersion SET version = 1;
+      `
     );
 
     const ctx = await TestSetupBuilder.create()
@@ -221,11 +226,14 @@ integrationTest("migrate only applies new migrations on partially migrated datab
     .build();
 
   try {
-    // Simulate already having run migration 000
+    // Simulate already having run migration 000 (using new table name)
     await ctx.surrealDb.query(`
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-      CREATE schema_version:current SET version = 0;
+      DEFINE TABLE schemaVersion SCHEMAFULL;
+      DEFINE FIELD version ON schemaVersion TYPE int;
+      DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+      DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+      CREATE schemaVersion SET version = 0;
+      CREATE schemaVersion:current SET version = 0;
 
       DEFINE TABLE users SCHEMAFULL;
       DEFINE FIELD name ON users TYPE string;
@@ -236,9 +244,11 @@ integrationTest("migrate only applies new migrations on partially migrated datab
       tempMigrationsDir,
       "000-init.surql",
       `
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-      CREATE schema_version:current SET version = 0;
+      DEFINE TABLE schemaVersion SCHEMAFULL;
+      DEFINE FIELD version ON schemaVersion TYPE int;
+      DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+      DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+      CREATE schemaVersion SET version = 0;
       DEFINE TABLE users SCHEMAFULL;
       DEFINE FIELD name ON users TYPE string;
     `
@@ -246,7 +256,10 @@ integrationTest("migrate only applies new migrations on partially migrated datab
     await writeMigration(
       tempMigrationsDir,
       "001-add-email.surql",
-      "DEFINE FIELD email ON users TYPE option<string>;"
+      `
+      DEFINE FIELD email ON users TYPE option<string>;
+      CREATE schemaVersion SET version = 1;
+      `
     );
     await writeMigration(
       tempMigrationsDir,
@@ -254,6 +267,7 @@ integrationTest("migrate only applies new migrations on partially migrated datab
       `
       DEFINE TABLE posts SCHEMAFULL;
       DEFINE FIELD title ON posts TYPE string;
+      CREATE schemaVersion SET version = 2;
     `
     );
 
@@ -287,13 +301,17 @@ integrationTest("migrate returns zero applied when no pending migrations", async
   try {
     // Simulate already having run all migrations
     await ctx.surrealDb.query(`
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-      CREATE schema_version:current SET version = 1;
+      DEFINE TABLE schemaVersion SCHEMAFULL;
+      DEFINE FIELD version ON schemaVersion TYPE int;
+      DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+      DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+      CREATE schemaVersion SET version = 0;
+      CREATE schemaVersion SET version = 1;
+      CREATE schemaVersion:current SET version = 1;
     `);
 
-    await writeMigration(tempMigrationsDir, "000-init.surql", "-- init");
-    await writeMigration(tempMigrationsDir, "001-add-users.surql", "-- users");
+    await writeMigration(tempMigrationsDir, "000-init.surql", "CREATE schemaVersion SET version = 0;");
+    await writeMigration(tempMigrationsDir, "001-add-users.surql", "CREATE schemaVersion SET version = 1;");
 
     const migrationService = new SurrealMigrationService({
       connectionFactory: ctx.surrealFactory,
@@ -321,9 +339,11 @@ integrationTest("migrate handles version gaps correctly", async () => {
       tempMigrationsDir,
       "000-init.surql",
       `
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-      CREATE schema_version:current SET version = 0;
+      DEFINE TABLE schemaVersion SCHEMAFULL;
+      DEFINE FIELD version ON schemaVersion TYPE int;
+      DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+      DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+      CREATE schemaVersion SET version = 0;
     `
     );
     await writeMigration(
@@ -332,6 +352,7 @@ integrationTest("migrate handles version gaps correctly", async () => {
       `
       DEFINE TABLE five SCHEMAFULL;
       DEFINE FIELD id ON five TYPE int;
+      CREATE schemaVersion SET version = 5;
     `
     );
     await writeMigration(
@@ -340,6 +361,7 @@ integrationTest("migrate handles version gaps correctly", async () => {
       `
       DEFINE TABLE ten SCHEMAFULL;
       DEFINE FIELD id ON ten TYPE int;
+      CREATE schemaVersion SET version = 10;
     `
     );
 
@@ -378,9 +400,11 @@ integrationTest("migrate throws SurrealMigrationExecutionError on SurrealQL fail
       tempMigrationsDir,
       "000-init.surql",
       `
-      DEFINE TABLE schema_version SCHEMAFULL;
-      DEFINE FIELD version ON schema_version TYPE int;
-      CREATE schema_version:current SET version = 0;
+      DEFINE TABLE schemaVersion SCHEMAFULL;
+      DEFINE FIELD version ON schemaVersion TYPE int;
+      DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+      DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+      CREATE schemaVersion SET version = 0;
     `
     );
     await writeMigration(
@@ -490,6 +514,295 @@ integrationTest("getAvailableMigrations throws SurrealMigrationError when direct
     await expect(badMigrationService.getAvailableMigrations()).rejects.toThrow(
       SurrealMigrationError
     );
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+// =====================
+// schemaVersion security tests
+// =====================
+
+// Helper to set up schemaVersion table with all events (mirrors migration 001)
+const SCHEMA_VERSION_SETUP = `
+DEFINE TABLE schemaVersion SCHEMAFULL TYPE NORMAL;
+DEFINE FIELD version ON schemaVersion TYPE int;
+DEFINE FIELD createdAt ON schemaVersion TYPE datetime VALUE time::now() READONLY;
+DEFINE FIELD updatedAt ON schemaVersion TYPE datetime VALUE time::now();
+DEFINE INDEX idx_schemaVersion_version ON schemaVersion FIELDS version;
+
+-- CREATE event: Validate uniqueness and update current pointer
+DEFINE EVENT schemaVersion_on_create ON TABLE schemaVersion
+WHEN $event = "CREATE" AND <string>$value.id != "schemaVersion:current"
+THEN {
+    LET $count = (SELECT count() FROM schemaVersion
+        WHERE version = $value.version
+        AND <string>id != "schemaVersion:current"
+        GROUP ALL)[0].count ?? 0;
+
+    IF $count > 1 {
+        THROW "[CODE] DUPLICATE_MIGRATION [CODE] Migration version [VERSION] " + <string>$value.version + " [VERSION] has already been applied";
+    };
+
+    UPSERT schemaVersion:current SET version = $value.version;
+};
+
+-- UPDATE event: Restrict updates
+DEFINE EVENT schemaVersion_on_update ON TABLE schemaVersion
+WHEN $event = "UPDATE"
+THEN {
+    IF <string>$value.id != "schemaVersion:current" {
+        THROW "[CODE] IMMUTABLE_RECORD [CODE] Cannot update schema version history records - they are immutable";
+    };
+
+    LET $maxVersion = (SELECT VALUE version FROM schemaVersion
+        WHERE <string>id != "schemaVersion:current"
+        ORDER BY version DESC LIMIT 1)[0];
+
+    IF $after.version != $maxVersion {
+        THROW "[CODE] INVALID_VERSION [CODE] schemaVersion:current can only be set to the highest version [MAX_VERSION] " + <string>$maxVersion + " [MAX_VERSION], attempted [ATTEMPTED_VERSION] " + <string>$after.version + " [ATTEMPTED_VERSION]";
+    };
+
+    IF $before.version IS NOT NONE AND $after.version <= $before.version {
+        THROW "[CODE] VERSION_NOT_INCREMENTING [CODE] Version must increase from [BEFORE_VERSION] " + <string>$before.version + " [BEFORE_VERSION] to [AFTER_VERSION] " + <string>$after.version + " [AFTER_VERSION]";
+    };
+};
+
+-- DELETE event: Prevent deletion
+DEFINE EVENT schemaVersion_on_delete ON TABLE schemaVersion
+WHEN $event = "DELETE"
+THEN {
+    THROW "[CODE] DELETE_NOT_ALLOWED [CODE] Cannot delete schema version records - version [VERSION] " + <string>$before.version + " [VERSION]";
+};
+`;
+
+integrationTest("schemaVersion: cannot modify existing version history record", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create initial versions
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 0;");
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 1;");
+
+    // Get the history record for version 0
+    const [records] = await ctx.surrealDb.query<[{ id: { id: string } }[]]>(
+      "SELECT id FROM schemaVersion WHERE version = 0 AND <string>id != 'schemaVersion:current'"
+    );
+    const historyRecordId = records[0].id;
+
+    // Try to modify the history record - should fail
+    await expect(
+      ctx.surrealDb.query(`UPDATE $recordId SET version = 99`, { recordId: historyRecordId })
+    ).rejects.toThrow("IMMUTABLE_RECORD");
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+integrationTest("schemaVersion: cannot set current to version without history entry", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create version 0 (this also creates/updates current to 0)
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 0;");
+
+    // Try to set current to version 5 which doesn't exist as a history entry
+    await expect(
+      ctx.surrealDb.query("UPDATE schemaVersion:current SET version = 5")
+    ).rejects.toThrow("INVALID_VERSION");
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+integrationTest("schemaVersion: cannot delete version entries", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create versions
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 0;");
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 1;");
+
+    // Try to delete a history record - should fail
+    await expect(
+      ctx.surrealDb.query("DELETE schemaVersion WHERE version = 0 AND <string>id != 'schemaVersion:current'")
+    ).rejects.toThrow("DELETE_NOT_ALLOWED");
+
+    // Try to delete the current record - should also fail
+    await expect(
+      ctx.surrealDb.query("DELETE schemaVersion:current")
+    ).rejects.toThrow("DELETE_NOT_ALLOWED");
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+integrationTest("schemaVersion: cannot add duplicate version", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create version 0
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 0;");
+
+    // Try to create another record with version 0 - should fail
+    await expect(
+      ctx.surrealDb.query("CREATE schemaVersion SET version = 0;")
+    ).rejects.toThrow("DUPLICATE_MIGRATION");
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+integrationTest("schemaVersion: can skip versions (e.g., v10 to v20)", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create version 10
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 10;");
+
+    // Verify current is 10
+    const [result1] = await ctx.surrealDb.query<[{ version: number }[]]>(
+      "SELECT version FROM schemaVersion:current"
+    );
+    expect(result1[0].version).toBe(10);
+
+    // Skip to version 20 (should succeed)
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 20;");
+
+    // Verify current is now 20
+    const [result2] = await ctx.surrealDb.query<[{ version: number }[]]>(
+      "SELECT version FROM schemaVersion:current"
+    );
+    expect(result2[0].version).toBe(20);
+
+    // Verify we have both history entries
+    const [history] = await ctx.surrealDb.query<[{ version: number }[]]>(
+      "SELECT version FROM schemaVersion WHERE <string>id != 'schemaVersion:current' ORDER BY version"
+    );
+    expect(history.length).toBe(2);
+    expect(history[0].version).toBe(10);
+    expect(history[1].version).toBe(20);
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+integrationTest("schemaVersion: cannot update current to version lower than current", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create versions 0, 1, 2
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 0;");
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 1;");
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 2;");
+
+    // Verify current is 2
+    const [result] = await ctx.surrealDb.query<[{ version: number }[]]>(
+      "SELECT version FROM schemaVersion:current"
+    );
+    expect(result[0].version).toBe(2);
+
+    // Try to set current back to version 1 - should fail (even though v1 exists as history)
+    // The max version is 2, so setting to 1 violates INVALID_VERSION
+    await expect(
+      ctx.surrealDb.query("UPDATE schemaVersion:current SET version = 1")
+    ).rejects.toThrow("INVALID_VERSION");
+  } finally {
+    await ctx.cleanup();
+    await Deno.remove(tempMigrationsDir, { recursive: true });
+  }
+});
+
+integrationTest("schemaVersion: current is automatically updated when new version is created", async () => {
+  const tempMigrationsDir = await Deno.makeTempDir({ prefix: "surreal_mig_test_" });
+
+  const ctx = await TestSetupBuilder.create()
+    .withMigrationsDir(tempMigrationsDir)
+    .withoutSurrealMigrations()
+    .withBaseOnly()
+    .build();
+
+  try {
+    // Set up schemaVersion table with events
+    await ctx.surrealDb.query(SCHEMA_VERSION_SETUP);
+
+    // Create version 0
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 0;");
+
+    // Verify current was automatically set to 0
+    const [result1] = await ctx.surrealDb.query<[{ version: number }[]]>(
+      "SELECT version FROM schemaVersion:current"
+    );
+    expect(result1[0].version).toBe(0);
+
+    // Create version 1
+    await ctx.surrealDb.query("CREATE schemaVersion SET version = 1;");
+
+    // Verify current was automatically updated to 1
+    const [result2] = await ctx.surrealDb.query<[{ version: number }[]]>(
+      "SELECT version FROM schemaVersion:current"
+    );
+    expect(result2[0].version).toBe(1);
   } finally {
     await ctx.cleanup();
     await Deno.remove(tempMigrationsDir, { recursive: true });

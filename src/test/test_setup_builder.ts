@@ -833,6 +833,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
           routePath: path,
           methods: options?.methods ?? ["GET"],
           keys: resolvedKeys,
+          cors: options?.cors,
         });
       }
     }

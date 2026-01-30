@@ -819,3 +819,214 @@ integrationTest("FunctionRouter - route deletion cascades to logs and secrets bu
     await ctx.cleanup();
   }
 });
+
+// ========================
+// CORS configuration tests
+// ========================
+
+integrationTest("FunctionRouter responds to OPTIONS preflight when CORS is enabled", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/cors-test", "cors.ts", {
+      methods: ["GET", "POST"],
+      cors: {
+        origins: ["https://example.com"],
+        maxAge: 3600,
+      },
+    })
+    .withFile("cors.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+    const res = await app.request("/run/cors-test", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://example.com",
+        "Access-Control-Request-Method": "POST",
+      },
+    });
+
+    // OPTIONS preflight should succeed (204 or 200)
+    expect(res.status).toBeLessThanOrEqual(204);
+
+    // Should include CORS headers
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionRouter adds CORS headers to actual requests when CORS is enabled", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/cors-test", "cors.ts", {
+      methods: ["GET"],
+      cors: {
+        origins: ["https://example.com"],
+      },
+    })
+    .withFile("cors.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+    const res = await app.request("/run/cors-test", {
+      headers: {
+        Origin: "https://example.com",
+      },
+    });
+
+    expect(res.status).toBe(200);
+
+    // Should include CORS headers on actual request
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionRouter returns no CORS headers when CORS is not configured", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/no-cors", "nocors.ts", { methods: ["GET"] })
+    .withFile("nocors.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+    const res = await app.request("/run/no-cors", {
+      headers: {
+        Origin: "https://example.com",
+      },
+    });
+
+    expect(res.status).toBe(200);
+
+    // Should NOT include CORS headers
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionRouter returns 404 for OPTIONS when CORS is not configured and OPTIONS method not registered", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/no-cors", "nocors.ts", { methods: ["GET", "POST"] })
+    .withFile("nocors.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+    const res = await app.request("/run/no-cors", {
+      method: "OPTIONS",
+      headers: {
+        Origin: "https://example.com",
+        "Access-Control-Request-Method": "POST",
+      },
+    });
+
+    // Without CORS config and without OPTIONS method, should be 404
+    expect(res.status).toBe(404);
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionRouter CORS on parent path does NOT affect child paths", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/products", "products.ts", {
+      name: "products-list",
+      methods: ["GET"],
+      cors: {
+        origins: ["https://example.com"],
+      },
+    })
+    .withFunction("/products/:id", "product.ts", {
+      name: "product-detail",
+      methods: ["GET"],
+      // Note: No CORS config
+    })
+    .withFile("products.ts", simpleHandler)
+    .withFile("product.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+
+    // Parent route should have CORS headers
+    const parentRes = await app.request("/run/products", {
+      headers: { Origin: "https://example.com" },
+    });
+    expect(parentRes.status).toBe(200);
+    expect(parentRes.headers.get("Access-Control-Allow-Origin")).toBe("https://example.com");
+
+    // Child route should NOT have CORS headers (no inheritance)
+    const childRes = await app.request("/run/products/123", {
+      headers: { Origin: "https://example.com" },
+    });
+    expect(childRes.status).toBe(200);
+    expect(childRes.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionRouter handles CORS with wildcard origin", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/public-api", "public.ts", {
+      methods: ["GET"],
+      cors: {
+        origins: ["*"],
+      },
+    })
+    .withFile("public.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+    const res = await app.request("/run/public-api", {
+      headers: {
+        Origin: "https://any-origin.com",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("*");
+  } finally {
+    await ctx.cleanup();
+  }
+});
+
+integrationTest("FunctionRouter handles CORS with credentials", async () => {
+  const ctx = await TestSetupBuilder.create()
+    .withAll()
+    .withFunction("/auth-api", "auth.ts", {
+      methods: ["GET", "POST"],
+      cors: {
+        origins: ["https://app.example.com"],
+        credentials: true,
+      },
+    })
+    .withFile("auth.ts", simpleHandler)
+    .build();
+
+  try {
+    const app = createAppWithRouter(ctx);
+    const res = await app.request("/run/auth-api", {
+      headers: {
+        Origin: "https://app.example.com",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+    expect(res.headers.get("Access-Control-Allow-Credentials")).toBe("true");
+  } finally {
+    await ctx.cleanup();
+  }
+});
