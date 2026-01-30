@@ -420,16 +420,23 @@ integrationTest("addRoute waits for in-progress rebuild", async () => {
   try {
     const events: string[] = [];
 
+    // Use a signal to ensure rebuild has started before we try to add
+    let signalRebuildStarted: () => void;
+    const rebuildStartedPromise = new Promise<void>((resolve) => {
+      signalRebuildStarted = resolve;
+    });
+
     // Start a slow rebuild
     const rebuildPromise = ctx.functionsService.rebuildIfNeeded(async () => {
       events.push("rebuild-start");
-      // Simulate some work with async delay for better timing control
+      signalRebuildStarted(); // Signal that rebuild has started
+      // Simulate some work with async delay
       await new Promise((r) => setTimeout(r, 100));
       events.push("rebuild-end");
     });
 
-    // Delay to ensure rebuild starts first
-    await new Promise((r) => setTimeout(r, 30));
+    // Wait for rebuild to actually start (not timing-based)
+    await rebuildStartedPromise;
 
     // Try to add a route while rebuild is in progress
     const addPromise = (async () => {
