@@ -10,10 +10,12 @@ When calling your functions from a web browser on a different domain, you'll nee
 CORS is a browser security feature that blocks web pages from making requests to different domains. If your frontend is at `https://app.example.com` and your Crude Functions API is at `https://api.example.com`, the browser will block the request unless the server explicitly allows it.
 
 **When you need CORS:**
+
 - Frontend JavaScript calling your functions from a different domain
 - Single-page apps (React, Vue, etc.) making API calls
 
 **When you don't need CORS:**
+
 - Server-side code (Node.js, Python, etc.)
 - Command-line tools (curl, httpie)
 - API testing tools (Postman, Insomnia)
@@ -28,15 +30,13 @@ Each function can have its own CORS configuration. When enabled:
 
 You don't need to handle OPTIONS requests in your function code - Crude Functions intercepts them when CORS is configured.
 
-## Configuration Options
+:::note[Manual CORS handling]
+The built-in CORS feature is optional. You can handle CORS yourself by either:
 
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `origins` | `string[]` | Yes | Allowed origins. Use `["*"]` for any, or specific URLs like `["https://app.example.com"]` |
-| `credentials` | `boolean` | No | Allow cookies and auth headers. Cannot be `true` when using `*` origin |
-| `maxAge` | `number` | No | How long browsers cache preflight responses (seconds). Default: 86400 (24 hours) |
-| `allowHeaders` | `string[]` | No | Extra headers the client can send (beyond standard ones) |
-| `exposeHeaders` | `string[]` | No | Response headers the client can read (beyond standard ones) |
+- Responding to OPTIONS requests and setting CORS headers in your function handler
+- or using a reverse proxy (nginx, Caddy, etc.) in front of Crude Functions
+
+:::
 
 ## Enabling CORS via Web UI
 
@@ -51,211 +51,15 @@ You don't need to handle OPTIONS requests in your function code - Crude Function
 6. Optionally enable **Allow Credentials** if your frontend sends cookies
 7. Click **Save**
 
-## Enabling CORS via API
+## Configuration Options
 
-Include the `cors` object when creating or updating a function:
-
-**Single origin:**
-
-```bash
-curl -X POST http://localhost:9000/api/functions \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-api",
-    "handler": "my-functions/api.ts",
-    "route": "/api/data",
-    "methods": ["GET", "POST", "OPTIONS"],
-    "cors": {
-      "origins": ["https://app.example.com"]
-    }
-  }'
-```
-
-**Multiple origins:**
-
-```bash
-curl -X POST http://localhost:9000/api/functions \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-api",
-    "handler": "my-functions/api.ts",
-    "route": "/api/data",
-    "methods": ["GET", "POST", "OPTIONS"],
-    "cors": {
-      "origins": [
-        "https://app.example.com",
-        "https://admin.example.com"
-      ]
-    }
-  }'
-```
-
-**With credentials:**
-
-```bash
-curl -X POST http://localhost:9000/api/functions \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-api",
-    "handler": "my-functions/api.ts",
-    "route": "/api/data",
-    "methods": ["GET", "POST", "OPTIONS"],
-    "cors": {
-      "origins": ["https://app.example.com"],
-      "credentials": true,
-      "maxAge": 3600
-    }
-  }'
-```
-
-**Allow any origin (development only):**
-
-```bash
-curl -X POST http://localhost:9000/api/functions \
-  -H "X-API-Key: your-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "my-api",
-    "handler": "my-functions/api.ts",
-    "route": "/api/data",
-    "methods": ["GET", "POST", "OPTIONS"],
-    "cors": {
-      "origins": ["*"]
-    }
-  }'
-```
-
-## Common Scenarios
-
-### Local Development
-
-Your frontend runs at `http://localhost:3000`, Crude Functions at `http://localhost:8000`:
-
-```json
-{
-  "cors": {
-    "origins": ["http://localhost:3000"]
-  }
-}
-```
-
-### Production with Single Frontend
-
-```json
-{
-  "cors": {
-    "origins": ["https://app.example.com"]
-  }
-}
-```
-
-### Multiple Frontends
-
-```json
-{
-  "cors": {
-    "origins": [
-      "https://app.example.com",
-      "https://admin.example.com",
-      "https://mobile.example.com"
-    ]
-  }
-}
-```
-
-### Frontend with Authentication
-
-If your frontend sends cookies or `Authorization` headers:
-
-```json
-{
-  "cors": {
-    "origins": ["https://app.example.com"],
-    "credentials": true
-  }
-}
-```
-
-### Custom Headers
-
-If your frontend sends custom headers like `X-Request-ID` or needs to read custom response headers:
-
-```json
-{
-  "cors": {
-    "origins": ["https://app.example.com"],
-    "allowHeaders": ["X-Request-ID", "X-Custom-Header"],
-    "exposeHeaders": ["X-Response-Time"]
-  }
-}
-```
-
-## Testing CORS
-
-### From the Browser Console
-
-Open your browser's developer console and run:
-
-```javascript
-fetch('http://localhost:8000/run/your-function')
-  .then(r => r.json())
-  .then(console.log)
-  .catch(console.error);
-```
-
-If CORS is configured correctly, you'll see the response. If not, you'll see an error like:
-
-```
-Access to fetch at 'http://localhost:8000/run/your-function' from origin
-'http://localhost:3000' has been blocked by CORS policy
-```
-
-### Simple HTML Test Page
-
-Create an HTML file and open it in your browser:
-
-```html
-<!DOCTYPE html>
-<html>
-<body>
-  <button onclick="testCORS()">Test CORS</button>
-  <pre id="result"></pre>
-
-  <script>
-    async function testCORS() {
-      try {
-        const response = await fetch('http://localhost:8000/run/hello');
-        const data = await response.json();
-        document.getElementById('result').textContent = JSON.stringify(data, null, 2);
-      } catch (error) {
-        document.getElementById('result').textContent = 'Error: ' + error.message;
-      }
-    }
-  </script>
-</body>
-</html>
-```
-
-### Check Preflight Response
-
-Use curl to see what CORS headers are returned:
-
-```bash
-curl -i -X OPTIONS http://localhost:8000/run/your-function \
-  -H "Origin: http://localhost:3000" \
-  -H "Access-Control-Request-Method: GET"
-```
-
-You should see headers like:
-
-```
-Access-Control-Allow-Origin: http://localhost:3000
-Access-Control-Allow-Methods: GET, POST, OPTIONS
-Access-Control-Max-Age: 86400
-```
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `origins` | `string[]` | Yes | Allowed origins. Use `["*"]` for any, or specific URLs like `["https://app.example.com"]` |
+| `credentials` | `boolean` | No | Allow cookies and auth headers. Cannot be `true` when using `*` origin |
+| `maxAge` | `number` | No | How long browsers cache preflight responses (seconds). Default: 86400 (24 hours) |
+| `allowHeaders` | `string[]` | No | Extra headers the client can send (beyond standard ones) |
+| `exposeHeaders` | `string[]` | No | Response headers the client can read (beyond standard ones) |
 
 ## Security Considerations
 
@@ -293,6 +97,7 @@ Access-Control-Max-Age: 86400
 ### Preflight succeeds but actual request fails
 
 **Cause:** This is usually not a CORS issue. Check:
+
 - API key authentication (if required)
 - Request body format
 - Function errors (check logs)

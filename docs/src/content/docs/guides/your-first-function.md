@@ -330,16 +330,16 @@ If you want to call your function from a web browser on a different domain, you'
 
 ### Why CORS?
 
-Browsers block JavaScript from making requests to different domains unless the server allows it. For example, if your frontend is at `http://localhost:3000` and Crude Functions is at `http://localhost:8000`, the browser will block the request without CORS headers.
+Browsers block JavaScript from making requests to different domains unless the server allows it. For example, if your frontend is at `https://surrealdb.com` and Crude Functions is at `https://xkonti.tech`, the browser will block the request without CORS headers.
 
-**Note:** curl, Postman, and server-side code don't need CORS - it's a browser-only security feature.
+**Note:** Many frontend dev servers (Vite, Webpack, Quasar, etc.) proxy API requests, hiding CORS issues until deployment. If your dev setup proxies requests, you won't see CORS errors locally but will in production. Curl, Postman, and server-side code don't enforce CORS - it's a browser-only security feature.
 
 ### Enable CORS for your function
 
 1. Edit your `hello-world` function in the web UI
 2. In **HTTP Methods**, make sure **OPTIONS** is checked
 3. Check the **Enable CORS** checkbox
-4. In **Allowed Origins**, enter your frontend URL (e.g., `http://localhost:3000`) or `*` for any origin
+4. In **Allowed Origins**, enter your frontend URL (e.g., `https://surrealdb.com`) or `*` for any origin
 5. Click **Save**
 
 ### Test from a browser
