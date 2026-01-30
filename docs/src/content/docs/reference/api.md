@@ -40,6 +40,39 @@ The examples below use `localhost:9000` (management port). If running in single-
 | PUT | `/api/functions/:id/enable` | Enable a function |
 | PUT | `/api/functions/:id/disable` | Disable a function |
 
+#### CORS Configuration
+
+Functions can include optional CORS configuration for browser cross-origin requests:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `cors.origins` | `string[]` | Required. Allowed origins, e.g., `["https://app.example.com"]` or `["*"]` |
+| `cors.credentials` | `boolean` | Optional. Allow credentials (cookies, auth headers). Cannot be `true` with `"*"` |
+| `cors.maxAge` | `number` | Optional. Preflight cache duration in seconds (default: 86400) |
+| `cors.allowHeaders` | `string[]` | Optional. Additional headers client can send |
+| `cors.exposeHeaders` | `string[]` | Optional. Headers client can read from response |
+
+See the [CORS Guide](/guides/cors) for detailed configuration examples and troubleshooting.
+
+**Creating a function with CORS:**
+
+```bash
+curl -X POST http://localhost:9000/api/functions \
+  -H "X-API-Key: your-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-api",
+    "handler": "my-functions/api.ts",
+    "route": "/api/data",
+    "methods": ["GET", "POST", "OPTIONS"],
+    "cors": {
+      "origins": ["https://app.example.com"],
+      "credentials": true,
+      "maxAge": 86400
+    }
+  }'
+```
+
 ### Code Sources
 
 | Method | Endpoint | Description |

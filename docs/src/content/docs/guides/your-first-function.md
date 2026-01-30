@@ -324,6 +324,54 @@ The metrics are aggregated by minute, hour, and day depending on the time range 
 
 ![Metrics view for hello-world function](../../../assets/screenshots/hello-world-metrics.png)
 
+## Step 9: Enable CORS (Optional)
+
+If you want to call your function from a web browser on a different domain, you'll need to enable CORS. Skip this step if you're only calling functions from server-side code or tools like curl.
+
+### Why CORS?
+
+Browsers block JavaScript from making requests to different domains unless the server allows it. For example, if your frontend is at `http://localhost:3000` and Crude Functions is at `http://localhost:8000`, the browser will block the request without CORS headers.
+
+**Note:** curl, Postman, and server-side code don't need CORS - it's a browser-only security feature.
+
+### Enable CORS for your function
+
+1. Edit your `hello-world` function in the web UI
+2. In **HTTP Methods**, make sure **OPTIONS** is checked
+3. Check the **Enable CORS** checkbox
+4. In **Allowed Origins**, enter your frontend URL (e.g., `http://localhost:3000`) or `*` for any origin
+5. Click **Save**
+
+### Test from a browser
+
+Create an HTML file and open it in your browser:
+
+```html
+<!DOCTYPE html>
+<html>
+<body>
+  <button onclick="testCORS()">Call Function</button>
+  <pre id="result"></pre>
+
+  <script>
+    async function testCORS() {
+      try {
+        const response = await fetch('http://localhost:8000/run/hello/Browser');
+        const data = await response.json();
+        document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+      } catch (error) {
+        document.getElementById('result').textContent = 'Error: ' + error.message;
+      }
+    }
+  </script>
+</body>
+</html>
+```
+
+If CORS is configured correctly, clicking the button shows the JSON response. If not, you'll see an error in the browser console about CORS policy.
+
+For more CORS options like credentials and custom headers, see the [CORS Guide](/guides/cors).
+
 ## Next Steps
 
 Congratulations! You've created, deployed, and tested your first function. Here's what to explore next:
