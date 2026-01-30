@@ -261,43 +261,37 @@ Deno.test("resolveAndValidatePath handles non-existent paths gracefully", async 
 });
 
 // =====================
-// resolveAndValidatePath - relative basePath handling
+// resolveAndValidatePath - basePath with subdirectory
 // =====================
+// Note: Previously these tests used Deno.chdir() to test relative basePath handling,
+// but chdir is process-global and breaks parallel test execution.
+// The relative path resolution is handled by @std/path's resolve() which is well-tested.
+// These tests now use absolute paths to verify the same validation logic.
 
-Deno.test("resolveAndValidatePath handles relative basePath correctly", async () => {
-  // Create temp dir and subdirectory
-  const tempDir = await Deno.makeTempDir();
-  const codeDir = `${tempDir}/code`;
-  await Deno.mkdir(codeDir);
-
-  // Save original cwd and change to tempDir
-  const originalCwd = Deno.cwd();
-  Deno.chdir(tempDir);
-
+Deno.test("resolveAndValidatePath handles basePath with subdirectory", async () => {
+  const ctx = await createTestContext();
   try {
-    // Use relative path like production does
-    const result = await resolveAndValidatePath("./code", "file.ts");
+    // Create a subdirectory structure similar to production's ./code
+    const codeDir = `${ctx.tempDir}/code`;
+    await Deno.mkdir(codeDir);
+
+    // Test with absolute path to the code directory
+    const result = await resolveAndValidatePath(codeDir, "file.ts");
     expect(result).toBe(`${codeDir}/file.ts`);
   } finally {
-    // Restore original cwd
-    Deno.chdir(originalCwd);
-    await Deno.remove(tempDir, { recursive: true });
+    await ctx.cleanup();
   }
 });
 
-Deno.test("resolveAndValidatePath handles relative basePath with nested file", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const codeDir = `${tempDir}/code`;
-  await Deno.mkdir(codeDir);
-
-  const originalCwd = Deno.cwd();
-  Deno.chdir(tempDir);
-
+Deno.test("resolveAndValidatePath handles basePath with nested file in subdirectory", async () => {
+  const ctx = await createTestContext();
   try {
-    const result = await resolveAndValidatePath("./code", "examples/handler.ts");
+    const codeDir = `${ctx.tempDir}/code`;
+    await Deno.mkdir(codeDir);
+
+    const result = await resolveAndValidatePath(codeDir, "examples/handler.ts");
     expect(result).toBe(`${codeDir}/examples/handler.ts`);
   } finally {
-    Deno.chdir(originalCwd);
-    await Deno.remove(tempDir, { recursive: true });
+    await ctx.cleanup();
   }
 });

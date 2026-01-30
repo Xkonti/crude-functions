@@ -6,10 +6,35 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 deno task dev       # Run with hot reload (--watch)
-deno task test      # Run all tests
+deno task test      # Run all tests in parallel
 deno lint           # Lint codebase
 deno check main.ts  # Type check entry point
 ```
+
+### Running Tests
+
+Tests run in parallel by default using a shared SurrealDB instance:
+
+```bash
+# Run all tests
+deno task test
+
+# Run specific file
+deno task test src/routes/functions_service_test.ts
+
+# Run specific directory
+deno task test src/routes/
+
+# Run multiple paths
+deno task test src/routes/ src/keys/
+```
+
+The test runner (`scripts/run-tests.ts`) automatically:
+1. Starts a single SurrealDB instance (port 54321, memory mode)
+2. Runs tests in parallel with `--parallel` flag
+3. Stops SurrealDB after tests complete
+
+Each test file gets its own isolated namespace within the shared SurrealDB instance.
 
 ## Architecture Overview
 
@@ -122,16 +147,41 @@ export default async function (c, ctx) {
 
 When dealing with testing, fixing tests, adding new tests, etc. please use the `crude-functions-testing` skill.
 
-**TestSetupBuilder** (`src/test/test_setup_builder.ts`):
+### Test Infrastructure
 
-- Use for service tests needing real database, migrations, and multiple services
-- Mirrors production initialization flow to prevent schema/initialization drift
-- Examples: `routes_service_test.ts`, `api_key_service_test.ts`
+Tests run in parallel with a shared SurrealDB instance for performance. Key components:
 
-**Simple helpers** (in-file functions):
+- **`scripts/run-tests.ts`** - Test runner that manages SurrealDB lifecycle
+- **`SharedSurrealManager`** - Detects external SurrealDB or starts local instance
+- **`TestSetupBuilder`** - Creates isolated test contexts with services
 
-- Use for file-specific setup needs
-- Preferred for low-level utilities and simple unit tests
+### TestSetupBuilder
+
+Use for service tests needing real database, migrations, and multiple services:
+
+```typescript
+const ctx = await TestSetupBuilder.create()
+  .withSettings()
+  .withApiKeys()
+  .build();
+
+try {
+  // Test using ctx.settingsService, ctx.apiKeyService, etc.
+} finally {
+  await ctx.cleanup();
+}
+```
+
+Options:
+- `.withMetrics()`, `.withSettings()`, `.withApiKeys()`, etc. - Include specific services
+- `.withDedicatedSurreal()` - Use isolated SurrealDB instance (for tests that modify namespaces)
+- `.withoutSurrealMigrations()` - Skip migrations (for migration tests)
+
+### Simple Helpers
+
+Use in-file helper functions for:
+- Low-level utilities and simple unit tests
+- File-specific setup needs
 - Examples: `env_isolator_test.ts`, `key_storage_service_test.ts`
 
 See `test_setup_builder.ts` header for detailed guidelines on when to use each approach.

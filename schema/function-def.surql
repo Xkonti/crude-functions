@@ -47,7 +47,7 @@ DEFINE EVENT IF NOT EXISTS delete_functionDef ON TABLE functionDef WHEN $event =
 -- Example: if one function has {GET, POST} and another tries {POST, PUT} on same route,
 -- both define POST which is a collision
 -- Error format uses tagged values for easy parsing: [TAG] value [TAG]
-DEFINE EVENT OVERWRITE check_route_method_overlap ON TABLE functionDef
+DEFINE EVENT IF NOT EXISTS check_route_method_overlap ON TABLE functionDef
 WHEN $event = "CREATE" OR $event = "UPDATE"
 THEN {
     LET $others = SELECT * FROM functionDef

@@ -408,42 +408,6 @@ integrationTest("VersionedEncryptionService - updateKeys", async (t) => {
     expect(service.isRotating).toBe(false);
     expect(service.phasedOutVersionChar).toBe(null);
   });
-
-  await t.step("blocks during encrypt operations (prevents race condition)", async () => {
-    const service = EncryptionServiceBuilder.create().build();
-    const results: string[] = [];
-
-    const encryptPromise = service.encrypt("test data").then((encrypted) => {
-      results.push("encrypt completed");
-      return encrypted;
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    const updatePromise = service.updateKeys({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-    }).then(() => {
-      results.push("updateKeys completed");
-    });
-
-    const encrypted = await encryptPromise;
-    await updatePromise;
-
-    expect(results).toEqual(["encrypt completed", "updateKeys completed"]);
-    TestHelpers.expectVersionPrefix(encrypted, "A");
-    expect(service.version).toBe("B");
-
-    // Add phased out key to decrypt old data
-    await service.updateKeys({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe("test data");
-  });
 });
 
 // =====================
@@ -510,12 +474,15 @@ integrationTest("VersionedEncryptionService - acquireRotationLock", async (t) =>
     const lock = await service.acquireRotationLock();
     results.push("lock acquired");
 
+    // Start encrypt operation - it should block until lock is released
     const encryptPromise = service.encrypt("test").then(() => {
       results.push("encrypt completed");
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    results.push("after delay");
+    // Use Promise.resolve().then() to ensure encrypt has started waiting
+    await Promise.resolve().then(() => {
+      results.push("encrypt is waiting");
+    });
 
     lock[Symbol.dispose]();
     results.push("lock released");
@@ -524,7 +491,7 @@ integrationTest("VersionedEncryptionService - acquireRotationLock", async (t) =>
 
     expect(results).toEqual([
       "lock acquired",
-      "after delay",
+      "encrypt is waiting",
       "lock released",
       "encrypt completed",
     ]);

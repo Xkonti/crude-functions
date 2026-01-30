@@ -5,6 +5,24 @@
  * namespace isolation for test independence. This dramatically improves
  * test performance by avoiding process startup overhead per test.
  *
+ * ## External Instance Detection
+ *
+ * When `ensureStarted()` is called, the manager first tries to connect to
+ * an existing SurrealDB instance at the configured port. If successful,
+ * it uses the external instance instead of starting a new one. This enables:
+ *
+ * - Parallel test execution with a shared external SurrealDB
+ * - IDE/debugger integration with a manually started instance
+ * - CI/CD setups where SurrealDB is started separately
+ *
+ * ## Configuration
+ *
+ * Environment variables:
+ * - `SURREAL_TEST_PORT` - Port for shared instance (default: 54321)
+ * - `SURREAL_TEST_USER` - Username (default: root)
+ * - `SURREAL_TEST_PASS` - Password (default: root)
+ * - `SURREAL_TEST_TIMEOUT` - Connection timeout in ms (default: 1000)
+ *
  * ## Usage Pattern
  *
  * ```typescript
@@ -30,11 +48,13 @@
  *
  * Process cleanup is registered via `globalThis.addEventListener("unload", ...)`.
  * This ensures the process is stopped when the test runner exits.
+ * For external instances, only connections are closed (process is not stopped).
  */
 
 import { Surreal } from "surrealdb";
 import { SurrealProcessManager } from "../database/surreal_process_manager.ts";
 import { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
+import type { DedicatedSurrealContext } from "./types.ts";
 
 /**
  * Context returned when creating a test namespace.
@@ -63,6 +83,17 @@ async function isSurrealAvailable(): Promise<boolean> {
 }
 
 /**
+ * Find an available port by binding to port 0 and getting the assigned port.
+ * This is the safest way to avoid port conflicts.
+ */
+function findAvailablePort(): number {
+  const listener = Deno.listen({ port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  listener.close();
+  return port;
+}
+
+/**
  * Singleton manager for shared SurrealDB test infrastructure.
  */
 export class SharedSurrealManager {
@@ -72,6 +103,9 @@ export class SharedSurrealManager {
   private startPromise: Promise<void> | null = null;
   private isStarted = false;
 
+  // Track whether we're using an external instance vs managing our own process
+  private isExternalInstance = false;
+
   // SurrealDB components (created on first start)
   // Note: We don't use supervisor/health monitor for tests - simpler is better.
   // If SurrealDB crashes, tests will fail naturally.
@@ -79,12 +113,19 @@ export class SharedSurrealManager {
   private adminFactory: SurrealConnectionFactory | null = null;
   private adminDb: Surreal | null = null;
 
-  // Fixed port for shared instance (avoid ephemeral port conflicts)
-  private readonly port = 54321;
-  private readonly username = "root";
-  private readonly password = "root";
+  // Configuration from environment variables with defaults
+  private readonly port: number;
+  private readonly username: string;
+  private readonly password: string;
+  private readonly connectionTimeoutMs: number;
 
   private constructor() {
+    // Load configuration from environment variables
+    this.port = parseInt(Deno.env.get("SURREAL_TEST_PORT") ?? "54321");
+    this.username = Deno.env.get("SURREAL_TEST_USER") ?? "root";
+    this.password = Deno.env.get("SURREAL_TEST_PASS") ?? "root";
+    this.connectionTimeoutMs = parseInt(Deno.env.get("SURREAL_TEST_TIMEOUT") ?? "1000");
+
     // Register cleanup on process exit
     this.registerCleanup();
   }
@@ -113,15 +154,117 @@ export class SharedSurrealManager {
   }
 
   /**
-   * Ensure the shared SurrealDB process is started.
+   * Create a dedicated SurrealDB instance for a single test.
+   *
+   * Use this for tests that need complete isolation from other tests,
+   * such as tests that:
+   * - Modify namespaces or databases
+   * - Test custom database users
+   * - Test error handling when the database is unavailable
+   * - Need to restart SurrealDB during the test
+   *
+   * The returned context includes a cleanup function that MUST be called
+   * to stop the SurrealDB process and prevent resource leaks.
+   *
+   * @returns Context with dedicated SurrealDB process
+   * @throws Error if SurrealDB binary is not available
+   *
+   * @example
+   * ```typescript
+   * const dedicated = await SharedSurrealManager.createDedicatedInstance();
+   * try {
+   *   // Use dedicated.db, dedicated.factory, etc.
+   *   await dedicated.db.query("CREATE test:1 SET name = 'test'");
+   * } finally {
+   *   await dedicated.cleanup();
+   * }
+   * ```
+   */
+  static async createDedicatedInstance(): Promise<DedicatedSurrealContext> {
+    // Check if surreal binary is available
+    if (!(await isSurrealAvailable())) {
+      throw new Error(
+        "SurrealDB binary not found at .bin/surreal. Run 'deno task setup' first."
+      );
+    }
+
+    // Find an available port using ephemeral port discovery
+    const port = findAvailablePort();
+
+    console.log(
+      `[SharedSurrealManager] Starting dedicated SurrealDB instance on port ${port}...`
+    );
+
+    // Create process manager
+    const processManager = new SurrealProcessManager({
+      binaryPath: ".bin/surreal",
+      port,
+      storagePath: "/tmp/surreal-dedicated", // Not used in memory mode
+      storageMode: "memory",
+      username: "root",
+      password: "root",
+      readinessTimeoutMs: 30000,
+    });
+
+    // Start the process
+    await processManager.start();
+
+    // Create connection factory
+    const factory = new SurrealConnectionFactory({
+      connectionUrl: processManager.connectionUrl,
+      username: "root",
+      password: "root",
+    });
+
+    // Create a connection
+    const db = await factory.connect({
+      namespace: "test",
+      database: "test",
+    });
+
+    console.log(
+      `[SharedSurrealManager] Dedicated instance running at ${processManager.connectionUrl}`
+    );
+
+    return {
+      processManager,
+      factory,
+      db,
+      connectionUrl: processManager.connectionUrl,
+      port,
+      async cleanup() {
+        console.log(
+          `[SharedSurrealManager] Stopping dedicated instance on port ${port}...`
+        );
+        try {
+          await db.close();
+        } catch {
+          // Ignore close errors
+        }
+        await processManager.stop();
+      },
+    };
+  }
+
+  /**
+   * Ensure the shared SurrealDB process is started or connected to external instance.
+   *
+   * First attempts to connect to an existing SurrealDB at the configured port.
+   * If successful, uses that instance. If not, starts a new local process.
    *
    * Thread-safe: multiple concurrent calls will all wait for the
    * same initialization to complete.
    */
   async ensureStarted(): Promise<void> {
-    // Already started - fast path
-    if (this.isStarted && this.processManager?.isRunning) {
-      return;
+    // Already started - fast path (works for both external and local)
+    if (this.isStarted) {
+      // For local instance, verify it's still running
+      if (!this.isExternalInstance && !this.processManager?.isRunning) {
+        // Local process died, reset and try again
+        this.isStarted = false;
+      } else {
+        return;
+      }
     }
 
     // Promise-based lock: if starting, wait for that promise
@@ -162,7 +305,7 @@ export class SharedSurrealManager {
 
     // Create a factory for this test's namespace with defaults set
     const factory = new SurrealConnectionFactory({
-      connectionUrl: this.processManager!.connectionUrl,
+      connectionUrl: this.connectionUrl,
       username: this.username,
       password: this.password,
       defaultNamespace: namespace,
@@ -215,6 +358,9 @@ export class SharedSurrealManager {
    * Get the connection URL (for tests that need it).
    */
   get connectionUrl(): string {
+    if (this.isExternalInstance) {
+      return `ws://127.0.0.1:${this.port}`;
+    }
     return this.processManager?.connectionUrl ?? "";
   }
 
@@ -222,35 +368,58 @@ export class SharedSurrealManager {
    * Check if the shared instance is running.
    */
   get isRunning(): boolean {
+    if (this.isExternalInstance) {
+      return this.isStarted;
+    }
     return this.isStarted && (this.processManager?.isRunning ?? false);
+  }
+
+  /**
+   * Check if we're using an external SurrealDB instance.
+   */
+  get usingExternalInstance(): boolean {
+    return this.isExternalInstance;
   }
 
   /**
    * Stop the shared SurrealDB process.
    * Normally called automatically on process exit.
+   *
+   * For external instances, only closes connections (doesn't stop the process).
    */
   async stop(): Promise<void> {
     if (!this.isStarted) {
       return;
     }
 
-    console.log("[SharedSurrealManager] Stopping shared SurrealDB instance...");
-
-    try {
-      // Close admin DB connection first
-      if (this.adminDb) {
-        await this.adminDb.close();
+    if (this.isExternalInstance) {
+      console.log("[SharedSurrealManager] Closing connections to external SurrealDB...");
+      try {
+        if (this.adminDb) {
+          await this.adminDb.close();
+        }
+      } catch (error) {
+        console.error("[SharedSurrealManager] Error closing connections:", error);
       }
+    } else {
+      console.log("[SharedSurrealManager] Stopping shared SurrealDB instance...");
+      try {
+        // Close admin DB connection first
+        if (this.adminDb) {
+          await this.adminDb.close();
+        }
 
-      // Stop the process
-      if (this.processManager?.isRunning) {
-        await this.processManager.stop();
+        // Stop the process
+        if (this.processManager?.isRunning) {
+          await this.processManager.stop();
+        }
+      } catch (error) {
+        console.error("[SharedSurrealManager] Error during stop:", error);
       }
-    } catch (error) {
-      console.error("[SharedSurrealManager] Error during stop:", error);
     }
 
     this.isStarted = false;
+    this.isExternalInstance = false;
     this.processManager = null;
     this.adminFactory = null;
     this.adminDb = null;
@@ -258,10 +427,39 @@ export class SharedSurrealManager {
 
   /**
    * Internal: perform the actual startup.
+   *
+   * First tries to connect to an existing SurrealDB instance.
+   * If that fails, starts a local process.
    */
   private async doStart(): Promise<void> {
+    const externalUrl = `ws://127.0.0.1:${this.port}`;
+
+    // Step 1: Try connecting to external instance first
+    if (await this.tryConnectExternal()) {
+      console.log(
+        `[SharedSurrealManager] Connected to external SurrealDB at ${externalUrl}`
+      );
+
+      // Set up admin connection to external instance
+      this.adminFactory = new SurrealConnectionFactory({
+        connectionUrl: externalUrl,
+        username: this.username,
+        password: this.password,
+      });
+
+      this.adminDb = await this.adminFactory.connect({
+        namespace: "test",
+        database: "admin",
+      });
+
+      this.isExternalInstance = true;
+      this.isStarted = true;
+      return;
+    }
+
+    // Step 2: No external instance - start our own
     console.log(
-      "[SharedSurrealManager] Starting shared SurrealDB instance (memory mode)..."
+      "[SharedSurrealManager] No external instance found, starting local process (memory mode)..."
     );
 
     // Check if surreal binary is available
@@ -298,10 +496,42 @@ export class SharedSurrealManager {
       database: "admin",
     });
 
+    this.isExternalInstance = false;
     this.isStarted = true;
     console.log(
       `[SharedSurrealManager] SurrealDB running on ${this.processManager.connectionUrl}`
     );
+  }
+
+  /**
+   * Try to connect to an external SurrealDB instance.
+   *
+   * @returns true if successfully connected, false otherwise
+   */
+  private async tryConnectExternal(): Promise<boolean> {
+    const healthUrl = `http://127.0.0.1:${this.port}/health`;
+    const wsUrl = `ws://127.0.0.1:${this.port}`;
+
+    try {
+      // Quick health check via HTTP
+      const response = await fetch(healthUrl, {
+        signal: AbortSignal.timeout(this.connectionTimeoutMs),
+      });
+      if (!response.ok) {
+        return false;
+      }
+
+      // Verify we can authenticate via WebSocket
+      const testDb = new Surreal();
+      await testDb.connect(wsUrl);
+      await testDb.signin({ username: this.username, password: this.password });
+      await testDb.close();
+
+      return true;
+    } catch {
+      // Connection failed - no external instance available
+      return false;
+    }
   }
 
   /**

@@ -53,13 +53,13 @@ integrationTest("StreamInterceptor captures console.log within request context",
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("Hello from handler");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -79,17 +79,17 @@ integrationTest("StreamInterceptor captures all console methods with correct lev
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("log message");
         console.debug("debug message");
         console.info("info message");
         console.warn("warn message");
         console.error("error message");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(5);
@@ -113,13 +113,13 @@ integrationTest("StreamInterceptor captures process.stdout.write with stdout lev
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         process.stdout.write("Direct stdout message\n");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -138,13 +138,13 @@ integrationTest("StreamInterceptor captures process.stderr.write with stderr lev
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         process.stderr.write("Direct stderr message\n");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -165,7 +165,8 @@ integrationTest("StreamInterceptor does not capture logs outside request context
     console.log("System log outside context");
     process.stdout.write("System stdout outside context\n");
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure any pending logs are flushed to database
+    await logService.flush();
 
     const allLogs = await logService.getRecent(100);
     expect(allLogs.length).toBe(0);
@@ -182,25 +183,25 @@ integrationTest("StreamInterceptor can be uninstalled", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("Before uninstall");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     interceptor.uninstall();
 
     await runInRequestContext(
       { requestId: "test-request-2", functionId },
-      async () => {
+      () => {
         console.log("After uninstall");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure any pending logs are flushed to database
+    await logService.flush();
 
     const logs1 = await logService.getByRequestId("test-request-1");
     expect(logs1.length).toBe(1);
@@ -236,13 +237,13 @@ integrationTest("StreamInterceptor install is idempotent", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("Test message");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -273,14 +274,14 @@ integrationTest("StreamInterceptor handles Uint8Array input", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         const encoder = new TextEncoder();
         process.stdout.write(encoder.encode("Binary message\n"));
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -299,16 +300,16 @@ integrationTest("StreamInterceptor handles empty messages", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         // Empty newline should not be stored
         process.stdout.write("\n");
         // But message with content should
         process.stdout.write("Real message\n");
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -330,14 +331,14 @@ integrationTest("StreamInterceptor captures Deno.stdout.writeSync", async () => 
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         const encoder = new TextEncoder();
         Deno.stdout.writeSync(encoder.encode("Deno stdout sync\n"));
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -359,11 +360,11 @@ integrationTest("StreamInterceptor captures Deno.stdout.write (async)", async ()
       async () => {
         const encoder = new TextEncoder();
         await Deno.stdout.write(encoder.encode("Deno stdout async\n"));
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -382,14 +383,14 @@ integrationTest("StreamInterceptor captures Deno.stderr.writeSync", async () => 
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         const encoder = new TextEncoder();
         Deno.stderr.writeSync(encoder.encode("Deno stderr sync\n"));
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -411,11 +412,11 @@ integrationTest("StreamInterceptor captures Deno.stderr.write (async)", async ()
       async () => {
         const encoder = new TextEncoder();
         await Deno.stderr.write(encoder.encode("Deno stderr async\n"));
-        await new Promise((resolve) => setTimeout(resolve, 50));
       }
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure logs are flushed to database
+    await logService.flush();
 
     const logs = await logService.getByRequestId("test-request-1");
     expect(logs.length).toBe(1);
@@ -436,7 +437,8 @@ integrationTest("StreamInterceptor does not capture Deno streams outside request
     Deno.stdout.writeSync(encoder.encode("Outside context\n"));
     await Deno.stderr.write(encoder.encode("Also outside\n"));
 
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Ensure any pending logs are flushed to database
+    await logService.flush();
 
     const allLogs = await logService.getRecent(100);
     expect(allLogs.length).toBe(0);

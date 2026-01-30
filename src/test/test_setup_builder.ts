@@ -162,6 +162,7 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
   private migrationsDir = "./migrations";
   private runSurrealMigrations = true;
   private baseOnly = false; // When true, skip all services (just base context)
+  private useDedicatedSurreal = false; // When true, use dedicated SurrealDB instance
 
   // Service flags - tracks which services to include
   private flags: ServiceFlags = createDefaultFlags();
@@ -233,6 +234,30 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
    */
   withBaseOnly(): this {
     this.baseOnly = true;
+    return this;
+  }
+
+  /**
+   * Use a dedicated SurrealDB instance instead of the shared one.
+   *
+   * Use this for tests that need complete isolation from other tests:
+   * - Tests that modify namespaces or databases
+   * - Tests that test custom database users
+   * - Tests that need to restart SurrealDB during the test
+   *
+   * Note: This is slower than the shared instance as it starts a new
+   * SurrealDB process for each test. Only use when necessary.
+   *
+   * @example
+   * ```typescript
+   * const ctx = await TestSetupBuilder.create()
+   *   .withDedicatedSurreal()
+   *   .withSettings()
+   *   .build();
+   * ```
+   */
+  withDedicatedSurreal(): this {
+    this.useDedicatedSurreal = true;
     return this;
   }
 
@@ -691,15 +716,17 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     }
 
     // STEP 1: Create core infrastructure (always needed)
-    // This includes shared SurrealDB connection and migrations
+    // This includes SurrealDB connection (shared or dedicated) and migrations
     const {
       tempDir,
       codeDir,
       surrealTestContext,
       surrealDb,
       surrealFactory,
+      dedicatedCleanup,
     } = await createCoreInfrastructure(this.migrationsDir, {
       runSurrealMigrations: this.runSurrealMigrations,
+      useDedicatedSurreal: this.useDedicatedSurreal,
     });
 
     // Build context incrementally
@@ -967,7 +994,8 @@ export class TestSetupBuilder<TContext extends BaseTestContext = BaseTestContext
     context.cleanup = createCleanupFunction(
       tempDir,
       surrealTestContext,
-      this.flags.consoleLogService ? context.consoleLogService : undefined
+      this.flags.consoleLogService ? context.consoleLogService : undefined,
+      dedicatedCleanup
     );
 
     return context as TContext;

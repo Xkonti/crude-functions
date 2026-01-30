@@ -601,10 +601,11 @@ integrationTest("KeyRotationService - triggerManualRotation rejects when rotatio
     // Start a manual rotation in the background (don't await)
     const rotation1Promise = service.triggerManualRotation();
 
-    // Small delay to ensure rotation has started
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Give the first rotation time to acquire the lock before starting the second
+    // This small delay ensures the async rotation has started
+    await new Promise((r) => setTimeout(r, 10));
 
-    // Try to start another while first is in progress - should fail
+    // Try to start another - should fail because first holds the lock
     await expect(service.triggerManualRotation()).rejects.toThrow(
       "Key rotation is already in progress"
     );

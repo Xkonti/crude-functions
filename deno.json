@@ -2,7 +2,7 @@
   "tasks": {
     "setup": "deno run --allow-read --allow-write --allow-env --allow-run --allow-net scripts/setup-surreal.ts",
     "dev": "deno task setup && deno run --env-file=.env --watch --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run main.ts",
-    "test": "deno test --env-file=.env --allow-net --allow-env --allow-read --allow-write --allow-ffi --allow-run",
+    "test": "deno run -A scripts/run-tests.ts",
     "reset": "rm -rf data && mkdir data"
   },
   "imports": {

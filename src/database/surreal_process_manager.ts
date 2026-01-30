@@ -31,6 +31,8 @@ export interface SurrealProcessManagerOptions {
   readinessIntervalMs?: number;
   /** Callback for unexpected process exits */
   onUnexpectedExit?: UnexpectedExitCallback;
+  /** Suppress stdout/stderr logging (default: false) */
+  quiet?: boolean;
 }
 
 /**
@@ -65,6 +67,7 @@ export class SurrealProcessManager {
   private readonly readinessTimeoutMs: number;
   private readonly readinessIntervalMs: number;
   private readonly onUnexpectedExit?: UnexpectedExitCallback;
+  private readonly quiet: boolean;
 
   private process: Deno.ChildProcess | null = null;
   private processExitPromise: Promise<Deno.CommandStatus> | null = null;
@@ -80,6 +83,7 @@ export class SurrealProcessManager {
     this.readinessTimeoutMs = options.readinessTimeoutMs ?? 30000;
     this.readinessIntervalMs = options.readinessIntervalMs ?? 100;
     this.onUnexpectedExit = options.onUnexpectedExit;
+    this.quiet = options.quiet ?? false;
   }
 
   /**
@@ -124,7 +128,7 @@ export class SurrealProcessManager {
       this.process = command.spawn();
       this.processExitPromise = this.process.status;
 
-      // Start streaming stdout/stderr to console
+      // Start streaming stdout/stderr (drain if quiet, log otherwise)
       this.streamOutput(this.process.stdout, "[SurrealDB]");
       this.streamOutput(this.process.stderr, "[SurrealDB:err]");
 
@@ -168,7 +172,9 @@ export class SurrealProcessManager {
 
         if (result === null) {
           // Timeout - force kill
-          console.warn("[SurrealDB] Process did not exit gracefully, forcing kill");
+          if (!this.quiet) {
+            console.warn("[SurrealDB] Process did not exit gracefully, forcing kill");
+          }
           this.process.kill("SIGKILL");
         }
       }
@@ -296,6 +302,7 @@ export class SurrealProcessManager {
 
   /**
    * Streams process output to console with a prefix.
+   * If quiet mode is enabled, drains the stream without logging.
    */
   private async streamOutput(
     stream: ReadableStream<Uint8Array>,
@@ -309,10 +316,13 @@ export class SurrealProcessManager {
         const { done, value } = await reader.read();
         if (done) break;
 
-        const text = decoder.decode(value);
-        for (const line of text.split("\n")) {
-          if (line.trim()) {
-            console.log(`${prefix} ${line}`);
+        // Only log if not in quiet mode
+        if (!this.quiet) {
+          const text = decoder.decode(value);
+          for (const line of text.split("\n")) {
+            if (line.trim()) {
+              console.log(`${prefix} ${line}`);
+            }
           }
         }
       }

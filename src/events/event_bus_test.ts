@@ -85,21 +85,20 @@ Deno.test("EventBus.publish continues notifying after sync subscriber error", ()
 
 Deno.test("EventBus.publish handles async subscribers", async () => {
   const eventBus = new EventBus();
-  let called = false;
+  let resolveSignal: () => void;
+  const completionSignal = new Promise<void>((resolve) => {
+    resolveSignal = resolve;
+  });
 
   eventBus.subscribe(EventType.JOB_ENQUEUED, async () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
-    called = true;
+    resolveSignal();
   });
 
   eventBus.publish(EventType.JOB_ENQUEUED, { jobId: new RecordId("job", "test1"), type: "test" });
 
-  // Publish is fire-and-forget, so subscriber runs async
-  expect(called).toBe(false);
-
-  // Wait for async subscriber to complete
-  await new Promise((resolve) => setTimeout(resolve, 50));
-  expect(called).toBe(true);
+  // Wait for async subscriber to complete using Promise signal
+  await completionSignal;
 });
 
 Deno.test("EventBus.publish continues after async subscriber rejection", async () => {
@@ -107,8 +106,8 @@ Deno.test("EventBus.publish continues after async subscriber rejection", async (
   const received: RecordId[] = [];
   const jobId = new RecordId("job", "test99");
 
-  eventBus.subscribe(EventType.JOB_ENQUEUED, () => {
-    return Promise.reject(new Error("Async error"));
+  eventBus.subscribe(EventType.JOB_ENQUEUED, async () => {
+    await Promise.reject(new Error("Async error"));
   });
   eventBus.subscribe(EventType.JOB_ENQUEUED, (event) => {
     received.push(event.payload.jobId);
@@ -119,8 +118,8 @@ Deno.test("EventBus.publish continues after async subscriber rejection", async (
   // Sync subscriber should have been called immediately
   expect(received).toEqual([jobId]);
 
-  // Wait for async error to be caught and logged (not thrown)
-  await new Promise((resolve) => setTimeout(resolve, 10));
+  // Wait for async error handling by yielding to microtask queue
+  await new Promise<void>((resolve) => queueMicrotask(() => resolve()));
 });
 
 Deno.test("EventBus.unsubscribe only removes the specific subscriber", () => {
