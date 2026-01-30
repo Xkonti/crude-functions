@@ -262,8 +262,12 @@ integrationTest("JobProcessorService.start and stop lifecycle", async () => {
     expect(processor.isRunning()).toBe(false);
 
     processor.start();
-    // Give it a moment to start
-    await new Promise((r) => setTimeout(r, 100));
+
+    // Poll for running state instead of fixed delay
+    const startTime = Date.now();
+    while (!processor.isRunning() && Date.now() - startTime < 5000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
     expect(processor.isRunning()).toBe(true);
 
@@ -287,9 +291,14 @@ integrationTest("JobProcessorService.start processes pending jobs", async () => 
 
   try {
     let handlerCalled = false;
+    let handlerResolve: () => void;
+    const handlerPromise = new Promise<void>((resolve) => {
+      handlerResolve = resolve;
+    });
 
     processor.registerHandler("auto-process", (_job, _token) => {
       handlerCalled = true;
+      handlerResolve();
       return { done: true };
     });
 
@@ -297,13 +306,19 @@ integrationTest("JobProcessorService.start processes pending jobs", async () => 
 
     processor.start();
 
-    // Wait for processing
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait for handler to be called
+    await handlerPromise;
 
     expect(handlerCalled).toBe(true);
 
-    // Jobs are deleted after completion, so nothing should remain
-    const jobs = await ctx.jobQueueService.getJobsByType("auto-process");
+    // Poll for job to be deleted (deleted after completion)
+    let jobs: { status: string }[] = [];
+    const deadline = Date.now() + 1000;
+    while (Date.now() < deadline) {
+      jobs = await ctx.jobQueueService.getJobsByType("auto-process");
+      if (jobs.length === 0) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
     expect(jobs.length).toBe(0);
   } finally {
     await processor.stop();
@@ -322,7 +337,12 @@ integrationTest("JobProcessorService warns when start called twice", async () =>
 
   try {
     processor.start();
-    await new Promise((r) => setTimeout(r, 50));
+
+    // Poll for running state instead of fixed delay
+    const startTime = Date.now();
+    while (!processor.isRunning() && Date.now() - startTime < 5000) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
 
     // Second start should warn but not crash
     processor.start();
@@ -376,6 +396,11 @@ integrationTest("JobProcessorService recovers orphaned jobs on startup", async (
     expect(orphaned.length).toBe(1);
 
     let handlerCalled = false;
+    let handlerResolve: () => void;
+    const handlerPromise = new Promise<void>((resolve) => {
+      handlerResolve = resolve;
+    });
+
     const processor = new JobProcessorService({
       jobQueueService: ctx.jobQueueService,
       instanceIdService: ctx.instanceIdService,
@@ -384,13 +409,14 @@ integrationTest("JobProcessorService recovers orphaned jobs on startup", async (
 
     processor.registerHandler("orphaned-job", (_job, _token) => {
       handlerCalled = true;
+      handlerResolve();
       return { recovered: true };
     });
 
     processor.start();
 
-    // Wait for orphan recovery and processing
-    await new Promise((r) => setTimeout(r, 500));
+    // Wait for handler to be called
+    await handlerPromise;
 
     await processor.stop();
 
@@ -451,13 +477,17 @@ integrationTest("JobProcessorService marks exhausted orphaned jobs as failed", a
 
     processor.start();
 
-    // Wait for orphan recovery
-    await new Promise((r) => setTimeout(r, 300));
+    // Poll for job to be processed and deleted
+    const startTime = Date.now();
+    let jobs = await ctx.jobQueueService.getJobsByType("exhausted-job");
+    while (jobs.length > 0 && Date.now() - startTime < 5000) {
+      await new Promise((r) => setTimeout(r, 50));
+      jobs = await ctx.jobQueueService.getJobsByType("exhausted-job");
+    }
 
     await processor.stop();
 
     // Job should be deleted after being marked as failed
-    const jobs = await ctx.jobQueueService.getJobsByType("exhausted-job");
     expect(jobs.length).toBe(0);
   } finally {
     await ctx.cleanup();

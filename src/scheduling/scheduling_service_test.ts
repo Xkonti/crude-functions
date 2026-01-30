@@ -616,11 +616,15 @@ integrationTest("SchedulingService triggers one-off schedule at scheduled time",
 
     ctx.schedulingService.start();
 
-    // Wait for trigger
-    await new Promise((r) => setTimeout(r, 300));
+    // Poll for job creation instead of fixed delay
+    let jobs: { status: string }[] = [];
+    const deadline = Date.now() + 1000; // 1 second timeout
+    while (Date.now() < deadline) {
+      jobs = await ctx.jobQueueService.getJobsByType("oneoff-job");
+      if (jobs.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20)); // Short poll interval
+    }
 
-    // Check that job was created
-    const jobs = await ctx.jobQueueService.getJobsByType("oneoff-job");
     expect(jobs.length).toBe(1);
     expect(jobs[0].status).toBe("pending");
 
@@ -706,12 +710,16 @@ integrationTest("SchedulingService clears transient schedules on startup", async
     // Start service (which should clear transient schedules)
     ctx.schedulingService.start();
 
-    // Wait for startup
-    await new Promise((r) => setTimeout(r, 100));
+    // Poll for cleanup to complete instead of fixed delay
+    const deadline = Date.now() + 1000; // 1 second timeout
+    let transient = null;
+    while (Date.now() < deadline) {
+      transient = await ctx.schedulingService.getSchedule("transient-schedule");
+      if (transient === null) break;
+      await new Promise((r) => setTimeout(r, 20)); // Short poll interval
+    }
 
     // Transient schedule should be gone
-    const transient =
-      await ctx.schedulingService.getSchedule("transient-schedule");
     expect(transient).toBeNull();
 
     // Persistent schedule should remain
@@ -755,17 +763,29 @@ integrationTest("SchedulingService sequential_interval waits for job completion"
 
     schedulingService.start();
 
-    // Wait for first trigger
-    await new Promise((r) => setTimeout(r, 150));
+    // Poll for job creation instead of fixed delay
+    let jobs = [];
+    const deadline = Date.now() + 1000; // 1 second timeout
+    while (Date.now() < deadline) {
+      jobs = await ctx.jobQueueService.getJobsByType("seq-interval-job");
+      if (jobs.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20)); // Short poll interval
+    }
+    expect(jobs.length).toBeGreaterThan(0);
 
     // Process the job (completion event is delivered synchronously)
     await processor.processOne();
 
-    // Event-based: no polling delay needed, completion is immediate
-    await new Promise((r) => setTimeout(r, 50));
+    // Poll for completion to be recorded instead of fixed delay
+    let schedule = null;
+    const completionDeadline = Date.now() + 1000;
+    while (Date.now() < completionDeadline) {
+      schedule = await schedulingService.getSchedule("seq-interval");
+      if (schedule!.lastCompletedAt !== null) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
 
     // Check schedule has new nextRunAt and completion was recorded
-    const schedule = await schedulingService.getSchedule("seq-interval");
     expect(schedule!.status).toBe("active");
     expect(schedule!.activeJobId).toBeNull();
     expect(schedule!.lastCompletedAt).not.toBeNull();
@@ -811,16 +831,28 @@ integrationTest("SchedulingService dynamic schedule uses handler result for next
 
     schedulingService.start();
 
-    // Wait for trigger
-    await new Promise((r) => setTimeout(r, 150));
+    // Poll for job creation instead of fixed delay
+    let jobs = [];
+    const deadline = Date.now() + 1000; // 1 second timeout
+    while (Date.now() < deadline) {
+      jobs = await ctx.jobQueueService.getJobsByType("dynamic-job");
+      if (jobs.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20)); // Short poll interval
+    }
+    expect(jobs.length).toBeGreaterThan(0);
 
     // Process the job (completion event is delivered synchronously)
     await processor.processOne();
 
-    // Event-based: no polling delay needed
-    await new Promise((r) => setTimeout(r, 50));
+    // Poll for nextRunAt update instead of fixed delay
+    let schedule = null;
+    const updateDeadline = Date.now() + 1000;
+    while (Date.now() < updateDeadline) {
+      schedule = await schedulingService.getSchedule("dynamic");
+      if (schedule!.nextRunAt?.getTime() === nextTime.getTime()) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
 
-    const schedule = await schedulingService.getSchedule("dynamic");
     expect(schedule!.nextRunAt?.getTime()).toBe(nextTime.getTime());
     expect(schedule!.status).toBe("active");
   } finally {
@@ -856,12 +888,27 @@ integrationTest("SchedulingService dynamic schedule completes when handler retur
 
     schedulingService.start();
 
-    await new Promise((r) => setTimeout(r, 150));
-    await processor.processOne();
-    // Event-based: no polling delay needed
-    await new Promise((r) => setTimeout(r, 50));
+    // Poll for job creation instead of fixed delay
+    let jobs = [];
+    const deadline = Date.now() + 1000; // 1 second timeout
+    while (Date.now() < deadline) {
+      jobs = await ctx.jobQueueService.getJobsByType("dynamic-final-job");
+      if (jobs.length > 0) break;
+      await new Promise((r) => setTimeout(r, 20)); // Short poll interval
+    }
+    expect(jobs.length).toBeGreaterThan(0);
 
-    const schedule = await schedulingService.getSchedule("dynamic-final");
+    await processor.processOne();
+
+    // Poll for schedule completion instead of fixed delay
+    let schedule = null;
+    const completionDeadline = Date.now() + 1000;
+    while (Date.now() < completionDeadline) {
+      schedule = await schedulingService.getSchedule("dynamic-final");
+      if (schedule!.status === "completed") break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+
     expect(schedule!.status).toBe("completed");
   } finally {
     await schedulingService.stop();
@@ -881,7 +928,13 @@ integrationTest("SchedulingService.isRunning returns correct state", async () =>
     expect(ctx.schedulingService.isRunning()).toBe(false);
 
     ctx.schedulingService.start();
-    await new Promise((r) => setTimeout(r, 50));
+
+    // Poll for service to be running instead of fixed delay
+    const deadline = Date.now() + 1000; // 1 second timeout
+    while (Date.now() < deadline) {
+      if (ctx.schedulingService.isRunning()) break;
+      await new Promise((r) => setTimeout(r, 10)); // Short poll interval
+    }
     expect(ctx.schedulingService.isRunning()).toBe(true);
 
     await ctx.schedulingService.stop();
@@ -897,7 +950,13 @@ integrationTest("SchedulingService.start is idempotent", async () => {
   try {
     ctx.schedulingService.start();
     ctx.schedulingService.start(); // Should not throw or cause issues
-    await new Promise((r) => setTimeout(r, 50));
+
+    // Poll for service to be running instead of fixed delay
+    const deadline = Date.now() + 1000; // 1 second timeout
+    while (Date.now() < deadline) {
+      if (ctx.schedulingService.isRunning()) break;
+      await new Promise((r) => setTimeout(r, 10)); // Short poll interval
+    }
     expect(ctx.schedulingService.isRunning()).toBe(true);
   } finally {
     await ctx.schedulingService.stop();
@@ -1238,19 +1297,35 @@ integrationTest("SchedulingService.updateSchedule triggers reschedule when runni
     });
 
     ctx.schedulingService.start();
-    await new Promise((r) => setTimeout(r, 100));
 
-    const originalNextTime = ctx.schedulingService.getNextScheduledTime();
+    // Poll for service to be running and have a scheduled time
+    let originalNextTime: Date | null = null;
+    const startDeadline = Date.now() + 1000;
+    while (Date.now() < startDeadline) {
+      if (ctx.schedulingService.isRunning()) {
+        originalNextTime = ctx.schedulingService.getNextScheduledTime();
+        if (originalNextTime) break;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+
+    expect(originalNextTime).not.toBeNull();
 
     // Update to much shorter interval
     await ctx.schedulingService.updateSchedule("reschedule-test", {
       intervalMs: 1000,
     });
 
-    // Wait for reschedule debounce
-    await new Promise((r) => setTimeout(r, 200));
-
-    const newNextTime = ctx.schedulingService.getNextScheduledTime();
+    // Poll for reschedule to complete
+    let newNextTime: Date | null = null;
+    const rescheduleDeadline = Date.now() + 1000;
+    while (Date.now() < rescheduleDeadline) {
+      newNextTime = ctx.schedulingService.getNextScheduledTime();
+      if (newNextTime && newNextTime.getTime() < originalNextTime!.getTime()) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 20));
+    }
 
     // New next time should be much sooner
     expect(newNextTime).not.toBeNull();

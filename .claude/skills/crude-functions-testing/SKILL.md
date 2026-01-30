@@ -9,12 +9,16 @@ description: Testing best practices for Crude Functions project - includes TestS
 
 This skill documents testing best practices specific to the Crude Functions project. Testing in this codebase follows a philosophy of **real infrastructure over mocks** - preferring real databases, migrations, and services when practical. The centerpiece is **TestSetupBuilder**, a fluent API for creating isolated test environments that mirror production initialization.
 
+**All tests run in parallel** against a single shared SurrealDB instance for ~10x speedup. This requires careful attention to avoid race conditions - see [Parallel Test Execution](#parallel-test-execution).
+
 **Key Principles:**
 - Use real infrastructure (database, migrations, services) via TestSetupBuilder for integration tests
 - Use simple helper functions for focused unit tests
 - Minimize mocking - only mock at boundaries (auth, external systems)
 - Always cleanup resources with try-finally pattern
 - Test pure functions separately without setup overhead
+- Avoid timing-based synchronization - use polling or Promise-based signaling
+- Never modify process-global state without mutex coordination
 
 ## TestSetupBuilder
 
@@ -365,6 +369,217 @@ integrationTest("migrate applies all migrations on fresh database", async () => 
 3. **Use `.withBaseOnly()` for migration tests** - Prevents auto-running migrations you're testing
 4. **Query `ctx.surrealDb` directly** - Verify state after operations
 5. **Namespace isolation is automatic** - No manual cleanup needed beyond `ctx.cleanup()`
+
+## Parallel Test Execution
+
+### Overview
+
+**All tests run in parallel** against a single shared SurrealDB instance. This provides ~10x speedup over sequential execution but requires careful attention to avoid race conditions.
+
+**Key facts:**
+- Tests run via `deno task test` which starts one SurrealDB and runs `deno test --parallel`
+- Each test file runs in its own Deno isolate (separate memory space)
+- All tests share the same SurrealDB process via namespace isolation
+- Process-global state (console, Deno.exit, environment variables) is shared across tests within a file
+
+### Race Condition Patterns to Avoid
+
+#### ❌ Pattern 1: Timing-Based Synchronization
+
+**Problem:** Using `setTimeout` or fixed delays to wait for async operations.
+
+```typescript
+// BAD - timing-based, flaky under load
+processor.start();
+await new Promise((r) => setTimeout(r, 100));  // Hope it started
+expect(processor.isRunning()).toBe(true);
+
+// BAD - waiting for handler to be called
+await new Promise((r) => setTimeout(r, 500));  // Hope handler ran
+expect(handlerCalled).toBe(true);
+```
+
+**Why it fails:** Under parallel execution with CPU load, 100ms may not be enough. Tests become flaky.
+
+**Solution A: Polling for state changes**
+
+```typescript
+// GOOD - poll until condition is met or timeout
+processor.start();
+
+const deadline = Date.now() + 5000;  // 5 second timeout
+while (!processor.isRunning() && Date.now() < deadline) {
+  await new Promise((r) => setTimeout(r, 10));  // Short poll interval
+}
+
+expect(processor.isRunning()).toBe(true);
+```
+
+**Solution B: Promise-based signaling**
+
+```typescript
+// GOOD - wait for actual event, not arbitrary time
+let handlerResolve: () => void;
+const handlerPromise = new Promise<void>((resolve) => {
+  handlerResolve = resolve;
+});
+
+processor.registerHandler("job-type", (_job, _token) => {
+  handlerCalled = true;
+  handlerResolve();  // Signal completion
+  return { done: true };
+});
+
+processor.start();
+await handlerPromise;  // Wait for actual handler call
+
+expect(handlerCalled).toBe(true);
+```
+
+**Solution C: Explicit flush/sync methods**
+
+```typescript
+// GOOD - use service's flush method instead of delay
+await runInRequestContext(ctx, async () => {
+  console.log("log message");
+});
+
+await logService.flush();  // Wait for actual flush, not arbitrary delay
+const logs = await logService.getByRequestId(requestId);
+```
+
+#### ❌ Pattern 2: Process-Global State Mutations
+
+**Problem:** Modifying process-global state that affects other parallel tests.
+
+```typescript
+// BAD - Deno.chdir affects ALL parallel tests
+Deno.chdir(tempDir);
+// ... test code ...
+Deno.chdir(originalDir);  // Too late - other tests already broken
+
+// BAD - Deno.env.set without coordination
+Deno.env.set("MY_VAR", "test-value");
+// Other tests may see this value unexpectedly
+
+// BAD - modifying global console without synchronization
+console.log = myCustomLogger;
+// Other tests' console output goes to your custom logger
+```
+
+**Solution: Use absolute paths instead of chdir**
+
+```typescript
+// GOOD - use absolute paths, never change working directory
+const tempDir = await Deno.makeTempDir();
+const filePath = `${tempDir}/file.txt`;
+await Deno.writeTextFile(filePath, content);
+
+// GOOD - resolve paths absolutely
+const result = await resolveAndValidatePath(tempDir, "file.ts");
+expect(result).toBe(`${tempDir}/file.ts`);
+```
+
+**Solution: Use mutex for tests that must modify global state**
+
+```typescript
+import { Mutex } from "@core/asyncutil/mutex";
+
+// Tests that modify process-global state MUST serialize
+const globalStateMutex = new Mutex();
+
+async function setupIsolator() {
+  using _lock = await globalStateMutex.acquire();
+  isolator = new ProcessIsolator();
+  isolator.install();  // Modifies Deno.exit, process.exit, etc.
+}
+
+async function teardownIsolator() {
+  using _lock = await globalStateMutex.acquire();
+  isolator?.uninstall();
+}
+```
+
+#### ❌ Pattern 3: Module-Level Singleton State
+
+**Problem:** Tests modifying module-level singletons (like a logger) conflict with each other.
+
+```typescript
+// BAD - multiple tests initializing the same logger concurrently
+integrationTest("test 1", async () => {
+  initializeLogger(settingsService);  // Modifies module-level state
+  // ...
+});
+
+integrationTest("test 2", async () => {
+  initializeLogger(otherSettingsService);  // Race condition!
+  // ...
+});
+```
+
+**Solution: Sequential test wrapper with mutex**
+
+```typescript
+const loggerTestMutex = new Mutex();
+
+function sequentialLoggerTest(
+  name: string,
+  fn: () => Promise<void> | void
+): void {
+  integrationTest(name, async () => {
+    using _lock = await loggerTestMutex.acquire();
+    await fn();
+  });
+}
+
+// All logger tests use the wrapper
+sequentialLoggerTest("logger outputs at debug level", async () => {
+  // Guaranteed to run sequentially with other logger tests
+  initializeLogger(settingsService);
+  // ...
+});
+```
+
+### When Fixed Delays ARE Acceptable
+
+Some tests legitimately need timing delays:
+
+1. **Testing time-based behavior** (e.g., idle timeout, retention periods)
+   ```typescript
+   // OK - testing actual time-based retention
+   const service = new LogTrimmingService({ retentionMs: 1000 });
+   await new Promise((r) => setTimeout(r, 2000));  // Wait for retention period
+   // Verify old logs were trimmed
+   ```
+
+2. **Simulating work inside handlers** (not for synchronization)
+   ```typescript
+   // OK - delay is the test's subject, not synchronization
+   processor.registerHandler("job", async () => {
+     await new Promise((r) => setTimeout(r, 50));  // Simulate work
+     return { done: true };
+   });
+   ```
+
+3. **Small delays to ensure async operation has started** (with comment explaining why)
+   ```typescript
+   // OK when necessary - but prefer Promise-based signaling
+   const rotation1Promise = service.triggerManualRotation();
+   // Give first rotation time to acquire lock before starting second
+   await new Promise((r) => setTimeout(r, 10));
+   await expect(service.triggerManualRotation()).rejects.toThrow();
+   ```
+
+### Summary: Parallel-Safe Test Checklist
+
+Before writing a test, ask:
+
+1. ✅ Does it use `TestSetupBuilder`? → Automatic namespace isolation
+2. ✅ Does it await actual completion (Promises, flush methods)?
+3. ✅ Does it avoid `Deno.chdir()`, `Deno.env.set()`, global mutations?
+4. ✅ Does it use absolute paths instead of relative paths?
+5. ✅ If it MUST modify global state, does it use a mutex?
+6. ✅ Does it have proper cleanup in `finally` blocks?
 
 ## Test Structure Patterns
 
@@ -760,16 +975,50 @@ const ctx = await TestSetupBuilder.create()
 
 **Exception:** Tests for migration logic itself may use inline schemas for comparison.
 
-### ❌ No Timing-Dependent Assertions
+### ❌ No Timing-Dependent Synchronization
+
+See [Parallel Test Execution](#parallel-test-execution) for comprehensive coverage.
 
 ```typescript
-// Bad - arbitrary timeout
+// Bad - arbitrary timeout for synchronization
+processor.start();
 await new Promise(resolve => setTimeout(resolve, 100));
-expect(processCompleted).toBe(true);  // ❌ Flaky!
+expect(processor.isRunning()).toBe(true);  // ❌ Flaky!
 
-// Good - await the actual promise
-await processPromise;
-expect(processCompleted).toBe(true);  // ✅ Deterministic
+// Good - poll for state change
+processor.start();
+const deadline = Date.now() + 5000;
+while (!processor.isRunning() && Date.now() < deadline) {
+  await new Promise((r) => setTimeout(r, 10));
+}
+expect(processor.isRunning()).toBe(true);  // ✅ Deterministic
+
+// Good - Promise-based signaling
+let resolveHandler: () => void;
+const handlerPromise = new Promise<void>((r) => { resolveHandler = r; });
+processor.registerHandler("type", () => { resolveHandler(); return {}; });
+processor.start();
+await handlerPromise;  // ✅ Wait for actual event
+```
+
+### ❌ No Process-Global State Mutations Without Coordination
+
+```typescript
+// Bad - affects all parallel tests
+Deno.chdir(tempDir);  // ❌ Process-global!
+
+// Good - use absolute paths
+const filePath = `${tempDir}/file.ts`;  // ✅ No global state change
+
+// Bad - modifying console without mutex
+console.log = myLogger;  // ❌ Affects other tests!
+
+// Good - use mutex when global state modification is unavoidable
+const mutex = new Mutex();
+using _lock = await mutex.acquire();
+console.log = myLogger;
+// ... test code ...
+console.log = originalLog;
 ```
 
 ## Related Files
@@ -780,6 +1029,7 @@ expect(processCompleted).toBe(true);  // ✅ Deterministic
 - **Dependency graph:** `src/test/dependency_graph.ts`
 - **SharedSurrealManager:** `src/test/shared_surreal_manager.ts`
 - **Test helpers:** `src/test/test_helpers.ts`
+- **Test runner script:** `scripts/run-tests.ts` (starts SurrealDB, runs parallel tests)
 
 ## Example Test Files
 
@@ -789,3 +1039,8 @@ expect(processCompleted).toBe(true);  // ✅ Deterministic
 - **Manual mocking:** `src/auth/auth_middleware_test.ts`
 - **Deferred data pattern:** `src/logs/console_log_service_test.ts`
 - **SurrealDB migration test:** `src/database/surreal_migration_service_test.ts`
+- **Parallel-safe patterns:**
+  - **Polling pattern:** `src/jobs/job_processor_service_test.ts`
+  - **Promise signaling:** `src/events/event_bus_test.ts`
+  - **Explicit flush:** `src/logs/stream_interceptor_test.ts`
+  - **Mutex for global state:** `src/process/process_isolator_test.ts`, `src/utils/logger_test.ts`

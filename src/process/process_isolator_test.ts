@@ -3,16 +3,24 @@ import { expect } from "@std/expect";
 import { ProcessIsolator, _getOriginalsForTesting } from "./process_isolator.ts";
 import { runInRequestContext } from "../logs/request_context.ts";
 import process from "node:process";
+import { Mutex } from "@core/asyncutil/mutex";
+
+// CRITICAL: ProcessIsolator modifies process-global state (Deno.exit, process.exit, etc.)
+// Multiple tests installing/uninstalling simultaneously would race on these globals.
+// We use a mutex to serialize all install/uninstall operations across parallel tests.
+const installMutex = new Mutex();
 
 let isolator: ProcessIsolator;
 
-// Setup/teardown helpers
-function setupIsolator() {
+// Setup/teardown helpers - these now acquire mutex to prevent parallel install/uninstall
+async function setupIsolator() {
+  using _lock = await installMutex.acquire();
   isolator = new ProcessIsolator();
   isolator.install();
 }
 
-function teardownIsolator() {
+async function teardownIsolator() {
+  using _lock = await installMutex.acquire();
   if (isolator) {
     isolator.uninstall();
   }
@@ -26,38 +34,51 @@ const createTestContext = () => ({
 
 describe("ProcessIsolator", () => {
   describe("Installation", () => {
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
-    it("should install successfully", () => {
-      setupIsolator();
+    it("should install successfully", async () => {
+      await setupIsolator();
       expect(isolator.installed).toBe(true);
     });
 
-    it("should be idempotent", () => {
-      setupIsolator();
-      isolator.install(); // Second install
+    it("should be idempotent", async () => {
+      await setupIsolator();
+      // Second install - must also use mutex to avoid races
+      {
+        using _lock = await installMutex.acquire();
+        isolator.install();
+      }
       expect(isolator.installed).toBe(true);
     });
 
-    it("should uninstall successfully", () => {
-      setupIsolator();
-      isolator.uninstall();
+    it("should uninstall successfully", async () => {
+      await setupIsolator();
+      {
+        using _lock = await installMutex.acquire();
+        isolator.uninstall();
+      }
       expect(isolator.installed).toBe(false);
     });
 
-    it("should allow multiple install/uninstall cycles", () => {
-      setupIsolator();
-      isolator.uninstall();
-      isolator.install();
+    it("should allow multiple install/uninstall cycles", async () => {
+      await setupIsolator();
+      {
+        using _lock = await installMutex.acquire();
+        isolator.uninstall();
+        isolator.install();
+      }
       expect(isolator.installed).toBe(true);
-      isolator.uninstall();
+      {
+        using _lock = await installMutex.acquire();
+        isolator.uninstall();
+      }
       expect(isolator.installed).toBe(false);
     });
 
-    it("should provide access to originals for testing", () => {
-      setupIsolator();
+    it("should provide access to originals for testing", async () => {
+      await setupIsolator();
       const originals = _getOriginalsForTesting();
       expect(originals.denoExit).toBeDefined();
       expect(originals.denoChdir).toBeDefined();
@@ -67,12 +88,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Deno.exit() isolation", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should throw inside handler context", () => {
@@ -107,12 +128,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("process.exit() isolation", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should throw inside handler context", () => {
@@ -147,12 +168,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Deno.chdir() isolation", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should throw inside handler context with string path", () => {
@@ -177,12 +198,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("process.chdir() isolation", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should throw inside handler context", () => {
@@ -197,12 +218,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Concurrent execution", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should isolate errors across concurrent requests", async () => {
@@ -247,12 +268,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Outside handler context", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should not throw when no context is active", async () => {
@@ -271,12 +292,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Async boundaries", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should maintain isolation across async operations", async () => {
@@ -310,12 +331,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Nested contexts", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should throw in nested request contexts", () => {
@@ -347,12 +368,12 @@ describe("ProcessIsolator", () => {
   });
 
   describe("Error messages", () => {
-    beforeEach(() => {
-      setupIsolator();
+    beforeEach(async () => {
+      await setupIsolator();
     });
 
-    afterEach(() => {
-      teardownIsolator();
+    afterEach(async () => {
+      await teardownIsolator();
     });
 
     it("should have clear error message for Deno.exit", () => {

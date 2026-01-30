@@ -8,6 +8,27 @@ import {
   type LogLevel,
   stopLoggerRefresh,
 } from "./logger.ts";
+import { Mutex } from "@core/asyncutil/mutex";
+
+// Logger tests cannot run in parallel due to shared module-level state.
+// The logger maintains process-global state (console object and log level)
+// that cannot be safely isolated between tests. This mutex ensures tests
+// run sequentially even when Deno test runner tries to parallelize them.
+const loggerTestMutex = new Mutex();
+
+/**
+ * Wrapper for logger tests that ensures sequential execution.
+ * All logger tests must use this wrapper to prevent parallel execution issues.
+ */
+function sequentialLoggerTest(
+  name: string,
+  fn: () => Promise<void> | void
+): void {
+  integrationTest(name, async () => {
+    using _lock = await loggerTestMutex.acquire();
+    await fn();
+  });
+}
 
 // =====================
 // Console spy helpers
@@ -28,10 +49,13 @@ interface ConsoleSpy {
 
 /**
  * Creates a spy that captures console.debug/info/warn/error calls.
- * Install before testing, uninstall in finally block.
+ * IMPORTANT: This modifies process-global console object. Tests using this
+ * cannot safely run in parallel and must coordinate through test sequencing.
  */
 function createConsoleSpy(): ConsoleSpy {
   const calls: ConsoleCall[] = [];
+  // Capture the CURRENT console methods at creation time, not at module load time
+  // This allows tests to restore to the state before they started
   const original = {
     debug: console.debug,
     info: console.info,
@@ -73,6 +97,36 @@ interface LoggerTestContext {
 }
 
 /**
+ * Waits for logger to stabilize after initialization or settings change.
+ * Uses polling to detect when the log level has been applied, rather than
+ * relying on timing.
+ */
+async function waitForLoggerStability(maxWaitMs = 200): Promise<void> {
+  const startTime = Date.now();
+  let lastCallCount = -1;
+  const spy = createConsoleSpy();
+
+  // Poll until logger state stabilizes or timeout
+  while (Date.now() - startTime < maxWaitMs) {
+    spy.calls.length = 0;
+    spy.install();
+    try {
+      logger.debug("stability check");
+      const currentCallCount = spy.calls.length;
+
+      // If call count matches previous iteration, logger is stable
+      if (currentCallCount === lastCallCount) {
+        return;
+      }
+      lastCallCount = currentCallCount;
+    } finally {
+      spy.uninstall();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+/**
  * Creates a test context with SettingsService configured for the given log level.
  */
 async function createLoggerTestContext(
@@ -86,8 +140,8 @@ async function createLoggerTestContext(
   return {
     async initLogger() {
       initializeLogger(ctx.settingsService);
-      // Wait for fire-and-forget refreshLogLevel() to complete
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Wait for logger state to stabilize using polling instead of fixed delay
+      await waitForLoggerStability();
     },
     async cleanup() {
       stopLoggerRefresh();
@@ -100,7 +154,7 @@ async function createLoggerTestContext(
 // Log level filtering tests
 // =====================
 
-integrationTest("logger.debug outputs at debug level", async () => {
+sequentialLoggerTest("logger.debug outputs at debug level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -119,7 +173,7 @@ integrationTest("logger.debug outputs at debug level", async () => {
   }
 });
 
-integrationTest("logger.debug suppressed at info level", async () => {
+sequentialLoggerTest("logger.debug suppressed at info level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -136,7 +190,7 @@ integrationTest("logger.debug suppressed at info level", async () => {
   }
 });
 
-integrationTest("logger.info outputs at info level", async () => {
+sequentialLoggerTest("logger.info outputs at info level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -155,7 +209,7 @@ integrationTest("logger.info outputs at info level", async () => {
   }
 });
 
-integrationTest("logger.info suppressed at warn level", async () => {
+sequentialLoggerTest("logger.info suppressed at warn level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("warn");
   const spy = createConsoleSpy();
 
@@ -172,7 +226,7 @@ integrationTest("logger.info suppressed at warn level", async () => {
   }
 });
 
-integrationTest("logger.warn outputs at warn level", async () => {
+sequentialLoggerTest("logger.warn outputs at warn level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("warn");
   const spy = createConsoleSpy();
 
@@ -191,7 +245,7 @@ integrationTest("logger.warn outputs at warn level", async () => {
   }
 });
 
-integrationTest("logger.warn suppressed at error level", async () => {
+sequentialLoggerTest("logger.warn suppressed at error level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("error");
   const spy = createConsoleSpy();
 
@@ -208,7 +262,7 @@ integrationTest("logger.warn suppressed at error level", async () => {
   }
 });
 
-integrationTest("logger.error outputs at error level", async () => {
+sequentialLoggerTest("logger.error outputs at error level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("error");
   const spy = createConsoleSpy();
 
@@ -227,7 +281,7 @@ integrationTest("logger.error outputs at error level", async () => {
   }
 });
 
-integrationTest("logger.error suppressed at none level", async () => {
+sequentialLoggerTest("logger.error suppressed at none level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("none");
   const spy = createConsoleSpy();
 
@@ -244,7 +298,7 @@ integrationTest("logger.error suppressed at none level", async () => {
   }
 });
 
-integrationTest("all log methods output at debug level", async () => {
+sequentialLoggerTest("all log methods output at debug level", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -270,7 +324,7 @@ integrationTest("all log methods output at debug level", async () => {
   }
 });
 
-integrationTest("none level suppresses all log methods", async () => {
+sequentialLoggerTest("none level suppresses all log methods", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("none");
   const spy = createConsoleSpy();
 
@@ -294,7 +348,7 @@ integrationTest("none level suppresses all log methods", async () => {
 // Initialization tests
 // =====================
 
-integrationTest("initializeLogger fetches log level from settings", async () => {
+sequentialLoggerTest("initializeLogger fetches log level from settings", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -312,7 +366,7 @@ integrationTest("initializeLogger fetches log level from settings", async () => 
   }
 });
 
-integrationTest("logger uses default info level before initialization", () => {
+sequentialLoggerTest("logger uses default info level before initialization", () => {
   const spy = createConsoleSpy();
 
   try {
@@ -340,7 +394,7 @@ integrationTest("logger uses default info level before initialization", () => {
 // Stop refresh tests
 // =====================
 
-integrationTest("stopLoggerRefresh is idempotent", async () => {
+sequentialLoggerTest("stopLoggerRefresh is idempotent", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
 
   try {
@@ -357,7 +411,7 @@ integrationTest("stopLoggerRefresh is idempotent", async () => {
   }
 });
 
-integrationTest("stopLoggerRefresh allows re-initialization", async () => {
+sequentialLoggerTest("stopLoggerRefresh allows re-initialization", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -386,7 +440,7 @@ integrationTest("stopLoggerRefresh allows re-initialization", async () => {
 // Message formatting tests
 // =====================
 
-integrationTest("logger.debug prefixes with [DEBUG]", async () => {
+sequentialLoggerTest("logger.debug prefixes with [DEBUG]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -403,7 +457,7 @@ integrationTest("logger.debug prefixes with [DEBUG]", async () => {
   }
 });
 
-integrationTest("logger.info prefixes with [INFO]", async () => {
+sequentialLoggerTest("logger.info prefixes with [INFO]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -420,7 +474,7 @@ integrationTest("logger.info prefixes with [INFO]", async () => {
   }
 });
 
-integrationTest("logger.warn prefixes with [WARN]", async () => {
+sequentialLoggerTest("logger.warn prefixes with [WARN]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("warn");
   const spy = createConsoleSpy();
 
@@ -437,7 +491,7 @@ integrationTest("logger.warn prefixes with [WARN]", async () => {
   }
 });
 
-integrationTest("logger.error prefixes with [ERROR]", async () => {
+sequentialLoggerTest("logger.error prefixes with [ERROR]", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("error");
   const spy = createConsoleSpy();
 
@@ -454,7 +508,7 @@ integrationTest("logger.error prefixes with [ERROR]", async () => {
   }
 });
 
-integrationTest("logger passes additional args to console", async () => {
+sequentialLoggerTest("logger passes additional args to console", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("debug");
   const spy = createConsoleSpy();
 
@@ -472,7 +526,7 @@ integrationTest("logger passes additional args to console", async () => {
   }
 });
 
-integrationTest("logger passes multiple args to console", async () => {
+sequentialLoggerTest("logger passes multiple args to console", async () => {
   const { initLogger, cleanup } = await createLoggerTestContext("info");
   const spy = createConsoleSpy();
 
@@ -493,7 +547,7 @@ integrationTest("logger passes multiple args to console", async () => {
 // Settings integration tests
 // =====================
 
-integrationTest("logger updates level when settings change", async () => {
+sequentialLoggerTest("logger updates level when settings change", async () => {
   // Start with info level
   const ctx = await TestSetupBuilder.create()
     .withSettings()
@@ -505,7 +559,7 @@ integrationTest("logger updates level when settings change", async () => {
   try {
     spy.install();
     initializeLogger(ctx.settingsService);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForLoggerStability();
 
     // Debug should be suppressed at info level
     logger.debug("should not appear");
@@ -519,7 +573,7 @@ integrationTest("logger updates level when settings change", async () => {
 
     // Re-initialize to trigger refresh
     initializeLogger(ctx.settingsService);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForLoggerStability();
 
     // Now debug should work
     logger.debug("should appear now");
@@ -531,7 +585,7 @@ integrationTest("logger updates level when settings change", async () => {
   }
 });
 
-integrationTest("logger handles invalid log level gracefully", async () => {
+sequentialLoggerTest("logger handles invalid log level gracefully", async () => {
   const ctx = await TestSetupBuilder.create()
     .withSettings()
     .withSetting(SettingNames.LOG_LEVEL, "debug")
@@ -542,7 +596,7 @@ integrationTest("logger handles invalid log level gracefully", async () => {
   try {
     spy.install();
     initializeLogger(ctx.settingsService);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForLoggerStability();
 
     // Confirm debug level is active
     logger.debug("before invalid");
@@ -560,7 +614,7 @@ integrationTest("logger handles invalid log level gracefully", async () => {
 
     // Re-initialize to trigger refresh
     initializeLogger(ctx.settingsService);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await waitForLoggerStability();
 
     // Should keep previous valid level (debug) since invalid is ignored
     logger.debug("after invalid");
