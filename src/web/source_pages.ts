@@ -156,9 +156,9 @@ export function createSourcePages(
       // Action buttons (icons)
       const csrfToken = getCsrfToken(c);
       const syncButton = source.type === "git"
-        ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline; margin: 0;">
+        ? `<form method="POST" action="/web/code/sources/${source.id}/sync" style="display: inline-block; margin: 0; width: auto;">
             ${csrfInput(csrfToken)}
-            <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1;" title="Sync" ${source.lastSyncStartedAt ? "disabled" : ""}>
+            <button type="submit" class="outline secondary" style="padding: 0.25rem 0.5rem; font-size: 1rem; line-height: 1; width: auto; min-width: auto;" title="Sync" ${source.lastSyncStartedAt ? "disabled" : ""}>
               🔄
             </button>
           </form>`
