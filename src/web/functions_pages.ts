@@ -34,6 +34,7 @@ import {
 } from "./templates.ts";
 import { csrfInput } from "../csrf/csrf_helpers.ts";
 import { validateSurrealId } from "../validation/common.ts";
+import { fuzzyAutocompleteComponent } from "./webcomponents/fuzzy_autocomplete.ts";
 
 const ALL_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"];
 
@@ -1137,10 +1138,12 @@ function renderFunctionForm(
         Description
         <textarea name="description" rows="2" placeholder="Optional description">${escapeHtml(route.description ?? "")}</textarea>
       </label>
-      <label>
+      <label for="handler-input">
         Handler Path
-        <input type="text" name="handler" value="${escapeHtml(route.handler ?? "")}"
-               required placeholder="handlers/my-function.ts">
+        <fuzzy-autocomplete endpoint="/api/files/search" input-id="handler-input" show-icon="right">
+          <input type="text" name="handler" id="handler-input" value="${escapeHtml(route.handler ?? "")}"
+                 required placeholder="handlers/my-function.ts">
+        </fuzzy-autocomplete>
         <small>Path to the TypeScript handler file in the code directory</small>
       </label>
       <label>
@@ -1243,6 +1246,8 @@ function renderFunctionForm(
         <a href="/web/functions" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
       </div>
     </form>
+
+    ${fuzzyAutocompleteComponent()}
 
     <script>
     // Toggle CORS fieldset visibility based on OPTIONS method checkbox

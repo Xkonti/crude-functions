@@ -515,6 +515,7 @@ const managementApp = createManagementApp({
   sourceFileService,
   schedulingService,
   csrfService,
+  codeDirectory: "./code",
 });
 
 console.log("✓ Hono apps created");

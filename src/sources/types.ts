@@ -41,9 +41,13 @@ export interface ManualTypeSettings extends BaseTypeSettings {
 /**
  * Git source settings.
  * Exactly one of branch/tag/commit should be set (branch is default).
+ *
+ * Note: Only HTTPS URLs are supported. SSH URLs (git@...) and git:// protocol
+ * are not supported because isomorphic-git only works with HTTP/HTTPS.
+ * For private repositories, use a personal access token in the authToken field.
  */
 export interface GitTypeSettings extends BaseTypeSettings {
-  /** HTTPS git URL (e.g., https://github.com/user/repo.git) */
+  /** HTTPS git URL (e.g., https://github.com/user/repo.git). SSH URLs are not supported. */
   url: string;
   /** Branch name. Default: "main". Mutually exclusive with tag/commit. */
   branch?: string;

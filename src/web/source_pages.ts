@@ -407,7 +407,7 @@ export function createSourcePages(
           <label>
             Repository URL *
             <input type="url" name="url" required placeholder="https://github.com/user/repo.git">
-            <small>HTTPS URL to the Git repository</small>
+            <small>HTTPS URL to the Git repository. SSH URLs (git@...) are not supported.</small>
           </label>
 
           <label>
@@ -863,6 +863,7 @@ export function createSourcePages(
             <label>
               Repository URL *
               <input type="url" name="url" required value="${escapeHtml(gitSettings.url)}">
+              <small>HTTPS URL only. SSH URLs (git@...) are not supported.</small>
             </label>
 
             <label>

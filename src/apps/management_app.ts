@@ -24,6 +24,7 @@ import { createApiKeyRoutes, createApiKeyGroupRoutes } from "../keys/api_key_rou
 import { createFunctionsRoutes } from "../routes/functions_routes.ts";
 import { createSourceRoutes, createSourceWebhookRoute } from "../sources/source_routes.ts";
 import { createSourceFileRoutes } from "../files/source_file_routes.ts";
+import { createFileSearchRoutes } from "../files/file_search_routes.ts";
 import { createRotationRoutes } from "../encryption/rotation_routes.ts";
 import { createSettingsRoutes } from "../settings/settings_routes.ts";
 import { createSecretsRoutes } from "../secrets/secrets_routes.ts";
@@ -52,6 +53,8 @@ export interface ManagementAppDeps {
   sourceFileService: SourceFileService;
   schedulingService: SchedulingService;
   csrfService: CsrfService;
+  /** Base directory containing all code sources */
+  codeDirectory: string;
 }
 
 /**
@@ -125,6 +128,11 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
     sourceFileService: deps.sourceFileService,
     settingsService: deps.settingsService,
     codeSourceService: deps.codeSourceService,
+  }));
+
+  // File search (across all sources)
+  api.route("/files", createFileSearchRoutes({
+    codeDirectory: deps.codeDirectory,
   }));
 
   // Encryption key rotation

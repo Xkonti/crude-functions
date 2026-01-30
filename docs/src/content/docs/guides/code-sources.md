@@ -65,19 +65,27 @@ The source is immediately ready for file uploads.
 
 ### Requirements
 
-- HTTPS Git URL (e.g., `https://github.com/user/repo.git`)
-- For private repos: Personal access token or deploy key
+- **HTTPS Git URL** (e.g., `https://github.com/user/repo.git`)
+- For private repos: Personal access token
 - One of: branch name, tag name, or commit SHA
+
+:::note[HTTPS URLs Only]
+Only HTTPS URLs are supported. SSH URLs (`git@github.com:user/repo.git`) and the `git://` protocol are not supported.
+
+This is because Crude Functions uses [isomorphic-git](https://isomorphic-git.org/), a pure JavaScript Git implementation that only supports HTTP/HTTPS protocols.
+
+**For private repositories**, use a personal access token in the "Authentication Token" field instead of SSH keys.
+:::
 
 1. Navigate to `http://localhost:9000/web/code`
 2. Click "Create New Source"
 3. Choose the git source
 3. Fill in the form:
    - **Name**: `production-api`
-   - **Git URL**: `https://github.com/yourorg/functions.git`
+   - **Git URL**: `https://github.com/yourorg/functions.git` (HTTPS only, no SSH)
    - **Reference Type**: Branch / Tag / Commit
    - **Reference Value**: `main` (branch)
-   - **Auth Token**: (optional, for private repos)
+   - **Auth Token**: Personal access token (required for private repos)
    - **Sync Settings**: (optional, interval of 300s is a decent default)
 4. Click "Create Source"
 
@@ -85,12 +93,21 @@ The source is created and an initial sync is triggered automatically.
 
 ### Setting Up GitHub Personal Access Token
 
-For private repositories, you'll need a token with read access:
+For private repositories, you'll need a personal access token (PAT). Since SSH URLs are not supported, this is the only way to authenticate with private repositories.
+
+**Creating a token:**
 
 1. Go to GitHub Settings → Developer Settings → Personal Access Tokens
-2. Click "Generate new token (classic)"
-3. Select scope: `repo` - only read-only access is needed
-4. Copy the generated token
+2. Click "Generate new token (classic)" or use Fine-grained tokens
+3. For classic tokens, select scope: `repo` (read access is sufficient)
+4. For fine-grained tokens, grant "Contents" read access to the specific repository
+5. Copy the generated token and paste it in the "Authentication Token" field
+
+**Other Git providers:**
+
+- **GitLab**: Use a Project Access Token or Personal Access Token with `read_repository` scope
+- **Bitbucket**: Use an App Password with repository read permissions
+- **Azure DevOps**: Use a Personal Access Token with Code (Read) scope
 
 ## Sync Strategies
 
