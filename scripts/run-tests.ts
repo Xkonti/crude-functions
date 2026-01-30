@@ -40,6 +40,10 @@ async function isSurrealAvailable(): Promise<boolean> {
 async function main(): Promise<void> {
   const args = Deno.args;
 
+  // Check for verbose flag early (used for both SurrealDB and test runner)
+  const verbose = args.includes("-v") || args.includes("--verbose");
+  const log = (...msg: unknown[]) => verbose && console.log(...msg);
+
   // Check if binary is available
   if (!(await isSurrealAvailable())) {
     console.error(
@@ -50,7 +54,7 @@ async function main(): Promise<void> {
   }
 
   // Start SurrealDB
-  console.log(`[test-runner] Starting SurrealDB on port ${TEST_PORT}...`);
+  log(`[test-runner] Starting SurrealDB on port ${TEST_PORT}...`);
 
   const processManager = new SurrealProcessManager({
     binaryPath: BINARY_PATH,
@@ -60,6 +64,7 @@ async function main(): Promise<void> {
     username: TEST_USER,
     password: TEST_PASS,
     readinessTimeoutMs: 30000,
+    quiet: !verbose, // Suppress SurrealDB output unless verbose
   });
 
   try {
@@ -69,9 +74,7 @@ async function main(): Promise<void> {
     Deno.exit(1);
   }
 
-  console.log(
-    `[test-runner] SurrealDB ready at ${processManager.connectionUrl}`
-  );
+  log(`[test-runner] SurrealDB ready at ${processManager.connectionUrl}`);
 
   // Create cleanup function
   let cleanupCalled = false;
@@ -79,10 +82,10 @@ async function main(): Promise<void> {
     if (cleanupCalled) return;
     cleanupCalled = true;
 
-    console.log("\n[test-runner] Stopping SurrealDB...");
+    log("\n[test-runner] Stopping SurrealDB...");
     try {
       await processManager.stop();
-      console.log("[test-runner] SurrealDB stopped");
+      log("[test-runner] SurrealDB stopped");
     } catch (error) {
       console.error("[test-runner] Error stopping SurrealDB:", error);
     }
@@ -90,7 +93,7 @@ async function main(): Promise<void> {
 
   // Register signal handlers for graceful cleanup
   const signalHandler = (signal: Deno.Signal) => {
-    console.log(`\n[test-runner] Received ${signal}, cleaning up...`);
+    log(`\n[test-runner] Received ${signal}, cleaning up...`);
     cleanup().then(() => {
       Deno.exit(signal === "SIGINT" ? 130 : 143);
     });
@@ -100,6 +103,8 @@ async function main(): Promise<void> {
   Deno.addSignalListener("SIGTERM", () => signalHandler("SIGTERM"));
 
   // Build test command
+  const hasReporterFlag = args.some((arg) => arg.startsWith("--reporter"));
+
   const testArgs = [
     "test",
     "--parallel",
@@ -110,10 +115,12 @@ async function main(): Promise<void> {
     "--allow-write",
     "--allow-ffi",
     "--allow-run",
-    ...args, // Pass through any additional arguments
+    // Use dot reporter for compact output unless user specified one or wants verbose
+    ...(hasReporterFlag || verbose ? [] : ["--reporter=dot"]),
+    ...args.filter((arg) => arg !== "-v" && arg !== "--verbose"),
   ];
 
-  console.log(`[test-runner] Running: deno ${testArgs.join(" ")}`);
+  log(`[test-runner] Running: deno ${testArgs.join(" ")}`);
 
   const testCmd = new Deno.Command("deno", {
     args: testArgs,
