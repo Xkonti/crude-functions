@@ -53,7 +53,7 @@ integrationTest("StreamInterceptor captures console.log within request context",
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("Hello from handler");
       }
     );
@@ -79,7 +79,7 @@ integrationTest("StreamInterceptor captures all console methods with correct lev
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("log message");
         console.debug("debug message");
         console.info("info message");
@@ -113,7 +113,7 @@ integrationTest("StreamInterceptor captures process.stdout.write with stdout lev
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         process.stdout.write("Direct stdout message\n");
       }
     );
@@ -138,7 +138,7 @@ integrationTest("StreamInterceptor captures process.stderr.write with stderr lev
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         process.stderr.write("Direct stderr message\n");
       }
     );
@@ -183,7 +183,7 @@ integrationTest("StreamInterceptor can be uninstalled", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("Before uninstall");
       }
     );
@@ -195,7 +195,7 @@ integrationTest("StreamInterceptor can be uninstalled", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-2", functionId },
-      async () => {
+      () => {
         console.log("After uninstall");
       }
     );
@@ -237,7 +237,7 @@ integrationTest("StreamInterceptor install is idempotent", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         console.log("Test message");
       }
     );
@@ -274,7 +274,7 @@ integrationTest("StreamInterceptor handles Uint8Array input", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         const encoder = new TextEncoder();
         process.stdout.write(encoder.encode("Binary message\n"));
       }
@@ -300,7 +300,7 @@ integrationTest("StreamInterceptor handles empty messages", async () => {
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         // Empty newline should not be stored
         process.stdout.write("\n");
         // But message with content should
@@ -331,7 +331,7 @@ integrationTest("StreamInterceptor captures Deno.stdout.writeSync", async () => 
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         const encoder = new TextEncoder();
         Deno.stdout.writeSync(encoder.encode("Deno stdout sync\n"));
       }
@@ -383,7 +383,7 @@ integrationTest("StreamInterceptor captures Deno.stderr.writeSync", async () => 
 
     await runInRequestContext(
       { requestId: "test-request-1", functionId },
-      async () => {
+      () => {
         const encoder = new TextEncoder();
         Deno.stderr.writeSync(encoder.encode("Deno stderr sync\n"));
       }
