@@ -97,33 +97,94 @@ interface LoggerTestContext {
 }
 
 /**
- * Waits for logger to stabilize after initialization or settings change.
+ * Waits for logger to reach a specific log level.
  * Uses polling to detect when the log level has been applied, rather than
  * relying on timing.
+ *
+ * @param expectedLevel - The log level we expect the logger to reach
+ * @param maxWaitMs - Maximum time to wait for the level to be applied
  */
-async function waitForLoggerStability(maxWaitMs = 200): Promise<void> {
+async function waitForLogLevel(
+  expectedLevel: LogLevel,
+  maxWaitMs = 2000
+): Promise<void> {
   const startTime = Date.now();
-  let lastCallCount = -1;
   const spy = createConsoleSpy();
 
-  // Poll until logger state stabilizes or timeout
-  while (Date.now() - startTime < maxWaitMs) {
-    spy.calls.length = 0;
-    spy.install();
-    try {
-      logger.debug("stability check");
-      const currentCallCount = spy.calls.length;
-
-      // If call count matches previous iteration, logger is stable
-      if (currentCallCount === lastCallCount) {
-        return;
+  // Define which methods should produce output at each level
+  const levelChecks: Record<LogLevel, () => boolean> = {
+    debug: () => {
+      spy.calls.length = 0;
+      spy.install();
+      try {
+        logger.debug("level check");
+        return spy.calls.length === 1;
+      } finally {
+        spy.uninstall();
       }
-      lastCallCount = currentCallCount;
-    } finally {
-      spy.uninstall();
+    },
+    info: () => {
+      spy.calls.length = 0;
+      spy.install();
+      try {
+        logger.debug("should not appear");
+        logger.info("level check");
+        // Debug should be suppressed, info should appear
+        return spy.calls.length === 1 && spy.calls[0].method === "info";
+      } finally {
+        spy.uninstall();
+      }
+    },
+    warn: () => {
+      spy.calls.length = 0;
+      spy.install();
+      try {
+        logger.info("should not appear");
+        logger.warn("level check");
+        // Info should be suppressed, warn should appear
+        return spy.calls.length === 1 && spy.calls[0].method === "warn";
+      } finally {
+        spy.uninstall();
+      }
+    },
+    error: () => {
+      spy.calls.length = 0;
+      spy.install();
+      try {
+        logger.warn("should not appear");
+        logger.error("level check");
+        // Warn should be suppressed, error should appear
+        return spy.calls.length === 1 && spy.calls[0].method === "error";
+      } finally {
+        spy.uninstall();
+      }
+    },
+    none: () => {
+      spy.calls.length = 0;
+      spy.install();
+      try {
+        logger.error("should not appear");
+        // Nothing should appear at none level
+        return spy.calls.length === 0;
+      } finally {
+        spy.uninstall();
+      }
+    },
+  };
+
+  const check = levelChecks[expectedLevel];
+
+  // Poll until expected level is reached or timeout
+  while (Date.now() - startTime < maxWaitMs) {
+    if (check()) {
+      return;
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+
+  throw new Error(
+    `Timed out waiting for log level to reach "${expectedLevel}" after ${maxWaitMs}ms`
+  );
 }
 
 /**
@@ -140,8 +201,8 @@ async function createLoggerTestContext(
   return {
     async initLogger() {
       initializeLogger(ctx.settingsService);
-      // Wait for logger state to stabilize using polling instead of fixed delay
-      await waitForLoggerStability();
+      // Wait for logger to actually reach the expected level using polling
+      await waitForLogLevel(logLevel);
     },
     async cleanup() {
       stopLoggerRefresh();
@@ -557,13 +618,16 @@ sequentialLoggerTest("logger updates level when settings change", async () => {
   const spy = createConsoleSpy();
 
   try {
-    spy.install();
     initializeLogger(ctx.settingsService);
-    await waitForLoggerStability();
+    await waitForLogLevel("info");
+
+    spy.install();
 
     // Debug should be suppressed at info level
     logger.debug("should not appear");
     expect(spy.calls.length).toBe(0);
+
+    spy.uninstall();
 
     // Change setting to debug
     await ctx.settingsService.setGlobalSetting(SettingNames.LOG_LEVEL, "debug");
@@ -573,7 +637,9 @@ sequentialLoggerTest("logger updates level when settings change", async () => {
 
     // Re-initialize to trigger refresh
     initializeLogger(ctx.settingsService);
-    await waitForLoggerStability();
+    await waitForLogLevel("debug");
+
+    spy.install();
 
     // Now debug should work
     logger.debug("should appear now");
@@ -594,14 +660,17 @@ sequentialLoggerTest("logger handles invalid log level gracefully", async () => 
   const spy = createConsoleSpy();
 
   try {
-    spy.install();
     initializeLogger(ctx.settingsService);
-    await waitForLoggerStability();
+    await waitForLogLevel("debug");
+
+    spy.install();
 
     // Confirm debug level is active
     logger.debug("before invalid");
     expect(spy.calls.length).toBe(1);
     spy.clear();
+
+    spy.uninstall();
 
     // Set an invalid log level
     await ctx.settingsService.setGlobalSetting(
@@ -612,9 +681,13 @@ sequentialLoggerTest("logger handles invalid log level gracefully", async () => 
     // Stop current interval before re-initializing
     stopLoggerRefresh();
 
-    // Re-initialize to trigger refresh
+    // Re-initialize to trigger refresh - since invalid_level is ignored,
+    // logger should keep the previous valid level (debug)
     initializeLogger(ctx.settingsService);
-    await waitForLoggerStability();
+    // Wait a bit to give the async refresh a chance to run
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    spy.install();
 
     // Should keep previous valid level (debug) since invalid is ignored
     logger.debug("after invalid");

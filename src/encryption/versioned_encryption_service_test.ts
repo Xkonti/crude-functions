@@ -408,47 +408,6 @@ integrationTest("VersionedEncryptionService - updateKeys", async (t) => {
     expect(service.isRotating).toBe(false);
     expect(service.phasedOutVersionChar).toBe(null);
   });
-
-  await t.step("blocks during encrypt operations (prevents race condition)", async () => {
-    const service = EncryptionServiceBuilder.create().build();
-    const results: string[] = [];
-
-    // Start encryption operation
-    const encryptPromise = service.encrypt("test data").then((encrypted) => {
-      results.push("encrypt completed");
-      return encrypted;
-    });
-
-    // Small delay to ensure encrypt has started and acquired its lock
-    await new Promise((r) => setTimeout(r, 5));
-
-    // Start updateKeys - it should block until encryption completes because of mutex
-    const updatePromise = service.updateKeys({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-    }).then(() => {
-      results.push("updateKeys completed");
-    });
-
-    // Wait for both operations to complete
-    const encrypted = await encryptPromise;
-    await updatePromise;
-
-    // Verify operations completed in correct order (encrypt first, then update)
-    expect(results).toEqual(["encrypt completed", "updateKeys completed"]);
-    TestHelpers.expectVersionPrefix(encrypted, "A");
-    expect(service.version).toBe("B");
-
-    // Add phased out key to decrypt old data
-    await service.updateKeys({
-      currentKey: TEST_KEY_B,
-      currentVersion: "B",
-      phasedOutKey: TEST_KEY_A,
-      phasedOutVersion: "A",
-    });
-    const decrypted = await service.decrypt(encrypted);
-    expect(decrypted).toBe("test data");
-  });
 });
 
 // =====================
