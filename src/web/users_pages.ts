@@ -70,7 +70,6 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
             <tr>
               <th>Email</th>
               <th>Name</th>
-              <th>Role</th>
               <th>Created</th>
               <th class="actions">Actions</th>
             </tr>
@@ -82,7 +81,6 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
               <tr>
                 <td><strong>${escapeHtml(user.email)}</strong>${user.id === currentUser?.id ? " <em>(you)</em>" : ""}</td>
                 <td>${user.name ? escapeHtml(user.name) : "<em>-</em>"}</td>
-                <td><code>${user.roles.length > 0 ? escapeHtml(user.roles.join(", ")) : "<em>none</em>"}</code></td>
                 <td>${formatDate(user.createdAt)}</td>
                 <td class="actions">
                   <a href="/web/users/edit/${encodeURIComponent(user.id)}" title="Edit" style="text-decoration: none; font-size: 1.2rem; margin-right: 0.5rem;">✏️</a>
@@ -132,7 +130,6 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
         email: userData.email,
         password: userData.password,
         name: userData.name || undefined,
-        role: userData.role || undefined,
       }, c.req.raw.headers);
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User created: ${userData.email}`));
@@ -204,7 +201,6 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
       // Update user via UserService
       await userService.updateUser(userId, {
         password: editData.password || undefined,
-        role: editData.role,
       }, c.req.raw.headers);
 
       return c.redirect("/web/users?success=" + encodeURIComponent(`User updated: ${user.email}`));
@@ -280,7 +276,7 @@ export function createUsersPages(options: UsersPagesOptions): Hono {
  */
 function renderUserForm(
   action: string,
-  data: { email?: string; name?: string; role?: string } = {},
+  data: { email?: string; name?: string } = {},
   error?: string,
   csrfToken: string = ""
 ): string {
@@ -308,12 +304,6 @@ function renderUserForm(
         Confirm Password
         <input type="password" name="confirmPassword" required minlength="8" />
       </label>
-      <label>
-        Role
-        <input type="text" name="role" value="${escapeHtml(data.role ?? "")}"
-               placeholder="e.g., userMgmt or permanent,userMgmt" />
-        <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
-      </label>
       <div class="grid" style="margin-bottom: 0;">
         <button type="submit" style="margin-bottom: 0;">Create User</button>
         <a href="/web/users" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
@@ -327,11 +317,10 @@ function renderUserForm(
  */
 function renderEditForm(
   action: string,
-  user: { email: string; name?: string; roles?: string[] },
+  user: { email: string; name?: string },
   error?: string,
   csrfToken: string = ""
 ): string {
-  const roleString = user.roles ? user.roles.join(",") : "";
   return `
     <h1>Edit User</h1>
     ${error ? flashMessages(undefined, error) : ""}
@@ -351,12 +340,6 @@ function renderEditForm(
         Confirm New Password
         <input type="password" name="confirmPassword" minlength="8" placeholder="Leave blank to keep current" />
       </label>
-      <label>
-        Role
-        <input type="text" name="role" value="${escapeHtml(roleString)}"
-               placeholder="e.g., userMgmt or permanent,userMgmt" />
-        <small>Role string (e.g., "userMgmt" for user management access, comma-separated for multiple roles)</small>
-      </label>
       <div class="grid" style="margin-bottom: 0;">
         <button type="submit" style="margin-bottom: 0;">Save Changes</button>
         <a href="/web/users" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
@@ -369,7 +352,7 @@ function renderEditForm(
  * Parse and validate create form data.
  */
 function parseCreateFormData(formData: FormData): {
-  userData: { email: string; name: string; password: string; role: string };
+  userData: { email: string; name: string; password: string };
   errors: string[];
 } {
   const errors: string[] = [];
@@ -378,7 +361,6 @@ function parseCreateFormData(formData: FormData): {
   const name = formData.get("name")?.toString().trim() ?? "";
   const password = formData.get("password")?.toString() ?? "";
   const confirmPassword = formData.get("confirmPassword")?.toString() ?? "";
-  const role = formData.get("role")?.toString().trim() ?? "";
 
   if (!email) {
     errors.push("Email is required");
@@ -397,7 +379,7 @@ function parseCreateFormData(formData: FormData): {
   }
 
   return {
-    userData: { email, name, password, role },
+    userData: { email, name, password },
     errors,
   };
 }
@@ -406,14 +388,13 @@ function parseCreateFormData(formData: FormData): {
  * Parse and validate edit form data.
  */
 function parseEditFormData(formData: FormData): {
-  editData: { password: string; role: string };
+  editData: { password: string };
   errors: string[];
 } {
   const errors: string[] = [];
 
   const password = formData.get("password")?.toString() ?? "";
   const confirmPassword = formData.get("confirmPassword")?.toString() ?? "";
-  const role = formData.get("role")?.toString().trim() ?? "";
 
   if (password) {
     if (password.length < 8) {
@@ -425,7 +406,7 @@ function parseEditFormData(formData: FormData): {
   }
 
   return {
-    editData: { password, role },
+    editData: { password },
     errors,
   };
 }
