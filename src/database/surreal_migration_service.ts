@@ -88,34 +88,17 @@ export class SurrealMigrationService {
   /**
    * Gets the current schema version from the database.
    *
-   * Checks the new schemaVersion table first, then falls back to the old
-   * schema_version table for backwards compatibility with existing installations.
-   *
    * @param db - Open database connection
    * @returns Current version number, or null if no migrations have been applied
    */
   private async getCurrentVersion(db: Surreal): Promise<number | null> {
-    // Try new table first (schemaVersion)
     try {
       const result = await db.query<[{ version: number }[]]>(
         "SELECT version FROM schemaVersion:current"
       );
-      const version = result?.[0]?.[0]?.version;
-      if (version !== undefined) {
-        return version;
-      }
-    } catch {
-      // Table doesn't exist - try old table
-    }
-
-    // Fall back to old table (schema_version) for backwards compatibility
-    try {
-      const result = await db.query<[{ version: number }[]]>(
-        "SELECT version FROM schema_version:current"
-      );
       return result?.[0]?.[0]?.version ?? null;
     } catch {
-      // Neither table exists - no migrations applied yet
+      // Table doesn't exist - no migrations applied yet
       return null;
     }
   }
