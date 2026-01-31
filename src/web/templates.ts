@@ -103,6 +103,7 @@ export async function layout(
         <li class="user-dropdown">
           <a href="#" class="user-dropdown-toggle">${escapeHtml(user.email)}</a>
           <ul class="user-dropdown-menu">
+            <li><a href="/web/query">Query Database</a></li>
             <li><a href="/web/password">Change Password</a></li>
             <li><a href="/web/logout">Logout</a></li>
             <li style="pointer-events: none; opacity: 0.6; text-align: center;"><small>v${escapeHtml(APP_VERSION)}</small></li>
