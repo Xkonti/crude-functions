@@ -16,6 +16,7 @@ import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
 import type { CsrfService } from "../csrf/csrf_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 
 import { createHybridAuthMiddleware } from "../auth/auth_middleware.ts";
 import { createSecurityHeadersMiddleware, createWebCacheHeadersMiddleware } from "../middleware/security_headers.ts";
@@ -53,6 +54,7 @@ export interface ManagementAppDeps {
   sourceFileService: SourceFileService;
   schedulingService: SchedulingService;
   csrfService: CsrfService;
+  errorStateService: ErrorStateService;
   /** Base directory containing all code sources */
   codeDirectory: string;
 }
@@ -215,6 +217,7 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
     settingsService: deps.settingsService,
     codeSourceService: deps.codeSourceService,
     sourceFileService: deps.sourceFileService,
+    errorStateService: deps.errorStateService,
   }));
 
   return app;
