@@ -19,7 +19,9 @@
     "better-auth/plugins": "npm:better-auth@^1.4.10/plugins",
     "better-auth/plugins/access": "npm:better-auth@^1.4.10/plugins/access",
     "isomorphic-git": "npm:isomorphic-git@^1.27.2",
-    "surrealdb": "npm:surrealdb@alpha"
+    "surrealdb": "npm:surrealdb@alpha",
+    "esbuild": "npm:esbuild@0.24.0",
+    "@luca/esbuild-deno-loader": "jsr:@luca/esbuild-deno-loader@0.11.0"
   },
   "test": {
     "exclude": [
