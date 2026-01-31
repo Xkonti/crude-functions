@@ -34,6 +34,89 @@ import { csrfInput } from "../csrf/csrf_helpers.ts";
 const MAX_EDITABLE_SIZE = 1024 * 1024; // 1 MB
 
 /**
+ * CSS styles for CodeMirror integration with Pico CSS.
+ * Shared across all file editor pages.
+ */
+const CODE_EDITOR_STYLES = `
+  <style>
+    /* CodeMirror integration with Pico CSS */
+    .cm-editor {
+      border: 1px solid var(--pico-form-element-border-color);
+      border-radius: var(--pico-border-radius);
+      background: var(--pico-form-element-background-color);
+      font-size: 0.9rem;
+    }
+    .cm-editor.cm-focused {
+      outline: none;
+      border-color: var(--pico-form-element-active-border-color);
+    }
+    .cm-scroller {
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      overflow: auto;
+    }
+    .cm-gutters {
+      background: var(--pico-card-background-color);
+      border-right: 1px solid var(--pico-muted-border-color);
+    }
+    .cm-activeLineGutter, .cm-activeLine {
+      background: rgba(128, 128, 128, 0.1);
+    }
+    .cm-selectionBackground {
+      background: rgba(128, 128, 128, 0.2) !important;
+    }
+    .code-editor .cm-editor {
+      min-height: 300px;
+      max-height: 600px;
+    }
+    .code-editor-readonly .cm-editor {
+      background: var(--pico-form-element-disabled-background-color);
+    }
+  </style>
+`;
+
+/**
+ * Gets the CodeMirror language extension name for a file path.
+ * Returns the function name to call from the codemirror bundle.
+ */
+function getEditorLanguage(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return "javascript";
+    case "ts":
+    case "tsx":
+    case "mts":
+    case "cts":
+      return "typescript";
+    case "json":
+    case "jsonc":
+      return "json";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "toml":
+      return "toml";
+    case "xml":
+      return "xml";
+    case "html":
+    case "htm":
+      return "html";
+    case "css":
+      return "css";
+    case "md":
+    case "markdown":
+      return "markdown";
+    case "surql":
+      return "surrealql";
+    default:
+      return "plain";
+  }
+}
+
+/**
  * Options for creating the source pages router.
  */
 export interface SourcePagesOptions {
@@ -1220,6 +1303,7 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
     const csrfToken = getCsrfToken(c);
 
     const content = `
+      ${CODE_EDITOR_STYLES}
       <h1>Upload File to ${escapeHtml(source.name)}</h1>
       ${flashMessages(undefined, error)}
       <p>
@@ -1229,7 +1313,7 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
         <label>
           File Path
           <input type="text" name="path" id="path-input" placeholder="e.g., handlers/my-function.ts" required>
-          <small>Relative path within the source directory</small>
+          <small>Relative path within the source directory. Syntax highlighting updates based on extension.</small>
         </label>
         <label>
           Select File
@@ -1241,19 +1325,101 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
           <br><small>The file will be uploaded directly.</small>
           <br><a href="#" id="clear-file-btn" style="font-size: 0.875rem;">Clear and type content instead</a>
         </div>
-        <label id="content-label">
-          Content
-          <textarea name="content" id="content-input" rows="15" style="font-family: monospace;"></textarea>
-        </label>
+        <div id="content-label">
+          <label>Content</label>
+          <div id="code-editor" class="code-editor"></div>
+        </div>
         <div class="grid" style="margin-bottom: 0;">
           <button type="submit" id="upload-btn" style="margin-bottom: 0;">Upload</button>
           <a href="/web/code/sources/${source.id}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
         </div>
       </form>
-      <script>
+      <script type="module">
+        import {
+          basicSetup,
+          EditorView,
+          javascript,
+          json,
+          yaml,
+          toml,
+          xml,
+          html,
+          css,
+          markdown,
+          surrealql,
+          StreamLanguage,
+        } from "/static/vendor/codemirror-surrealql.js";
+
         const sourceId = ${JSON.stringify(source.id)};
         const csrfToken = ${JSON.stringify(csrfToken)};
         let selectedFile = null;
+        let editor = null;
+        let currentLang = "plain";
+
+        function getLanguageFromPath(filePath) {
+          const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+          switch (ext) {
+            case "js": case "jsx": case "mjs": case "cjs": return "javascript";
+            case "ts": case "tsx": case "mts": case "cts": return "typescript";
+            case "json": case "jsonc": return "json";
+            case "yaml": case "yml": return "yaml";
+            case "toml": return "toml";
+            case "xml": return "xml";
+            case "html": case "htm": return "html";
+            case "css": return "css";
+            case "md": case "markdown": return "markdown";
+            case "surql": return "surrealql";
+            default: return "plain";
+          }
+        }
+
+        function getLanguageExtension(lang) {
+          switch (lang) {
+            case "javascript": return javascript();
+            case "typescript": return javascript({ typescript: true });
+            case "json": return json();
+            case "yaml": return yaml();
+            case "toml": return StreamLanguage.define(toml);
+            case "xml": return xml();
+            case "html": return html();
+            case "css": return css();
+            case "markdown": return markdown();
+            case "surrealql": return surrealql();
+            default: return [];
+          }
+        }
+
+        function createEditor(lang) {
+          const content = editor ? editor.state.doc.toString() : "";
+          if (editor) {
+            editor.destroy();
+          }
+          editor = new EditorView({
+            doc: content,
+            extensions: [
+              basicSetup,
+              getLanguageExtension(lang),
+              EditorView.lineWrapping,
+            ],
+            parent: document.getElementById("code-editor"),
+          });
+          currentLang = lang;
+        }
+
+        // Initialize editor
+        createEditor("plain");
+
+        // Update language on path change
+        let pathDebounce = null;
+        document.getElementById('path-input').addEventListener('input', function(e) {
+          clearTimeout(pathDebounce);
+          pathDebounce = setTimeout(() => {
+            const newLang = getLanguageFromPath(e.target.value);
+            if (newLang !== currentLang) {
+              createEditor(newLang);
+            }
+          }, 300);
+        });
 
         function formatFileSize(bytes) {
           if (bytes < 1024) return bytes + ' B';
@@ -1302,7 +1468,7 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
             return;
           }
 
-          const content = document.getElementById('content-input').value;
+          const content = editor.state.doc.toString();
           if (!selectedFile && !content) {
             window.location.href = '/web/code/sources/' + sourceId + '/files/upload?error=' + encodeURIComponent('Please select a file or enter content');
             return;
@@ -1384,8 +1550,10 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
       const editButton = isEditable
         ? `<a href="/web/code/sources/${source.id}/files/edit?path=${encodeURIComponent(path)}" role="button" class="secondary">Edit File</a>`
         : "";
+      const language = getEditorLanguage(path);
 
       pageContent = `
+        ${CODE_EDITOR_STYLES}
         <h1>View File</h1>
         <p>
           <a href="/web/code/sources/${source.id}" role="button" class="secondary outline">Back</a>
@@ -1393,10 +1561,56 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
         </p>
         <p><strong>Path:</strong> <code>${escapeHtml(path)}</code></p>
         <p><strong>Size:</strong> ${formatSize(bytes.length)}</p>
-        <textarea readonly rows="25" style="font-family: monospace; background: var(--pico-form-element-disabled-background-color);">${escapeHtml(fileContent)}</textarea>
+        <div id="code-editor" class="code-editor code-editor-readonly"></div>
         <p>
           <a href="/api/sources/${encodeURIComponent(source.name)}/files/${encodeURIComponent(path)}" role="button" class="outline" download="${escapeHtml(path.split("/").pop() || path)}">Download</a>
         </p>
+        <script type="module">
+          import {
+            basicSetup,
+            EditorView,
+            javascript,
+            json,
+            yaml,
+            toml,
+            xml,
+            html,
+            css,
+            markdown,
+            surrealql,
+            StreamLanguage,
+          } from "/static/vendor/codemirror-surrealql.js";
+
+          const content = ${JSON.stringify(fileContent)};
+          const lang = ${JSON.stringify(language)};
+
+          function getLanguageExtension(lang) {
+            switch (lang) {
+              case "javascript": return javascript();
+              case "typescript": return javascript({ typescript: true });
+              case "json": return json();
+              case "yaml": return yaml();
+              case "toml": return StreamLanguage.define(toml);
+              case "xml": return xml();
+              case "html": return html();
+              case "css": return css();
+              case "markdown": return markdown();
+              case "surrealql": return surrealql();
+              default: return [];
+            }
+          }
+
+          new EditorView({
+            doc: content,
+            extensions: [
+              basicSetup,
+              getLanguageExtension(lang),
+              EditorView.lineWrapping,
+              EditorView.editable.of(false),
+            ],
+            parent: document.getElementById("code-editor"),
+          });
+        </script>
       `;
     } else {
       const reason = !isText
@@ -1471,7 +1685,9 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
 
     if (canEditInTextarea) {
       const fileContent = new TextDecoder().decode(bytes);
+      const language = getEditorLanguage(path);
       pageContent = `
+        ${CODE_EDITOR_STYLES}
         <h1>Edit File</h1>
         ${flashMessages(success, error)}
         <p>
@@ -1479,23 +1695,79 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
         </p>
         <p><strong>Path:</strong> <code>${escapeHtml(path)}</code></p>
         <form id="edit-form">
-          <label>
-            Content
-            <textarea name="content" id="content-input" rows="20" style="font-family: monospace;">${escapeHtml(fileContent)}</textarea>
-          </label>
+          <label>Content</label>
+          <div id="code-editor" class="code-editor"></div>
+          <p class="keyboard-hint" style="margin-top: 0.5rem;"><kbd>Ctrl</kbd>+<kbd>S</kbd> to save</p>
           <div class="grid" style="margin-bottom: 0;">
             <button type="submit" id="save-btn" style="margin-bottom: 0;">Save</button>
             <a href="/web/code/sources/${source.id}" role="button" class="secondary" style="margin-bottom: 0;">Cancel</a>
           </div>
         </form>
-        <script>
+        <style>
+          .keyboard-hint {
+            font-size: 0.85rem;
+            color: var(--pico-muted-color);
+          }
+          .keyboard-hint kbd {
+            background: var(--pico-card-background-color);
+            color: var(--pico-color);
+            border: 1px solid var(--pico-muted-border-color);
+            border-radius: 3px;
+            padding: 0.1rem 0.4rem;
+            font-family: inherit;
+            font-size: 0.85em;
+          }
+        </style>
+        <script type="module">
+          import {
+            basicSetup,
+            EditorView,
+            javascript,
+            json,
+            yaml,
+            toml,
+            xml,
+            html,
+            css,
+            markdown,
+            surrealql,
+            StreamLanguage,
+          } from "/static/vendor/codemirror-surrealql.js";
+
+          const initialContent = ${JSON.stringify(fileContent)};
+          const lang = ${JSON.stringify(language)};
           const sourceId = ${JSON.stringify(source.id)};
           const filePath = ${JSON.stringify(path)};
           const csrfToken = ${JSON.stringify(csrfToken)};
 
-          document.getElementById('edit-form').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            const content = document.getElementById('content-input').value;
+          function getLanguageExtension(lang) {
+            switch (lang) {
+              case "javascript": return javascript();
+              case "typescript": return javascript({ typescript: true });
+              case "json": return json();
+              case "yaml": return yaml();
+              case "toml": return StreamLanguage.define(toml);
+              case "xml": return xml();
+              case "html": return html();
+              case "css": return css();
+              case "markdown": return markdown();
+              case "surrealql": return surrealql();
+              default: return [];
+            }
+          }
+
+          const editor = new EditorView({
+            doc: initialContent,
+            extensions: [
+              basicSetup,
+              getLanguageExtension(lang),
+              EditorView.lineWrapping,
+            ],
+            parent: document.getElementById("code-editor"),
+          });
+
+          async function saveFile() {
+            const content = editor.state.doc.toString();
             const btn = document.getElementById('save-btn');
 
             btn.disabled = true;
@@ -1518,6 +1790,19 @@ export function createSourcePages(options: SourcePagesOptions): Hono {
             } catch (err) {
               window.location.href = '/web/code/sources/' + sourceId + '/files/edit?path=' + encodeURIComponent(filePath) +
                 '&error=' + encodeURIComponent(err.message || 'Network error');
+            }
+          }
+
+          document.getElementById('edit-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            saveFile();
+          });
+
+          // Ctrl/Cmd+S shortcut
+          editor.dom.addEventListener('keydown', function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+              e.preventDefault();
+              saveFile();
             }
           });
         </script>

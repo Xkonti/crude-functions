@@ -29,6 +29,14 @@ const completionData = {
 const entryContent = `
 export { basicSetup, EditorView } from "npm:codemirror@6.0.1";
 export { json } from "npm:@codemirror/lang-json@6.0.1";
+export { javascript } from "npm:@codemirror/lang-javascript@6.2.2";
+export { html } from "npm:@codemirror/lang-html@6.4.9";
+export { css } from "npm:@codemirror/lang-css@6.3.1";
+export { xml } from "npm:@codemirror/lang-xml@6.1.0";
+export { yaml } from "npm:@codemirror/lang-yaml@6.1.2";
+export { markdown } from "npm:@codemirror/lang-markdown@6.3.2";
+export { StreamLanguage } from "npm:@codemirror/language@6.10.8";
+export { toml } from "npm:@codemirror/legacy-modes@6.4.2/mode/toml";
 export { surrealql } from "npm:@surrealdb/codemirror@1.0.3";
 export { autocompletion } from "npm:@codemirror/autocomplete@6.18.0";
 
