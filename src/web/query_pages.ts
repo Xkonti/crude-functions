@@ -32,52 +32,169 @@ export function createQueryPages(options: QueryPagesOptions): Hono {
     const csrfToken = getCsrfToken(c);
 
     const content = `
+
+      <style>
+        /* CodeMirror integration with Pico CSS */
+        .cm-editor {
+          border: 1px solid var(--pico-form-element-border-color);
+          border-radius: var(--pico-border-radius);
+          background: var(--pico-form-element-background-color);
+          font-size: 0.9rem;
+        }
+        .cm-editor.cm-focused {
+          outline: none;
+          border-color: var(--pico-form-element-active-border-color);
+        }
+        .cm-scroller {
+          font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+          overflow: auto;
+        }
+        .cm-gutters {
+          background: var(--pico-card-background-color);
+          border-right: 1px solid var(--pico-muted-border-color);
+        }
+        .cm-activeLineGutter, .cm-activeLine {
+          background: rgba(128, 128, 128, 0.1);
+        }
+        .cm-selectionBackground {
+          background: rgba(128, 128, 128, 0.2) !important;
+        }
+        #query-editor .cm-editor {
+          min-height: 200px;
+          max-height: 400px;
+        }
+        #result-editor .cm-editor {
+          min-height: 100px;
+          max-height: 500px;
+        }
+        .query-error {
+          padding: 1rem;
+          margin-top: 1rem;
+          background: #f8d7da;
+          color: #721c24;
+          border: 1px solid #f5c6cb;
+          border-radius: var(--pico-border-radius);
+          font-family: ui-monospace, SFMono-Regular, monospace;
+          white-space: pre-wrap;
+          word-break: break-word;
+        }
+        [data-theme="dark"] .query-error {
+          background: #4a1f24;
+          color: #f8d7da;
+          border-color: #6b2c32;
+        }
+        .keyboard-hint {
+          font-size: 0.85rem;
+          color: var(--pico-muted-color);
+          margin-top: 0.5rem;
+        }
+        .keyboard-hint kbd {
+          background: var(--pico-card-background-color);
+          border: 1px solid var(--pico-muted-border-color);
+          border-radius: 3px;
+          padding: 0.1rem 0.4rem;
+          font-family: inherit;
+          font-size: 0.85em;
+        }
+      </style>
+
       <h1>SurrealDB Query</h1>
       <div id="flash-container"></div>
       <form id="query-form">
         <input type="hidden" name="_csrf" value="${csrfToken}">
-        <label>
-          SurrealQL Query
-          <textarea
-            id="query-input"
-            name="query"
-            rows="10"
-            placeholder="SELECT * FROM setting LIMIT 10;"
-            style="font-family: monospace;"
-          ></textarea>
-        </label>
-        <button type="submit" id="submit-btn">Execute Query</button>
+        <label>SurrealQL Query</label>
+        <div id="query-editor"></div>
+        <p class="keyboard-hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to execute</p>
+        <button type="submit" id="submit-btn" style="margin-top: 0.5rem;">Execute Query</button>
       </form>
-      <div id="result-container"></div>
+      <div id="result-container">
+        <h2 id="result-header" style="display: none;">Result</h2>
+        <div id="result-editor"></div>
+        <div id="error-display" class="query-error" style="display: none;"></div>
+      </div>
 
-      <script>
-        const form = document.getElementById('query-form');
-        const queryInput = document.getElementById('query-input');
-        const submitBtn = document.getElementById('submit-btn');
-        const resultContainer = document.getElementById('result-container');
-        const flashContainer = document.getElementById('flash-container');
+      <script type="module">
+        import { basicSetup, EditorView, json, surrealql } from "/static/vendor/codemirror-surrealql.js";
 
-        form.addEventListener('submit', async (e) => {
-          e.preventDefault();
+        // Create query editor (editable)
+        const queryEditor = new EditorView({
+          doc: "SELECT * FROM setting LIMIT 10;",
+          extensions: [
+            basicSetup,
+            surrealql(),
+            EditorView.lineWrapping,
+          ],
+          parent: document.getElementById("query-editor"),
+        });
 
-          const query = queryInput.value.trim();
+        // Result editor reference
+        let resultEditor = null;
+
+        function showResult(jsonText) {
+          const header = document.getElementById("result-header");
+          const container = document.getElementById("result-editor");
+          const errorDisplay = document.getElementById("error-display");
+
+          header.style.display = "block";
+          errorDisplay.style.display = "none";
+
+          if (resultEditor) {
+            resultEditor.destroy();
+          }
+
+          resultEditor = new EditorView({
+            doc: jsonText,
+            extensions: [
+              basicSetup,
+              json(),
+              EditorView.lineWrapping,
+              EditorView.editable.of(false),
+            ],
+            parent: container,
+          });
+        }
+
+        function showError(errorMessage) {
+          const header = document.getElementById("result-header");
+          const container = document.getElementById("result-editor");
+          const errorDisplay = document.getElementById("error-display");
+
+          header.style.display = "none";
+
+          if (resultEditor) {
+            resultEditor.destroy();
+            resultEditor = null;
+          }
+          container.innerHTML = "";
+
+          errorDisplay.textContent = errorMessage;
+          errorDisplay.style.display = "block";
+        }
+
+        // Form handling
+        const form = document.getElementById("query-form");
+        const submitBtn = document.getElementById("submit-btn");
+        const flashContainer = document.getElementById("flash-container");
+
+        async function executeQuery() {
+          const query = queryEditor.state.doc.toString().trim();
           if (!query) {
-            showFlash('Query cannot be empty', 'error');
+            showFlash("Query cannot be empty", "error");
             return;
           }
 
           submitBtn.disabled = true;
-          submitBtn.setAttribute('aria-busy', 'true');
-          submitBtn.textContent = 'Executing...';
-          flashContainer.innerHTML = '';
+          submitBtn.setAttribute("aria-busy", "true");
+          submitBtn.textContent = "Executing...";
+          flashContainer.innerHTML = "";
 
           try {
             const csrfToken = form.querySelector('input[name="_csrf"]').value;
-            const response = await fetch('/web/query', {
-              method: 'POST',
+            const response = await fetch("/web/query", {
+              method: "POST",
               headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken,
+                "Content-Type": "application/json",
+                "X-CSRF-Token": csrfToken,
               },
               body: JSON.stringify({ query }),
             });
@@ -85,26 +202,34 @@ export function createQueryPages(options: QueryPagesOptions): Hono {
             const data = await response.json();
 
             if (data.success) {
-              resultContainer.innerHTML = \`
-                <h2>Result</h2>
-                <pre style="background: var(--pico-card-background-color); padding: 1rem; overflow-x: auto; border-radius: var(--pico-border-radius);"><code>\${escapeHtml(data.result)}</code></pre>
-              \`;
+              showResult(data.result);
             } else {
-              showFlash(data.error || 'Unknown error', 'error');
-              resultContainer.innerHTML = '';
+              showError(data.error || "Unknown error");
             }
           } catch (err) {
-            showFlash('Request failed: ' + err.message, 'error');
-            resultContainer.innerHTML = '';
+            showError("Request failed: " + err.message);
           } finally {
             submitBtn.disabled = false;
-            submitBtn.removeAttribute('aria-busy');
-            submitBtn.textContent = 'Execute Query';
+            submitBtn.removeAttribute("aria-busy");
+            submitBtn.textContent = "Execute Query";
+          }
+        }
+
+        form.addEventListener("submit", (e) => {
+          e.preventDefault();
+          executeQuery();
+        });
+
+        // Ctrl/Cmd+Enter shortcut
+        queryEditor.dom.addEventListener("keydown", (e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            e.preventDefault();
+            executeQuery();
           }
         });
 
         function showFlash(message, type) {
-          const className = type === 'error' ? 'pico-background-red-500' : 'pico-background-green-500';
+          const className = type === "error" ? "pico-background-red-500" : "pico-background-green-500";
           flashContainer.innerHTML = \`
             <article class="\${className}" style="margin-bottom: 1rem; padding: 0.75rem 1rem;">
               \${escapeHtml(message)}
@@ -113,7 +238,7 @@ export function createQueryPages(options: QueryPagesOptions): Hono {
         }
 
         function escapeHtml(text) {
-          const div = document.createElement('div');
+          const div = document.createElement("div");
           div.textContent = text;
           return div.innerHTML;
         }
