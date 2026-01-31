@@ -46,6 +46,7 @@ export function fuzzyAutocompleteComponent(): string {
   .fuzzy-input-wrapper input {
     flex: 1;
     min-width: 0;
+    margin: 0;
   }
 
   .fuzzy-input-wrapper.icon-left input {
@@ -68,6 +69,8 @@ export function fuzzyAutocompleteComponent(): string {
     color: var(--pico-muted-color, #666);
     cursor: help;
     min-width: 2.5rem;
+    align-self: stretch;
+    margin: 0;
   }
 
   .fuzzy-input-wrapper.icon-left .fuzzy-icon {
@@ -179,6 +182,7 @@ export function fuzzyAutocompleteComponent(): string {
       this.validationTimer = null;
       this.abortController = null;
       this.validationState = 'unknown'; // 'valid', 'warning', 'unknown'
+      this.isSelectingFromDropdown = false; // Flag to prevent reopening dropdown after selection
     }
 
     connectedCallback() {
@@ -277,6 +281,11 @@ export function fuzzyAutocompleteComponent(): string {
     }
 
     onInput() {
+      // Skip if we're programmatically setting value from dropdown selection
+      if (this.isSelectingFromDropdown) {
+        return;
+      }
+
       const query = this.input.value.trim();
 
       if (this.debounceTimer) {
@@ -382,6 +391,10 @@ export function fuzzyAutocompleteComponent(): string {
     selectItem(index) {
       if (index >= 0 && index < this.matches.length) {
         const path = this.matches[index].path;
+
+        // Set flag to prevent dropdown from reopening
+        this.isSelectingFromDropdown = true;
+
         this.input.value = path;
         this.knownPaths.add(path); // Remember this as a valid path
         this.input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -392,6 +405,11 @@ export function fuzzyAutocompleteComponent(): string {
         if (this.iconPosition) {
           this.updateIcon('valid');
         }
+
+        // Reset flag after a short delay to allow normal typing to resume
+        setTimeout(() => {
+          this.isSelectingFromDropdown = false;
+        }, 50);
       }
     }
 
