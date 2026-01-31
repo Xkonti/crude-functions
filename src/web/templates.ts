@@ -1,4 +1,5 @@
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import { SettingNames, GlobalSettingDefaults } from "../settings/types.ts";
 import { APP_VERSION } from "../version.ts";
 import { csrfInput } from "../csrf/csrf_helpers.ts";
@@ -86,14 +87,21 @@ export function getCsrfToken(c: any): string {
 }
 
 /**
+ * Options for the layout function.
+ */
+export interface LayoutOptions {
+  title: string;
+  content: string;
+  user: LayoutUser | undefined;
+  settingsService: SettingsService;
+  errorStateService?: ErrorStateService;
+}
+
+/**
  * Wraps content in a full HTML page with PicoCSS styling.
  */
-export async function layout(
-  title: string,
-  content: string,
-  user: LayoutUser | undefined,
-  settingsService: SettingsService
-): Promise<string> {
+export async function layout(options: LayoutOptions): Promise<string> {
+  const { title, content, user, settingsService, errorStateService } = options;
   // Fetch server name setting, with fallback to default if not found
   const serverName = await settingsService.getGlobalSetting(SettingNames.SERVER_NAME)
     ?? GlobalSettingDefaults[SettingNames.SERVER_NAME];
@@ -111,6 +119,14 @@ export async function layout(
         </li>
       `
     : `<li><a href="/web/logout">Logout</a></li>`;
+
+  // Generate migration error banner if there's a migration failure
+  const migrationError = errorStateService?.getMigrationError();
+  const migrationErrorBanner = migrationError
+    ? `<div class="migration-error-banner">
+        <strong>⚠ Migration Failed:</strong> ${escapeHtml(migrationError.filename)} — Please check the application logs.
+      </div>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en" data-theme="light">
@@ -212,10 +228,25 @@ export async function layout(
     .settings-category h3 {
       margin-top: 0;
     }
+    /* Migration error banner */
+    .migration-error-banner {
+      background: #dc2626;
+      color: white;
+      padding: 0.75rem 1rem;
+      text-align: center;
+      font-weight: 500;
+      margin: -1rem -1rem 1rem -1rem;
+    }
+    @media (min-width: 576px) {
+      .migration-error-banner {
+        margin: -2rem -2rem 1rem -2rem;
+      }
+    }
   </style>
 </head>
 <body>
   <main class="container">
+    ${migrationErrorBanner}
     <nav>
       <ul><li><strong><a href="/web">${escapeHtml(serverName)}</a></strong></li></ul>
       <ul>
@@ -256,20 +287,27 @@ export function flashMessages(
 }
 
 /**
+ * Options for the confirmation page.
+ */
+export interface ConfirmPageOptions {
+  title: string;
+  message: string;
+  actionUrl: string;
+  cancelUrl: string;
+  user: LayoutUser | undefined;
+  settingsService: SettingsService;
+  errorStateService?: ErrorStateService;
+  csrfToken?: string;
+}
+
+/**
  * Creates a confirmation page for delete actions.
  */
-export async function confirmPage(
-  title: string,
-  message: string,
-  actionUrl: string,
-  cancelUrl: string,
-  user: LayoutUser | undefined,
-  settingsService: SettingsService,
-  csrfToken: string = ""
-): Promise<string> {
-  return await layout(
+export async function confirmPage(options: ConfirmPageOptions): Promise<string> {
+  const { title, message, actionUrl, cancelUrl, user, settingsService, errorStateService, csrfToken = "" } = options;
+  return await layout({
     title,
-    `
+    content: `
     <h1>${escapeHtml(title)}</h1>
     <article>
       <p>${escapeHtml(message)}</p>
@@ -283,8 +321,9 @@ export async function confirmPage(
     </article>
   `,
     user,
-    settingsService
-  );
+    settingsService,
+    errorStateService,
+  });
 }
 
 /**

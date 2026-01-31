@@ -20,9 +20,13 @@ RUN deno install
 COPY main.ts ./
 COPY src/ ./src/
 COPY migrations/ ./migrations/
+COPY scripts/ ./scripts/
 
 # Generate version file with build-time version
 RUN echo "export const APP_VERSION = \"${BUILD_VERSION}\";" > src/version.ts
+
+# Build vendor assets (CodeMirror bundle with SurrealQL support)
+RUN deno task build:vendor
 
 # Create directories for volumes
 RUN mkdir -p /app/config /app/code
@@ -37,6 +41,7 @@ WORKDIR /app
 COPY --from=surrealdb --chown=deno:deno /surreal /surreal
 
 # Copy everything from builder including Deno cache
+# Note: /app includes built static/vendor/ assets from build:vendor task
 COPY --from=builder --chown=deno:deno /deno-dir /deno-dir
 COPY --from=builder --chown=deno:deno /app /app
 

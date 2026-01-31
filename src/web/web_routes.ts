@@ -23,6 +23,7 @@ import type { SettingsService } from "../settings/settings_service.ts";
 import type { UserService } from "../users/user_service.ts";
 import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 
 export interface WebRoutesOptions {
   auth: Auth;
@@ -36,10 +37,11 @@ export interface WebRoutesOptions {
   settingsService: SettingsService;
   codeSourceService: CodeSourceService;
   sourceFileService: SourceFileService;
+  errorStateService: ErrorStateService;
 }
 
 export function createWebRoutes(options: WebRoutesOptions): Hono {
-  const { auth, surrealFactory, userService, functionsService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService } = options;
+  const { auth, surrealFactory, userService, functionsService, apiKeyService, consoleLogService, executionMetricsService, encryptionService, settingsService, codeSourceService, sourceFileService, errorStateService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
@@ -109,18 +111,24 @@ export function createWebRoutes(options: WebRoutesOptions): Hono {
         </article>
       </div>
     `;
-    return c.html(await layout("Dashboard", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({
+      title: "Dashboard",
+      content,
+      user: getLayoutUser(c),
+      settingsService,
+      errorStateService,
+    }));
   });
 
   // Mount sub-routers
-  routes.route("/password", createPasswordPages(settingsService));
-  routes.route("/users", createUsersPages({ userService, settingsService }));
-  routes.route("/code", createSourcePages(codeSourceService, sourceFileService, settingsService));
-  routes.route("/functions", createFunctionsPages(functionsService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService));
-  routes.route("/keys", createKeysPages(apiKeyService, secretsService, settingsService));
-  routes.route("/secrets", createSecretsPages({ surrealFactory, encryptionService, settingsService }));
-  routes.route("/settings", createSettingsPages({ settingsService, apiKeyService }));
-  routes.route("/query", createQueryPages({ surrealFactory, settingsService }));
+  routes.route("/password", createPasswordPages({ settingsService, errorStateService }));
+  routes.route("/users", createUsersPages({ userService, settingsService, errorStateService }));
+  routes.route("/code", createSourcePages({ codeSourceService, sourceFileService, settingsService, errorStateService }));
+  routes.route("/functions", createFunctionsPages({ functionsService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService, errorStateService }));
+  routes.route("/keys", createKeysPages({ apiKeyService, secretsService, settingsService, errorStateService }));
+  routes.route("/secrets", createSecretsPages({ surrealFactory, encryptionService, settingsService, errorStateService }));
+  routes.route("/settings", createSettingsPages({ settingsService, apiKeyService, errorStateService }));
+  routes.route("/query", createQueryPages({ surrealFactory, settingsService, errorStateService }));
 
   return routes;
 }

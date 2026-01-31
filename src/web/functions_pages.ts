@@ -16,6 +16,7 @@ import type { Secret, SecretPreview } from "../secrets/types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 import { RecordId } from "surrealdb";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import { SettingNames } from "../settings/types.ts";
 import { formatForDisplay } from "../utils/datetime.ts";
 import {
@@ -1564,14 +1565,21 @@ function renderFunctionSecretEditForm(
   `;
 }
 
-export function createFunctionsPages(
-  functionsService: FunctionsService,
-  consoleLogService: ConsoleLogService,
-  executionMetricsService: ExecutionMetricsService,
-  apiKeyService: ApiKeyService,
-  secretsService: SecretsService,
-  settingsService: SettingsService
-): Hono {
+/**
+ * Options for creating the functions pages router.
+ */
+export interface FunctionsPagesOptions {
+  functionsService: FunctionsService;
+  consoleLogService: ConsoleLogService;
+  executionMetricsService: ExecutionMetricsService;
+  apiKeyService: ApiKeyService;
+  secretsService: SecretsService;
+  settingsService: SettingsService;
+  errorStateService: ErrorStateService;
+}
+
+export function createFunctionsPages(options: FunctionsPagesOptions): Hono {
+  const { functionsService, consoleLogService, executionMetricsService, apiKeyService, secretsService, settingsService, errorStateService } = options;
   const routes = new Hono();
 
   // Helper function to render key group names for a function route
@@ -1727,7 +1735,7 @@ export function createFunctionsPages(
       `
       }
     `;
-    return c.html(await layout("Functions", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Functions", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // Create form
@@ -1735,7 +1743,7 @@ export function createFunctionsPages(
     const error = c.req.query("error");
     const groups = await apiKeyService.getGroups();
     const csrfToken = getCsrfToken(c);
-    return c.html(await layout("Create Function", renderFunctionForm("/web/functions/create", {}, groups, error, csrfToken), getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Create Function", content: renderFunctionForm("/web/functions/create", {}, groups, error, csrfToken), user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // Handle create
@@ -1753,7 +1761,7 @@ export function createFunctionsPages(
     if (errors.length > 0) {
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, errors.join(". "), csrfToken), getLayoutUser(c), settingsService),
+        await layout({ title: "Create Function", content: renderFunctionForm("/web/functions/create", route, groups, errors.join(". "), csrfToken), user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -1765,7 +1773,7 @@ export function createFunctionsPages(
       const message = err instanceof Error ? err.message : "Failed to create function";
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout("Create Function", renderFunctionForm("/web/functions/create", route, groups, message, csrfToken), getLayoutUser(c), settingsService),
+        await layout({ title: "Create Function", content: renderFunctionForm("/web/functions/create", route, groups, message, csrfToken), user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -1788,11 +1796,13 @@ export function createFunctionsPages(
 
     const groups = await apiKeyService.getGroups();
     return c.html(
-      layout(
-        `Edit: ${route.name}`,
-        renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error, csrfToken),
-        getLayoutUser(c), settingsService
-      )
+      await layout({
+        title: `Edit: ${route.name}`,
+        content: renderFunctionForm(`/web/functions/edit/${id}`, route, groups, error, csrfToken),
+        user: getLayoutUser(c),
+        settingsService,
+        errorStateService,
+      })
     );
   });
 
@@ -1827,11 +1837,13 @@ export function createFunctionsPages(
       // The form uses existingRoute.id (RecordId) for display
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout(
-          `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, { ...route, id: existingRoute.id }, groups, errors.join(". "), csrfToken),
-          getLayoutUser(c), settingsService
-        ),
+        await layout({
+          title: `Edit: ${existingRoute.name}`,
+          content: renderFunctionForm(`/web/functions/edit/${id}`, { ...route, id: existingRoute.id }, groups, errors.join(". "), csrfToken),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }
@@ -1844,11 +1856,13 @@ export function createFunctionsPages(
       const message = err instanceof Error ? err.message : "Failed to update function";
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout(
-          `Edit: ${existingRoute.name}`,
-          renderFunctionForm(`/web/functions/edit/${id}`, { ...route, id: existingRoute.id }, groups, message, csrfToken),
-          getLayoutUser(c), settingsService
-        ),
+        await layout({
+          title: `Edit: ${existingRoute.name}`,
+          content: renderFunctionForm(`/web/functions/edit/${id}`, { ...route, id: existingRoute.id }, groups, message, csrfToken),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }
@@ -1890,15 +1904,16 @@ export function createFunctionsPages(
     }
 
     return c.html(
-      confirmPage(
-        "Delete Function",
-        `Are you sure you want to delete the function "${route.name}"? This action cannot be undone.`,
-        `/web/functions/delete/${id}`,
-        "/web/functions",
-        getLayoutUser(c),
+      await confirmPage({
+        title: "Delete Function",
+        message: `Are you sure you want to delete the function "${route.name}"? This action cannot be undone.`,
+        actionUrl: `/web/functions/delete/${id}`,
+        cancelUrl: "/web/functions",
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 
@@ -1957,7 +1972,7 @@ export function createFunctionsPages(
       nextCursor: paginatedResult.nextCursor ?? null,
       hasMore: paginatedResult.hasMore,
     });
-    return c.html(await layout(`Logs: ${route.name}`, content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Logs: ${route.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // View global (server-wide) metrics
@@ -1998,7 +2013,7 @@ export function createFunctionsPages(
       allFunctions
     );
 
-    return c.html(await layout("Metrics: Global metrics", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Metrics: Global metrics", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // View metrics for a function
@@ -2049,7 +2064,7 @@ export function createFunctionsPages(
       allFunctions
     );
 
-    return c.html(await layout(`Metrics: ${route.name}`, content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Metrics: ${route.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============== Function Secrets Management ==============
@@ -2100,7 +2115,7 @@ export function createFunctionsPages(
     `;
 
     return c.html(
-      layout(`Secrets: ${route.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Secrets: ${route.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -2135,7 +2150,7 @@ export function createFunctionsPages(
     `;
 
     return c.html(
-      layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Create Secret: ${route.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -2180,7 +2195,7 @@ export function createFunctionsPages(
         ${renderFunctionSecretCreateForm(functionId, secretData, errors.join(". "), csrfToken)}
       `;
       return c.html(
-        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Create Secret: ${route.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -2211,7 +2226,7 @@ export function createFunctionsPages(
         ${renderFunctionSecretCreateForm(functionId, secretData, message, csrfToken)}
       `;
       return c.html(
-        layout(`Create Secret: ${route.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Create Secret: ${route.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -2259,7 +2274,7 @@ export function createFunctionsPages(
     `;
 
     return c.html(
-      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -2320,7 +2335,7 @@ export function createFunctionsPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -2355,7 +2370,7 @@ export function createFunctionsPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -2391,14 +2406,16 @@ export function createFunctionsPages(
     }
 
     return c.html(
-      confirmPage(
-        "Delete Secret",
-        `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>" from function "${escapeHtml(route.name)}"? This action cannot be undone.`,
-        `/web/functions/secrets/${functionId}/delete/${secretId}`,
-        `/web/functions/secrets/${functionId}`,
-        getLayoutUser(c), settingsService,
-        getCsrfToken(c)
-      )
+      await confirmPage({
+        title: "Delete Secret",
+        message: `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>" from function "${escapeHtml(route.name)}"? This action cannot be undone.`,
+        actionUrl: `/web/functions/secrets/${functionId}/delete/${secretId}`,
+        cancelUrl: `/web/functions/secrets/${functionId}`,
+        user: getLayoutUser(c),
+        settingsService,
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 

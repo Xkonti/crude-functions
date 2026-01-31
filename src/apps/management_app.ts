@@ -16,6 +16,7 @@ import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
 import type { SchedulingService } from "../scheduling/scheduling_service.ts";
 import type { CsrfService } from "../csrf/csrf_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 
 import { createHybridAuthMiddleware } from "../auth/auth_middleware.ts";
 import { createSecurityHeadersMiddleware, createWebCacheHeadersMiddleware } from "../middleware/security_headers.ts";
@@ -53,6 +54,7 @@ export interface ManagementAppDeps {
   sourceFileService: SourceFileService;
   schedulingService: SchedulingService;
   csrfService: CsrfService;
+  errorStateService: ErrorStateService;
   /** Base directory containing all code sources */
   codeDirectory: string;
 }
@@ -195,6 +197,68 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
   });
 
   // ============================================================================
+  // Static Assets (public - vendor bundles, etc.)
+  // ============================================================================
+  app.get("/static/*", async (c) => {
+    const requestedPath = c.req.path.slice("/static/".length);
+
+    // Security: Only allow specific safe extensions
+    const allowedExtensions = [".js", ".css", ".woff", ".woff2", ".ttf", ".svg", ".png", ".ico"];
+    const ext = requestedPath.substring(requestedPath.lastIndexOf(".")).toLowerCase();
+    if (!allowedExtensions.includes(ext)) {
+      return c.text("Forbidden", 403);
+    }
+
+    // Security: Prevent path traversal - reject any path with ..
+    if (requestedPath.includes("..") || requestedPath.includes("\\")) {
+      return c.text("Forbidden", 403);
+    }
+
+    // Security: Only allow alphanumeric, dash, underscore, dot, and forward slash
+    if (!/^[\w\-./]+$/.test(requestedPath)) {
+      return c.text("Forbidden", 403);
+    }
+
+    try {
+      const staticDir = new URL("../../static/", import.meta.url);
+      const filePath = new URL(requestedPath, staticDir);
+
+      // Security: Verify resolved path is still within static directory
+      if (!filePath.pathname.startsWith(staticDir.pathname)) {
+        return c.text("Forbidden", 403);
+      }
+
+      const content = await Deno.readFile(filePath);
+
+      const contentTypes: Record<string, string> = {
+        ".js": "application/javascript",
+        ".css": "text/css",
+        ".woff": "font/woff",
+        ".woff2": "font/woff2",
+        ".ttf": "font/ttf",
+        ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".ico": "image/x-icon",
+      };
+
+      return new Response(content, {
+        status: 200,
+        headers: {
+          "Content-Type": contentTypes[ext] ?? "application/octet-stream",
+          "Content-Length": String(content.length),
+          "Cache-Control": "public, max-age=31536000, immutable",
+        },
+      });
+    } catch (error) {
+      if (error instanceof Deno.errors.NotFound) {
+        return c.text("Not found", 404);
+      }
+      console.error("Failed to serve static file:", error);
+      return c.text("Internal server error", 500);
+    }
+  });
+
+  // ============================================================================
   // Web UI (session auth applied internally by createWebRoutes)
   // ============================================================================
   // Apply CSRF middleware to web routes (validates tokens, sets csrfToken in context)
@@ -215,6 +279,7 @@ export function createManagementApp(deps: ManagementAppDeps): Hono {
     settingsService: deps.settingsService,
     codeSourceService: deps.codeSourceService,
     sourceFileService: deps.sourceFileService,
+    errorStateService: deps.errorStateService,
   }));
 
   return app;

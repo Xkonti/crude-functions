@@ -53,7 +53,9 @@ import { SurrealProcessManager } from "./src/database/surreal_process_manager.ts
 import { SurrealHealthMonitor } from "./src/database/surreal_health_monitor.ts";
 import { SurrealSupervisor } from "./src/database/surreal_supervisor.ts";
 import { SurrealMigrationService } from "./src/database/surreal_migration_service.ts";
+import { SurrealMigrationExecutionError, SurrealMigrationFileError } from "./src/database/surreal_errors.ts";
 import { recordIdToString } from "./src/database/surreal_helpers.ts";
+import { ErrorStateService } from "./src/errors/mod.ts";
 
 /**
  * Parse an environment variable as a positive integer.
@@ -164,6 +166,9 @@ const surrealSupervisor = new SurrealSupervisor({
   restartCooldownMs: 5000,
 });
 
+// Initialize error state service for tracking system-level errors
+const errorStateService = new ErrorStateService();
+
 try {
   // Start supervisor (starts process, connects DB, starts monitoring)
   await surrealSupervisor.start();
@@ -192,9 +197,58 @@ try {
     );
   }
 } catch (error) {
-  console.warn("⚠ SurrealDB initialization failed (non-fatal):", error);
-  // Supervisor handles its own cleanup
-  // Don't throw - SurrealDB is experimental and optional
+  // Log detailed migration failure information
+  if (error instanceof SurrealMigrationExecutionError) {
+    console.error("═".repeat(60));
+    console.error("MIGRATION FAILED");
+    console.error("═".repeat(60));
+    console.error(`Migration: ${error.filename} (version ${error.version})`);
+    console.error(`Error: ${error.message}`);
+    if (error.originalError instanceof Error) {
+      console.error(`Details: ${error.originalError.message}`);
+    }
+    console.error("═".repeat(60));
+    console.error("The application will continue but may be in an inconsistent state.");
+    console.error("Please fix the migration and restart the application.");
+    console.error("═".repeat(60));
+
+    errorStateService.setMigrationError({
+      version: error.version,
+      filename: error.filename,
+      message: error.message,
+    });
+  } else if (error instanceof SurrealMigrationFileError) {
+    console.error("═".repeat(60));
+    console.error("MIGRATION FILE ERROR");
+    console.error("═".repeat(60));
+    console.error(`File: ${error.filePath}`);
+    console.error(`Error: ${error.message}`);
+    console.error("═".repeat(60));
+
+    // Extract version and filename from path if possible
+    const pathParts = error.filePath.split("/");
+    const filename = pathParts[pathParts.length - 1];
+    const versionMatch = filename.match(/^(\d+)-/);
+    const version = versionMatch ? parseInt(versionMatch[1], 10) : 0;
+
+    errorStateService.setMigrationError({
+      version,
+      filename,
+      message: error.message,
+    });
+  } else {
+    console.error("═".repeat(60));
+    console.error("SURREALDB INITIALIZATION FAILED");
+    console.error("═".repeat(60));
+    console.error(error);
+    console.error("═".repeat(60));
+
+    errorStateService.setMigrationError({
+      version: 0,
+      filename: "unknown",
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // ============================================================================
@@ -515,6 +569,7 @@ const managementApp = createManagementApp({
   sourceFileService,
   schedulingService,
   csrfService,
+  errorStateService,
   codeDirectory: "./code",
 });
 
