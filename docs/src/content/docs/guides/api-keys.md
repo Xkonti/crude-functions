@@ -152,7 +152,7 @@ curl http://localhost:8000/run/api/data \
 **Note**: Key values are currently not expected to be Base64 encoded. This is a subject to change in the future.
 
 ```bash
-curl http://localhost:8000/run/api/data?api_ley=K5jQm8xPl3nRt7wVy2zAh6bDf9gHj4kMp1qSu0vXc8eYi3oN
+curl http://localhost:8000/run/api/data?api_key=K5jQm8xPl3nRt7wVy2zAh6bDf9gHj4kMp1qSu0vXc8eYi3oN
 ```
 
 ### Key Extraction Priority
