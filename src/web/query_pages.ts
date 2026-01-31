@@ -90,11 +90,34 @@ export function createQueryPages(options: QueryPagesOptions): Hono {
         }
         .keyboard-hint kbd {
           background: var(--pico-card-background-color);
+          color: var(--pico-color);
           border: 1px solid var(--pico-muted-border-color);
           border-radius: 3px;
           padding: 0.1rem 0.4rem;
           font-family: inherit;
           font-size: 0.85em;
+        }
+        /* Autocomplete tooltip styling */
+        .cm-tooltip-autocomplete {
+          background: var(--pico-card-background-color) !important;
+          border: 1px solid var(--pico-muted-border-color) !important;
+          border-radius: var(--pico-border-radius);
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+        .cm-tooltip-autocomplete ul {
+          font-family: ui-monospace, SFMono-Regular, monospace;
+          font-size: 0.9rem;
+        }
+        .cm-tooltip-autocomplete li {
+          padding: 0.25rem 0.5rem;
+        }
+        .cm-tooltip-autocomplete li[aria-selected] {
+          background: var(--pico-primary-background) !important;
+          color: var(--pico-primary-inverse) !important;
+        }
+        .cm-completionIcon {
+          opacity: 0.7;
+          padding-right: 0.5rem;
         }
       </style>
 
@@ -114,14 +137,22 @@ export function createQueryPages(options: QueryPagesOptions): Hono {
       </div>
 
       <script type="module">
-        import { basicSetup, EditorView, json, surrealql } from "/static/vendor/codemirror-surrealql.js";
+        import {
+          basicSetup,
+          EditorView,
+          json,
+          surrealql,
+          autocompletion,
+          surqlCompletionSource
+        } from "/static/vendor/codemirror-surrealql.js";
 
-        // Create query editor (editable)
+        // Create query editor (editable) with autocompletion
         const queryEditor = new EditorView({
           doc: "SELECT * FROM setting LIMIT 10;",
           extensions: [
             basicSetup,
             surrealql(),
+            autocompletion({ override: [surqlCompletionSource] }),
             EditorView.lineWrapping,
           ],
           parent: document.getElementById("query-editor"),

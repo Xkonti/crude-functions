@@ -1,0 +1,39 @@
+{
+  "keywords": [
+    "SELECT", "FROM", "WHERE", "AND", "OR", "NOT",
+    "CREATE", "UPDATE", "DELETE", "INSERT", "INTO",
+    "SET", "CONTENT", "MERGE", "PATCH", "RETURN",
+    "ORDER", "BY", "ASC", "DESC", "LIMIT", "START",
+    "GROUP", "FETCH", "TIMEOUT", "PARALLEL",
+    "LET", "IF", "THEN", "ELSE", "END", "FOR", "IN",
+    "DEFINE", "TABLE", "FIELD", "INDEX", "EVENT", "FUNCTION",
+    "TYPE", "VALUE", "DEFAULT", "ASSERT", "PERMISSIONS",
+    "SCHEMAFULL", "SCHEMALESS", "DROP", "CHANGEFEED",
+    "RELATE", "SPLIT", "UNSET", "DIFF",
+    "LIVE", "KILL", "SHOW", "INFO", "USE", "NS", "DB",
+    "BEGIN", "TRANSACTION", "COMMIT", "CANCEL",
+    "NONE", "NULL", "TRUE", "FALSE",
+    "UNIQUE", "READONLY", "FLEXIBLE", "OVERWRITE"
+  ],
+  "functions": [
+    "count", "time::now", "array::len"
+  ],
+  "types": [
+    "string", "int", "float", "bool", "datetime", "duration",
+    "object", "array", "set", "record", "option", "any"
+  ],
+  "tables": {
+    "user": ["id", "email", "name", "emailVerified", "image", "role", "createdAt", "updatedAt"],
+    "session": ["id", "userId", "token", "expiresAt", "createdAt", "updatedAt", "ipAddress", "userAgent"],
+    "setting": ["id", "name", "value", "updatedAt"],
+    "apiKeyGroup": ["id", "name", "description", "createdAt"],
+    "apiKey": ["id", "groupId", "name", "keyHash", "createdAt", "expiresAt", "lastUsedAt"],
+    "functionDef": ["id", "route", "normalizedRoute", "handler", "methods", "keyGroups", "cors", "enabled", "createdAt", "updatedAt"],
+    "secret": ["id", "scope", "scopeId", "name", "encryptedValue", "createdAt", "updatedAt"],
+    "executionMetric": ["id", "functionId", "windowStart", "windowEnd", "requestCount", "totalDurationMs", "minDurationMs", "maxDurationMs"],
+    "executionLog": ["id", "requestId", "functionId", "level", "message", "timestamp"],
+    "codeSource": ["id", "name", "type", "config", "syncedAt", "createdAt"],
+    "job": ["id", "type", "status", "payload", "referenceType", "referenceId", "priority", "retryCount", "maxRetries", "scheduledFor", "startedAt", "completedAt", "error", "createdAt"],
+    "schedule": ["id", "name", "cronExpression", "timezone", "enabled", "nextRunAt", "lastRunAt", "jobType", "jobPayload", "createdAt", "updatedAt"]
+  }
+}
