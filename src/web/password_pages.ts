@@ -1,6 +1,15 @@
 import { Hono } from "@hono/hono";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import { layout, escapeHtml, getLayoutUser } from "./templates.ts";
+
+/**
+ * Options for creating the password pages router.
+ */
+export interface PasswordPagesOptions {
+  settingsService: SettingsService;
+  errorStateService: ErrorStateService;
+}
 
 /**
  * Creates the password change page router.
@@ -8,7 +17,8 @@ import { layout, escapeHtml, getLayoutUser } from "./templates.ts";
  * Provides a page for authenticated users to change their password.
  * Follows the same pattern as the login page with client-side fetch.
  */
-export function createPasswordPages(settingsService: SettingsService): Hono {
+export function createPasswordPages(options: PasswordPagesOptions): Hono {
+  const { settingsService, errorStateService } = options;
   const routes = new Hono();
 
   // GET /password - Password change form
@@ -101,7 +111,13 @@ export function createPasswordPages(settingsService: SettingsService): Hono {
       </script>
     `;
 
-    return c.html(await layout("Change Password", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({
+      title: "Change Password",
+      content,
+      user: getLayoutUser(c),
+      settingsService,
+      errorStateService,
+    }));
   });
 
   return routes;

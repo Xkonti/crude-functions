@@ -1,6 +1,7 @@
 import { Hono } from "@hono/hono";
 import type { SettingsService } from "../settings/settings_service.ts";
 import type { ApiKeyService, ApiKeyGroup } from "../keys/api_key_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import {
   SettingNames,
   GlobalSettingDefaults,
@@ -21,10 +22,11 @@ import { recordIdToString } from "../database/surreal_helpers.ts";
 export interface SettingsPagesOptions {
   settingsService: SettingsService;
   apiKeyService: ApiKeyService;
+  errorStateService: ErrorStateService;
 }
 
 export function createSettingsPages(options: SettingsPagesOptions): Hono {
-  const { settingsService, apiKeyService } = options;
+  const { settingsService, apiKeyService, errorStateService } = options;
   const routes = new Hono();
 
   // GET / - Main settings page
@@ -44,7 +46,7 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
     const csrfToken = getCsrfToken(c);
 
     const content = renderSettingsPage(settingsData, availableGroups, success, error, csrfToken);
-    return c.html(await layout("Settings", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Settings", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // POST / - Handle settings update
@@ -71,12 +73,13 @@ export function createSettingsPages(options: SettingsPagesOptions): Hono {
       const csrfToken = getCsrfToken(c);
 
       return c.html(
-        await layout(
-          "Settings",
-          renderSettingsPage(settingsData, availableGroups, undefined, errors.join(". "), csrfToken),
-          getLayoutUser(c),
-          settingsService
-        ),
+        await layout({
+          title: "Settings",
+          content: renderSettingsPage(settingsData, availableGroups, undefined, errors.join(". "), csrfToken),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }

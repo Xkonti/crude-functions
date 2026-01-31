@@ -2,6 +2,7 @@ import { Hono } from "@hono/hono";
 import type { CodeSourceService } from "../sources/code_source_service.ts";
 import type { SourceFileService } from "../files/source_file_service.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import type {
   CodeSource,
   GitTypeSettings,
@@ -33,14 +34,21 @@ import { csrfInput } from "../csrf/csrf_helpers.ts";
 const MAX_EDITABLE_SIZE = 1024 * 1024; // 1 MB
 
 /**
+ * Options for creating the source pages router.
+ */
+export interface SourcePagesOptions {
+  codeSourceService: CodeSourceService;
+  sourceFileService: SourceFileService;
+  settingsService: SettingsService;
+  errorStateService: ErrorStateService;
+}
+
+/**
  * Creates web pages for code source management.
  * Mounted at /web/code
  */
-export function createSourcePages(
-  codeSourceService: CodeSourceService,
-  sourceFileService: SourceFileService,
-  settingsService: SettingsService
-): Hono {
+export function createSourcePages(options: SourcePagesOptions): Hono {
+  const { codeSourceService, sourceFileService, settingsService, errorStateService } = options;
   const routes = new Hono();
 
   // ============================================================================
@@ -264,7 +272,7 @@ export function createSourcePages(
       ${tableContent}
     `;
 
-    return c.html(await layout("Code Sources", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Code Sources", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============================================================================
@@ -306,7 +314,7 @@ export function createSourcePages(
       </div>
     `;
 
-    return c.html(await layout("New Code Source", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "New Code Source", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============================================================================
@@ -339,7 +347,7 @@ export function createSourcePages(
       </form>
     `;
 
-    return c.html(await layout("Create Manual Source", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Create Manual Source", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   routes.post("/sources/new/manual", async (c) => {
@@ -516,7 +524,7 @@ export function createSourcePages(
       </script>
     `;
 
-    return c.html(await layout("Create Git Source", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Create Git Source", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   routes.post("/sources/new/git", async (c) => {
@@ -798,7 +806,7 @@ export function createSourcePages(
       ${filesTable}
     `;
 
-    return c.html(await layout(`Source: ${source.name}`, content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Source: ${source.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============================================================================
@@ -997,7 +1005,7 @@ export function createSourcePages(
       ${formContent}
     `;
 
-    return c.html(await layout(`Edit Source: ${source.name}`, content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Edit Source: ${source.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   routes.post("/sources/:id/edit", async (c) => {
@@ -1125,15 +1133,16 @@ export function createSourcePages(
     }
 
     return c.html(
-      await confirmPage(
-        "Delete Source",
-        `Are you sure you want to delete the source "${escapeHtml(source.name)}"? This will permanently delete all files in this source. This action cannot be undone.`,
-        `/web/code/sources/${source.id}/delete`,
-        `/web/code/sources/${source.id}`,
-        getLayoutUser(c),
+      await confirmPage({
+        title: "Delete Source",
+        message: `Are you sure you want to delete the source "${escapeHtml(source.name)}"? This will permanently delete all files in this source. This action cannot be undone.`,
+        actionUrl: `/web/code/sources/${source.id}/delete`,
+        cancelUrl: `/web/code/sources/${source.id}`,
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 
@@ -1334,7 +1343,7 @@ export function createSourcePages(
       </script>
     `;
 
-    return c.html(await layout(`Upload File - ${source.name}`, content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Upload File - ${source.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============================================================================
@@ -1417,7 +1426,7 @@ export function createSourcePages(
       `;
     }
 
-    return c.html(await layout(`View File - ${source.name}`, pageContent, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `View File - ${source.name}`, content: pageContent, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============================================================================
@@ -1593,7 +1602,7 @@ export function createSourcePages(
       `;
     }
 
-    return c.html(await layout(`Edit: ${path}`, pageContent, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Edit: ${path}`, content: pageContent, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // ============================================================================
@@ -1674,7 +1683,7 @@ export function createSourcePages(
       </script>
     `;
 
-    return c.html(await layout("Delete File", pageContent, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Delete File", content: pageContent, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   return routes;

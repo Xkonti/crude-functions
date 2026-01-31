@@ -5,6 +5,7 @@ import type { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import {
   layout,
   escapeHtml,
@@ -22,11 +23,18 @@ import {
 } from "./templates.ts";
 import { csrfInput } from "../csrf/csrf_helpers.ts";
 
-export function createKeysPages(
-  apiKeyService: ApiKeyService,
-  secretsService: SecretsService,
-  settingsService: SettingsService
-): Hono {
+/**
+ * Options for creating the keys pages router.
+ */
+export interface KeysPagesOptions {
+  apiKeyService: ApiKeyService;
+  secretsService: SecretsService;
+  settingsService: SettingsService;
+  errorStateService: ErrorStateService;
+}
+
+export function createKeysPages(options: KeysPagesOptions): Hono {
+  const { apiKeyService, secretsService, settingsService, errorStateService } = options;
   const routes = new Hono();
 
   // List all keys grouped by group
@@ -133,7 +141,7 @@ export function createKeysPages(
 
       ${secretScripts()}
     `;
-    return c.html(await layout("API Keys", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "API Keys", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // Create group form
@@ -161,7 +169,7 @@ export function createKeysPages(
         </div>
       </form>
     `;
-    return c.html(await layout("Create API Key Group", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Create API Key Group", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // Handle create group
@@ -239,7 +247,7 @@ export function createKeysPages(
         </div>
       </form>
     `;
-    return c.html(await layout(`Edit Group: ${group.name}`, content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: `Edit Group: ${group.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // Handle edit group
@@ -354,7 +362,7 @@ export function createKeysPages(
       </script>
       ${valueGeneratorScripts()}
     `;
-    return c.html(await layout("Create API Key", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Create API Key", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // Handle create
@@ -452,7 +460,7 @@ export function createKeysPages(
   });
 
   // Delete key by ID confirmation
-  routes.get("/delete", (c) => {
+  routes.get("/delete", async (c) => {
     const id = c.req.query("id");
 
     if (!id) {
@@ -460,15 +468,16 @@ export function createKeysPages(
     }
 
     return c.html(
-      confirmPage(
-        "Delete API Key",
-        `Are you sure you want to delete the key with ID ${id}? This action cannot be undone.`,
-        `/web/keys/delete?id=${id}`,
-        "/web/keys",
-        getLayoutUser(c),
+      await confirmPage({
+        title: "Delete API Key",
+        message: `Are you sure you want to delete the key with ID ${id}? This action cannot be undone.`,
+        actionUrl: `/web/keys/delete?id=${id}`,
+        cancelUrl: "/web/keys",
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 
@@ -517,15 +526,16 @@ export function createKeysPages(
     }
 
     return c.html(
-      confirmPage(
-        "Delete Group",
-        `Are you sure you want to delete the group "${group.name}"? This action cannot be undone.`,
-        `/web/keys/delete-group?id=${groupId}`,
-        "/web/keys",
-        getLayoutUser(c),
+      await confirmPage({
+        title: "Delete Group",
+        message: `Are you sure you want to delete the group "${group.name}"? This action cannot be undone.`,
+        actionUrl: `/web/keys/delete-group?id=${groupId}`,
+        cancelUrl: "/web/keys",
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 
@@ -615,7 +625,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Secrets: ${group.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Secrets: ${group.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -650,7 +660,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Create Secret: ${group.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -695,7 +705,7 @@ export function createKeysPages(
         ${renderGroupSecretCreateForm(groupId, secretData, errors.join(". "), csrfToken)}
       `;
       return c.html(
-        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Create Secret: ${group.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -726,7 +736,7 @@ export function createKeysPages(
         ${renderGroupSecretCreateForm(groupId, secretData, message, csrfToken)}
       `;
       return c.html(
-        layout(`Create Secret: ${group.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Create Secret: ${group.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -775,7 +785,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -837,7 +847,7 @@ export function createKeysPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -873,7 +883,7 @@ export function createKeysPages(
         )}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService),
+        await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService }),
         400
       );
     }
@@ -909,15 +919,16 @@ export function createKeysPages(
     }
 
     return c.html(
-      confirmPage(
-        "Delete Secret",
-        `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
-        `/web/keys/secrets/${groupId}/delete/${secretId}`,
-        `/web/keys/secrets/${groupId}`,
-        getLayoutUser(c),
+      await confirmPage({
+        title: "Delete Secret",
+        message: `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
+        actionUrl: `/web/keys/secrets/${groupId}/delete/${secretId}`,
+        cancelUrl: `/web/keys/secrets/${groupId}`,
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 
@@ -1017,7 +1028,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Secrets: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Secrets: ${keyDisplay}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -1054,7 +1065,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Create Secret: ${keyDisplay}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -1094,7 +1105,7 @@ export function createKeysPages(
         ${renderKeySecretCreateForm(keyId, secretData, errors.join(", "), csrfToken)}
       `;
       return c.html(
-        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
+        await layout({ title: `Create Secret: ${keyDisplay}`, content, user: getLayoutUser(c), settingsService, errorStateService })
       );
     }
 
@@ -1124,7 +1135,7 @@ export function createKeysPages(
         ${renderKeySecretCreateForm(keyId, secretData, message, csrfToken)}
       `;
       return c.html(
-        layout(`Create Secret: ${keyDisplay}`, content, getLayoutUser(c), settingsService)
+        await layout({ title: `Create Secret: ${keyDisplay}`, content, user: getLayoutUser(c), settingsService, errorStateService })
       );
     }
   });
@@ -1169,7 +1180,7 @@ export function createKeysPages(
     `;
 
     return c.html(
-      layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
+      await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
     );
   });
 
@@ -1216,7 +1227,7 @@ export function createKeysPages(
         ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, errors.join(", "), csrfToken)}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
+        await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
       );
     }
 
@@ -1246,7 +1257,7 @@ export function createKeysPages(
         ${renderKeySecretEditForm(keyId, { ...secret, ...editData }, message, csrfToken)}
       `;
       return c.html(
-        layout(`Edit Secret: ${secret.name}`, content, getLayoutUser(c), settingsService)
+        await layout({ title: `Edit Secret: ${secret.name}`, content, user: getLayoutUser(c), settingsService, errorStateService })
       );
     }
   });
@@ -1280,15 +1291,16 @@ export function createKeysPages(
     }
 
     return c.html(
-      confirmPage(
-        `Delete Secret: ${escapeHtml(secret.name)}`,
-        `Are you sure you want to delete the secret <strong>${escapeHtml(secret.name)}</strong>? This action cannot be undone.`,
-        `/web/keys/${keyId}/secrets/delete/${secretId}`,
-        `/web/keys/${keyId}/secrets`,
-        getLayoutUser(c),
+      await confirmPage({
+        title: `Delete Secret: ${escapeHtml(secret.name)}`,
+        message: `Are you sure you want to delete the secret <strong>${escapeHtml(secret.name)}</strong>? This action cannot be undone.`,
+        actionUrl: `/web/keys/${keyId}/secrets/delete/${secretId}`,
+        cancelUrl: `/web/keys/${keyId}/secrets`,
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 

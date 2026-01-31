@@ -2,6 +2,7 @@ import { Hono } from "@hono/hono";
 import type { SurrealConnectionFactory } from "../database/surreal_connection_factory.ts";
 import type { IEncryptionService } from "../encryption/types.ts";
 import type { SettingsService } from "../settings/settings_service.ts";
+import type { ErrorStateService } from "../errors/mod.ts";
 import { SecretsService } from "../secrets/secrets_service.ts";
 import type { Secret } from "../secrets/types.ts";
 import { recordIdToString } from "../database/surreal_helpers.ts";
@@ -29,6 +30,7 @@ export interface SecretsPagesOptions {
   surrealFactory: SurrealConnectionFactory;
   encryptionService: IEncryptionService;
   settingsService: SettingsService;
+  errorStateService: ErrorStateService;
 }
 
 /**
@@ -37,7 +39,7 @@ export interface SecretsPagesOptions {
  * Provides CRUD operations for global-scope secrets with encryption.
  */
 export function createSecretsPages(options: SecretsPagesOptions): Hono {
-  const { surrealFactory, encryptionService, settingsService } = options;
+  const { surrealFactory, encryptionService, settingsService, errorStateService } = options;
   const routes = new Hono();
 
   // Initialize secrets service
@@ -119,19 +121,21 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
       `
       }
     `;
-    return c.html(await layout("Global Secrets", content, getLayoutUser(c), settingsService));
+    return c.html(await layout({ title: "Global Secrets", content, user: getLayoutUser(c), settingsService, errorStateService }));
   });
 
   // GET /create - Create secret form
-  routes.get("/create", (c) => {
+  routes.get("/create", async (c) => {
     const error = c.req.query("error");
     const csrfToken = getCsrfToken(c);
     return c.html(
-      layout(
-        "Create Secret",
-        renderCreateForm("/web/secrets/create", {}, error, csrfToken),
-        getLayoutUser(c), settingsService
-      )
+      await layout({
+        title: "Create Secret",
+        content: renderCreateForm("/web/secrets/create", {}, error, csrfToken),
+        user: getLayoutUser(c),
+        settingsService,
+        errorStateService,
+      })
     );
   });
 
@@ -151,11 +155,13 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     if (errors.length > 0) {
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout(
-          "Create Secret",
-          renderCreateForm("/web/secrets/create", secretData, errors.join(". "), csrfToken),
-          getLayoutUser(c), settingsService
-        ),
+        await layout({
+          title: "Create Secret",
+          content: renderCreateForm("/web/secrets/create", secretData, errors.join(". "), csrfToken),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }
@@ -176,11 +182,13 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
         err instanceof Error ? err.message : "Failed to create secret";
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout(
-          "Create Secret",
-          renderCreateForm("/web/secrets/create", secretData, message, csrfToken),
-          getLayoutUser(c), settingsService
-        ),
+        await layout({
+          title: "Create Secret",
+          content: renderCreateForm("/web/secrets/create", secretData, message, csrfToken),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }
@@ -208,11 +216,13 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     }
 
     return c.html(
-      layout(
-        `Edit: ${secret.name}`,
-        renderEditForm(`/web/secrets/edit/${id}`, secret, error, csrfToken),
-        getLayoutUser(c), settingsService
-      )
+      await layout({
+        title: `Edit: ${secret.name}`,
+        content: renderEditForm(`/web/secrets/edit/${id}`, secret, error, csrfToken),
+        user: getLayoutUser(c),
+        settingsService,
+        errorStateService,
+      })
     );
   });
 
@@ -249,16 +259,18 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     if (errors.length > 0) {
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout(
-          `Edit: ${secret.name}`,
-          renderEditForm(
+        await layout({
+          title: `Edit: ${secret.name}`,
+          content: renderEditForm(
             `/web/secrets/edit/${id}`,
             { ...secret, ...editData },
             errors.join(". "),
             csrfToken
           ),
-          getLayoutUser(c), settingsService
-        ),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }
@@ -279,16 +291,18 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
         err instanceof Error ? err.message : "Failed to update secret";
       const csrfToken = getCsrfToken(c);
       return c.html(
-        layout(
-          `Edit: ${secret.name}`,
-          renderEditForm(
+        await layout({
+          title: `Edit: ${secret.name}`,
+          content: renderEditForm(
             `/web/secrets/edit/${id}`,
             { ...secret, ...editData },
             message,
             csrfToken
           ),
-          getLayoutUser(c), settingsService
-        ),
+          user: getLayoutUser(c),
+          settingsService,
+          errorStateService,
+        }),
         400
       );
     }
@@ -313,15 +327,16 @@ export function createSecretsPages(options: SecretsPagesOptions): Hono {
     }
 
     return c.html(
-      confirmPage(
-        "Delete Secret",
-        `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
-        `/web/secrets/delete/${id}`,
-        "/web/secrets",
-        getLayoutUser(c),
+      await confirmPage({
+        title: "Delete Secret",
+        message: `Are you sure you want to delete the secret "<strong>${escapeHtml(secret.name)}</strong>"? This action cannot be undone.`,
+        actionUrl: `/web/secrets/delete/${id}`,
+        cancelUrl: "/web/secrets",
+        user: getLayoutUser(c),
         settingsService,
-        getCsrfToken(c)
-      )
+        errorStateService,
+        csrfToken: getCsrfToken(c),
+      })
     );
   });
 
